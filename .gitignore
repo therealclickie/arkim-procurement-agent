@@ -50,3 +50,7 @@ frontend/.next/
 frontend/.turbo/
 frontend/.env.local
 frontend/tsconfig.tsbuildinfo
+build.log
+review.log
+loop.log
+VERDICT.txt
