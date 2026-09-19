@@ -288,3 +288,62 @@ the prime directive — as the build tasks land.)*
 recorded here at the end of the arc.)*
 
 - **Gate (this commit):** I1–I6 complete. No tests written, no source touched.
+
+### Build log — T1 through T8 (all landed, one commit per task)
+
+- **T1 `7afdb04`** — jsdom + Testing Library environment: `vitest.config.ts` (oxc JSX automatic runtime,
+  default env node), `vitest.setup.ts` (cleanup + matchMedia), devDeps only. Original 8 tests untouched.
+- **T2 `39ab125`** — ClaimPage six states: loading / hero / zero-state (honest, no fabricated digits) /
+  rejected (byte-identical across 404/410/422/network) / submitted / soft-error (input preserved, alert).
+- **T3 `070a34d`** — security posture of both public routes: network reach (portal→`/api/portal/*` only,
+  quote→`/api/quote/*` only; no admin endpoints, no Authorization headers), token hygiene (storage/cookies/
+  console dump asserted clean after a full cycle), uniform rejection equality + CLOSED(409) contrast.
+- **T4 `7016d12`** — ProfileForm: tri-state relationship (scoped past the duplicate add-brand control), both
+  ship-area payload shapes read from the real propose-revision POST body, aftermarket disclosure on/off,
+  fresh-claim empty state (no error semantics).
+- **T5 `f8cd9d9`** — OpenRequests: flag-off renders nothing (asserted non-vacuously), data render with
+  active/review quoted badges, history with verbatim status fallback, 200-empty renders nothing.
+- **T6 `a487aab`** — quote form on both entry paths (A `/quote/{token}`, B portal inline): prefills, honest
+  validation (never lists part number), exact submit payload at the seam (in-stock + optional fold),
+  revising framing, pn-differs flags-not-blocks (pre-submit note + honest review copy). Path C: no frontend
+  surface (F2).
+- **T7 `3ffa7a0`** — admin portal controls: show-once claim link (generate / regenerate / tab-switch clear),
+  revisions approve/reject endpoints, bearer-in-header-never-URL auth posture on every `/api/admin/*` call.
+  The same-tab re-fetch case is skipped as F4 (observed failing, below).
+- **T8 `ac9b905`** — brand-discipline scan: comments stripped (newline-preserving), quoted string literals
+  matched for exact title-case `Gofer`/`Arkim` across `src/app/portal`, `src/app/quote`, `src/components`.
+  Exactly one violation reported → skipped as F1 (observed failing, below).
+
+---
+
+## FINAL `npm test` COUNT
+
+Run after the T8 commit (`ac9b905`), branch `arc1/frontend-test-floor`:
+
+```
+Test Files  9 passed | 1 skipped (10)
+     Tests  54 passed | 2 skipped (56)
+```
+
+The 2 skips are the two FINDING tests below (F4, F1) — each was first run un-skipped to
+OBSERVE the failure against current source, then re-skipped per the prime directive. The
+original 8 tests from before the arc are unchanged and passing inside that count.
+
+---
+
+## FINDINGS (final — test stage)
+
+| # | Status | Detail | Skipped test |
+|---|---|---|---|
+| F1 | **CONFIRMED** (observed failing at T8) | Hard-coded brand string literal `alt="Gofer"` at `src/components/proc/gofer-mark.tsx:29` — the only title-case brand literal in the scan scope, outside `src/lib/brand.ts`. A rebrand would miss it, and screen-reader users would keep hearing the old name. | `src/components/__tests__/brand-discipline.test.ts` |
+| F2 | **CONFIRMED** (scoped limitation) | Quote entry path C (concierge/sales-assisted) has no frontend surface — nothing to test; T6 covers paths A and B. | — |
+| F3 | **CONFIRMED** (environment) | React 18.3.1 lacks `use`; both route `page.tsx` files render only under Next's vendored React 19, so they get structural (not render) coverage. Fix = React 19 dep bump, out of arc scope. | — |
+| F4 | **CONFIRMED** (observed failing at T7) | `admin/page.tsx` — `load()` (the tab fetch, `:167-200`) never clears `claimLink`; only the tab-switch effect (`:208-210`) does. Clicking **Refresh** on the suppliers tab re-fetches the table but leaves the show-once raw claim token on screen, breaking the show-once contract the panel itself states. Observed: the "Copy and send this now" panel persisted after Refresh. | `src/app/admin/__tests__/admin-portal-controls.test.tsx` (T7.1 re-fetch case) |
+| F5 | **Brief staleness — no defect** | `utils/supplier_portal.py::_ZERO_STATE_FRAMING` (`:60-63`) says "Gofer", matching `BRAND_NAME = "Gofer"` — the brief's "still contains Arkim" is outdated. In sync; backend untouched. | — |
+
+**Source changes made this arc: none.** Every commit touches only test files, `src/test-support/*`,
+`vitest.config.ts`, `vitest.setup.ts`, and `package.json` devDependencies.
+
+**Arc complete.** T1–T8 built, committed per task, suite green (54 passed | 2 skipped). Not pushed —
+branch `arc1/frontend-test-floor` awaits reviewer (Fable 5.1 → `FRONTEND_TEST_FLOOR_REVIEW.md`) and
+human review of the FINDINGS above.
