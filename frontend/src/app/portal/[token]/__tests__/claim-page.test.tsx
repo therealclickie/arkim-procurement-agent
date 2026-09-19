@@ -6,8 +6,9 @@
  *
  * All HTTP is mocked at the global-fetch seam (src/test-support/fetch-seam.ts,
  * gate finding I3). The route wrapper page.tsx is covered structurally in
- * portal-route.test.ts (gate finding I2: React 18.3.1 lacks `use`, so the
- * server wrapper is not renderable under vitest).
+ * portal-route.test.ts (review finding 1 / gate finding I2: React 18.3.1
+ * lacks `use`, so the server wrapper is not renderable under vitest — the
+ * structural test imports the module, which does not crash).
  */
 import { describe, it, expect } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";

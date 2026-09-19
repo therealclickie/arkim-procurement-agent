@@ -55,9 +55,13 @@ function consoleDump(spies: Array<vi.Spied<typeof console.log>>): string {
     .join("\n");
 }
 
-function headerValue(call: FetchCall, name: string): string | undefined {
-  const h = call.init?.headers as Record<string, string> | undefined;
-  return h?.[name];
+function headerValue(call: FetchCall, name: string): string | null {
+  // Review finding 3: normalise through Headers so the absence assertion
+  // cannot pass vacuously if a future client passes a Headers instance
+  // instead of a plain record (a plain-record read of a Headers object is
+  // undefined even when the header IS set). Headers.get is case-insensitive,
+  // so one lookup covers both spellings.
+  return new Headers(call.init?.headers).get(name);
 }
 
 describe("portal route — token hygiene (full render + submit cycle)", () => {
@@ -70,7 +74,11 @@ describe("portal route — token hygiene (full render + submit cycle)", () => {
     await user.click(screen.getByRole("button", { name: "Submit for review" }));
     await screen.findByText("Submitted for review");
 
-    // After the complete cycle, sweep every persisted surface.
+    // After the complete cycle, sweep every persisted surface. Review finding
+    // 4: the length assertions are stronger than substring containment —
+    // nothing at all is written, so a truncated-token leak cannot slip past.
+    expect(window.localStorage.length).toBe(0);
+    expect(window.sessionStorage.length).toBe(0);
     expect(storageDump(window.localStorage)).not.toContain(TOKEN);
     expect(storageDump(window.sessionStorage)).not.toContain(TOKEN);
     expect(document.cookie).not.toContain(TOKEN);
@@ -117,8 +125,7 @@ describe("portal route — network reach (fetch-seam URL/header assertions)", ()
     await screen.findByText("Submitted for review");
 
     for (const c of calls) {
-      expect(headerValue(c, "Authorization")).toBeUndefined();
-      expect(headerValue(c, "authorization")).toBeUndefined();
+      expect(headerValue(c, "authorization")).toBeNull();
     }
   });
 });

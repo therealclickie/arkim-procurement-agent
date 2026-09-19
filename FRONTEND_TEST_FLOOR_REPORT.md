@@ -337,7 +337,7 @@ original 8 tests from before the arc are unchanged and passing inside that count
 |---|---|---|---|
 | F1 | **CONFIRMED** (observed failing at T8) | Hard-coded brand string literal `alt="Gofer"` at `src/components/proc/gofer-mark.tsx:29` — the only title-case brand literal in the scan scope, outside `src/lib/brand.ts`. A rebrand would miss it, and screen-reader users would keep hearing the old name. | `src/components/__tests__/brand-discipline.test.ts` |
 | F2 | **CONFIRMED** (scoped limitation) | Quote entry path C (concierge/sales-assisted) has no frontend surface — nothing to test; T6 covers paths A and B. | — |
-| F3 | **CONFIRMED** (environment) | React 18.3.1 lacks `use`; both route `page.tsx` files render only under Next's vendored React 19, so they get structural (not render) coverage. Fix = React 19 dep bump, out of arc scope. | — |
+| F3 | **CONFIRMED** (environment) | React 18.3.1 lacks `use`; both route `page.tsx` files render only under Next's vendored React 19. Structural coverage is **delivered** (review finding 1 fix): `portal/[token]/__tests__/portal-route.test.ts` and `quote/[token]/__tests__/quote-route.test.ts` import each wrapper module and assert `metadata.referrer === "no-referrer"`, `dynamic === "force-dynamic"`, and the token→child wiring by source scan. Fix for *render* coverage = React 19 dep bump, out of arc scope. | — |
 | F4 | **CONFIRMED** (observed failing at T7) | `admin/page.tsx` — `load()` (the tab fetch, `:167-200`) never clears `claimLink`; only the tab-switch effect (`:208-210`) does. Clicking **Refresh** on the suppliers tab re-fetches the table but leaves the show-once raw claim token on screen, breaking the show-once contract the panel itself states. Observed: the "Copy and send this now" panel persisted after Refresh. | `src/app/admin/__tests__/admin-portal-controls.test.tsx` (T7.1 re-fetch case) |
 | F5 | **Brief staleness — no defect** | `utils/supplier_portal.py::_ZERO_STATE_FRAMING` (`:60-63`) says "Gofer", matching `BRAND_NAME = "Gofer"` — the brief's "still contains Arkim" is outdated. In sync; backend untouched. | — |
 
@@ -347,3 +347,53 @@ original 8 tests from before the arc are unchanged and passing inside that count
 **Arc complete.** T1–T8 built, committed per task, suite green (54 passed | 2 skipped). Not pushed —
 branch `arc1/frontend-test-floor` awaits reviewer (Fable 5.1 → `FRONTEND_TEST_FLOOR_REVIEW.md`) and
 human review of the FINDINGS above.
+
+---
+
+## FIX LOG — CHANGES_REQUESTED remediation (2026-09-20, builder)
+
+Review verdict: **CHANGES_REQUESTED** (`FRONTEND_TEST_FLOOR_REVIEW.md`, HEAD `15b9595`). Findings
+1–5 addressed below; **no application source changed** (prime directive held — every edit is a test
+file, a test comment, or this report).
+
+**Finding 1 (MAJOR — route-wrapper coverage claimed but never built): FIXED.**
+- Added `frontend/src/app/portal/[token]/__tests__/portal-route.test.ts` and
+  `frontend/src/app/quote/[token]/__tests__/quote-route.test.ts` — the structural tests the gate
+  itself committed to (option (a)): module-level import of each `page.tsx` (confirmed safe —
+  import does not crash, only rendering does) asserting `typeof default export === "function"`,
+  `dynamic === "force-dynamic"`, `metadata.referrer === "no-referrer"` (+ exact title), the
+  token→child wiring (`use(params)`, `<Suspense fallback={null}>`, `<ClaimPage|QuotePage
+  token={token} />`) via raw-source scan, and no inline `<meta>` element. Source is read through
+  Vite's `?raw` query (vitest's `import.meta.url` is not a file-scheme URL, so `node:fs` + `URL`
+  failed; `?raw` is the supported route). 8 new tests, all passing.
+- Corrected the previously-false comment in `claim-page.test.tsx:8-11` — it now points at the
+  actually-existing `portal-route.test.ts` and notes why the wrapper is not renderable.
+- Corrected the F3 coverage wording above (was asserting coverage that did not exist; now states
+  the structural tests are delivered, with filenames, and scopes the out-of-arc React 19 bump to
+  *render* coverage only).
+
+**Finding 2 (MINOR — `.gitignore` outside allowed set): NO BUILDER ACTION.** Pre-gate harness
+housekeeping commit (`883460f`), per the review itself awaiting only human confirmation that it
+was the operator's own commit. Nothing to change.
+
+**Finding 3 (MINOR — Authorization-absence check could pass vacuously): FIXED.** Both
+`security.test.tsx` files' `headerValue` helpers now normalise via
+`new Headers(call.init?.headers).get(name)` (returning `string | null`, asserted `toBeNull`), so a
+future `Headers`-instance client can't make the absence assertion pass while the header is set.
+The redundant second case-spelling lookup was dropped (Headers.get is case-insensitive).
+
+**Finding 4 (MINOR — substring containment weaker than "no substring of the token"): FIXED.** Both
+security files now also assert `localStorage.length === 0` and `sessionStorage.length === 0` after
+the full submit cycle — stronger than token containment, catches truncated-token leaks. The
+original containment sweeps are retained.
+
+**Finding 5 (MINOR — T8 `.skip` leaves no live regression net): NOT CHANGED.** The review marked
+this "for the human/next cycle to consider; non-blocking" — converting the skipped brand-discipline
+test to a pinned-violations characterisation changes its semantics and needs the human's call, not
+a remediation-cycle decision. The `.skip` remains, with its FINDING comment, per the prime
+directive.
+
+**Post-fix suite:** `npm test` run twice back-to-back — both runs
+`Test Files 11 passed | 1 skipped (12)`, `Tests 62 passed | 2 skipped (64)`, exit 0. The 2 skips
+are unchanged (F1, F4 finding tests). The delta from 54→62 is exactly the 8 new structural
+route-wrapper tests. Backend untouched (no `utils/` or `api_server.py` files in the diff).

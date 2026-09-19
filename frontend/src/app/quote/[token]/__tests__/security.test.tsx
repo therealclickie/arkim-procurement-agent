@@ -55,9 +55,13 @@ function storageDump(store: Storage): string {
   return parts.join("\n");
 }
 
-function headerValue(call: FetchCall, name: string): string | undefined {
-  const h = call.init?.headers as Record<string, string> | undefined;
-  return h?.[name];
+function headerValue(call: FetchCall, name: string): string | null {
+  // Review finding 3: normalise through Headers so the absence assertion
+  // cannot pass vacuously if a future client passes a Headers instance
+  // instead of a plain record (a plain-record read of a Headers object is
+  // undefined even when the header IS set). Headers.get is case-insensitive,
+  // so one lookup covers both spellings.
+  return new Headers(call.init?.headers).get(name);
 }
 
 describe("quote route — network reach", () => {
@@ -70,8 +74,7 @@ describe("quote route — network reach", () => {
     expect(urls.every((u) => /^\/api\/quote\//.test(u))).toBe(true);
     expect(urls.some((u) => u.includes("/api/admin"))).toBe(false);
     for (const c of calls) {
-      expect(headerValue(c, "Authorization")).toBeUndefined();
-      expect(headerValue(c, "authorization")).toBeUndefined();
+      expect(headerValue(c, "authorization")).toBeNull();
     }
   });
 });
@@ -84,6 +87,11 @@ describe("quote route — token hygiene (full submit cycle)", () => {
     stubLiveQuote();
     await fullSubmitCycle();
 
+    // Review finding 4: the length assertions are stronger than substring
+    // containment — nothing at all is written, so a truncated-token leak
+    // cannot slip past.
+    expect(window.localStorage.length).toBe(0);
+    expect(window.sessionStorage.length).toBe(0);
     expect(storageDump(window.localStorage)).not.toContain(TOKEN);
     expect(storageDump(window.sessionStorage)).not.toContain(TOKEN);
     expect(document.cookie).not.toContain(TOKEN);
