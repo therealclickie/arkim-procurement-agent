@@ -317,14 +317,29 @@ CREATE TABLE IF NOT EXISTS email_suppression (
 """
 
 # Soft bounces do NOT suppress (D8); three consecutive ones raise an alert.
-# "Consecutive" is why the counter resets on a delivery.
+# "Consecutive" is why the counter resets on a delivery. ``first_at`` stamps the
+# START of the current streak: it is what makes one alert per streak possible
+# (an alert deduped on the address alone could never fire for a second streak,
+# and one deduped on the count alone fires again on every later bounce).
 _DDL_SOFT_BOUNCES = """
 CREATE TABLE IF NOT EXISTS soft_bounce_counts (
-    email   TEXT PRIMARY KEY,
-    count   INTEGER NOT NULL DEFAULT 0,
-    last_at TEXT
+    email    TEXT PRIMARY KEY,
+    count    INTEGER NOT NULL DEFAULT 0,
+    last_at  TEXT,
+    first_at TEXT
 );
 """
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """PRAGMA-driven idempotent column adds (convention B, G7).
+
+    Only for tables whose shape changed after they first shipped — a fresh
+    database gets the column from the DDL above and this is a no-op.
+    """
+    have = {r[1] for r in conn.execute("PRAGMA table_info(soft_bounce_counts)")}
+    if have and "first_at" not in have:
+        conn.execute("ALTER TABLE soft_bounce_counts ADD COLUMN first_at TEXT")
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -342,6 +357,7 @@ def _get_conn() -> sqlite3.Connection:
     conn.execute(_INDEX_ALERT_DEDUPE)
     conn.execute(_DDL_SUPPRESSION)
     conn.execute(_DDL_SOFT_BOUNCES)
+    _migrate(conn)
     conn.commit()
     return conn
 
@@ -1025,16 +1041,25 @@ def list_suppressed_emails() -> list[dict]:
 def bump_soft_bounce(email: str) -> int:
     """Increment the CONSECUTIVE soft-bounce counter and return the new count.
     ``0`` on bad input / store failure (a failure must not manufacture an
-    alert)."""
+    alert).
+
+    The row also stamps ``first_at`` — the start of the current streak — which
+    :func:`soft_bounce_streak_start` reads. See that function for why the
+    caller needs it.
+    """
     norm = (email or "").strip().lower()
     if not norm:
         return 0
+    now = _now()
     try:
         with closing(_get_conn()) as conn:
             conn.execute(
-                "INSERT INTO soft_bounce_counts (email, count, last_at) VALUES (?,1,?) "
-                "ON CONFLICT(email) DO UPDATE SET count = count + 1, last_at = excluded.last_at",
-                (norm, _now()))
+                "INSERT INTO soft_bounce_counts (email, count, last_at, first_at) "
+                "VALUES (?,1,?,?) "
+                "ON CONFLICT(email) DO UPDATE SET count = count + 1, "
+                "last_at = excluded.last_at, "
+                "first_at = COALESCE(soft_bounce_counts.first_at, excluded.first_at)",
+                (norm, now, now))
             conn.commit()
             r = conn.execute("SELECT count FROM soft_bounce_counts WHERE email = ?",
                              (norm,)).fetchone()
@@ -1042,6 +1067,29 @@ def bump_soft_bounce(email: str) -> int:
     except Exception as exc:
         print(f"[Notifications] bump_soft_bounce failed: {exc}")
         return 0
+
+
+def soft_bounce_streak_start(email: str) -> Optional[str]:
+    """When the address's CURRENT run of consecutive soft bounces began.
+
+    This is the identity of the streak, and it exists so the caller can raise
+    exactly one alert per streak: an alert deduped on the address alone could
+    never fire again after the first streak, and one deduped on the count fires
+    again on every later bounce in the same streak. ``None`` when the address
+    has no streak / on a store failure.
+    """
+    norm = (email or "").strip().lower()
+    if not norm:
+        return None
+    try:
+        with closing(_get_conn()) as conn:
+            r = conn.execute(
+                "SELECT first_at FROM soft_bounce_counts WHERE email = ?",
+                (norm,)).fetchone()
+            return r[0] if r else None
+    except Exception as exc:
+        print(f"[Notifications] soft_bounce_streak_start failed: {exc}")
+        return None
 
 
 def reset_soft_bounce(email: str) -> bool:

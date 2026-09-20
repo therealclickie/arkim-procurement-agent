@@ -517,14 +517,24 @@ def _apply_suppression_side_effects(event: dict, event_type: str,
                     detail={"reason": "hard_bounce",
                             "subtype": event.get("bounce_subtype")})
             else:
+                # A soft bounce is a full mailbox or a temporary MTA failure:
+                # it does NOT suppress (D8), because tomorrow the same address
+                # works again. The counter is what turns a run of them into a
+                # human-visible signal.
                 count = store.bump_soft_bounce(addr)
-                if count >= SOFT_BOUNCE_ALERT_THRESHOLD:
+                streak_started_at = store.soft_bounce_streak_start(addr)
+                if count == SOFT_BOUNCE_ALERT_THRESHOLD:
+                    # ONE alert per streak. Keyed on when the streak started,
+                    # so a mailbox that soft-bounces fifty times raises one
+                    # alert rather than forty-eight, and a NEW streak after a
+                    # successful delivery still raises its own.
                     store.raise_alert(
                         kind=store.ALERT_SOFT_BOUNCE_REPEATED,
-                        dedupe_key=f"soft_bounce:{addr}:{count}",
+                        dedupe_key=f"soft_bounce:{addr}:{streak_started_at}",
                         account_id=account_id, member_id=member_id,
                         notification_id=notification_id, email=addr,
-                        detail={"consecutive": count})
+                        detail={"consecutive": count,
+                                "streak_started_at": streak_started_at})
 
 
 # ---------------------------------------------------------------------------
