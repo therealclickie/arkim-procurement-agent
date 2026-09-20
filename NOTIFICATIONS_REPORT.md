@@ -477,3 +477,16 @@ still tracked without entering the D6 ladder.
 Nothing was built. No source file, test file, `conftest.py`, dependency manifest or frontend
 file was modified. `boto3` was **not** added (`uv.lock` contains zero `boto` entries;
 runtime deps at `pyproject.toml:5-28`) — that is T2's first act, once Q1 is ruled.
+
+---
+
+## BUILD NOT STARTED — Q1 STILL UNRESOLVED (2026-09-20)
+
+The builder was invoked for T1-T12 and stopped without writing any code: this gate report ends
+on the unresolved STOP question Q1 (which seam owns `RFQ_NEW` — `rfq_send` or `tier1_notify`),
+no ruling on it exists anywhere in the repo (`VERDICT.txt` at the root is a stale arc-3/frontend
+artefact, last written by `e5aff80`, not an arc-4 ruling), and the brief's GATE RULINGS pre-authorise
+no answer to it. Per the GATE RULINGS' final clause and the builder's own stop rule, a stopped arc
+with a clear question is the correct outcome. T1-T12 remain unbuilt; no source, test, conftest,
+dependency-manifest or frontend file was modified. Resolve Q1 (the recommended ruling is stated
+above) and re-invoke the builder.
