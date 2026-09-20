@@ -30,6 +30,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { notificationsEnabled } from "@/lib/flags";
 import type { OpenRequest, QuoteHistoryRow } from "@/lib/portal-api";
 import { useSupplierMode } from "@/lib/supplier-mode";
 import { QuoteForm, type QuoteFormState } from "../../quote/[token]/quote-form";
@@ -137,6 +138,19 @@ export function OpenRequests({
                 <div className="portal-request-head">
                   <div>
                     <p className="portal-request-part">
+                      {/* Arc 4 T11/D5: "New" means nobody at this company had
+                          opened the request before this render. `seen` is
+                          absent when the backend's NOTIFICATIONS_V1 is off, and
+                          an absent value must NOT read as unseen — otherwise a
+                          flags-off backend would badge every row forever. */}
+                      {notificationsEnabled() && r.seen === false && (
+                        <span
+                          className="portal-unseen-badge"
+                          data-testid="unseen-badge"
+                        >
+                          New
+                        </span>
+                      )}
                       {[r.manufacturer, r.part_number]
                         .filter(Boolean)
                         .join(" — ") || "Requested part"}

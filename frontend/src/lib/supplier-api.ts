@@ -297,3 +297,35 @@ export function revokeAccountMember(
     method: "POST",
   }, true);
 }
+
+// ---------------------------------------------------------------------------
+// Arc 4 T10/D7 — the member's own notification preference
+// ---------------------------------------------------------------------------
+
+export type NotificationPreference = "IMMEDIATE" | "DAILY_DIGEST" | "NONE";
+
+export interface NotificationPreferences {
+  preference: NotificationPreference;
+  /** The server's vocabulary, so the control renders what the server accepts
+   *  rather than a client-side copy that can drift out of sync with it. */
+  choices: NotificationPreference[];
+}
+
+/** GET /api/supplier/notification-preferences — SELF only; there is no member
+ *  id in the URL because the server takes it from the session. */
+export function getNotificationPreferences(): Promise<
+  SessionResult<NotificationPreferences>
+> {
+  return sessionFetch<NotificationPreferences>("/notification-preferences");
+}
+
+/** PUT /api/supplier/notification-preferences — set the caller's own. */
+export function setNotificationPreference(
+  preference: NotificationPreference,
+): Promise<SessionResult<{ ok: boolean; preference: NotificationPreference }>> {
+  return sessionFetch<{ ok: boolean; preference: NotificationPreference }>(
+    "/notification-preferences",
+    { method: "PUT", body: JSON.stringify({ preference }) },
+    true,
+  );
+}
