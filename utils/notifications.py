@@ -140,6 +140,47 @@ def record_auth_send(*, supplier_domain: Optional[str], recipient: str,
         return None
 
 
+def track_auth_notification(*, kind: str, recipient: str,
+                            supplier_domain: Optional[str],
+                            member_id: Optional[str], status: str,
+                            provider_message_id: Optional[str] = None
+                            ) -> Optional[dict]:
+    """Record an auth-class send as a tracked ``Notification`` (D3/D5).
+
+    Auth mail is tracked for DELIVERY, not for escalation: a magic link or an
+    invite has no RFQ to be unseen, so neither kind is in
+    ``ESCALATABLE_KINDS``. What tracking buys is D8 — a hard bounce on a
+    sign-in link suppresses that address and alerts a human, instead of the
+    person quietly never being able to log in.
+
+    Fail-soft ``None``; never raises into an auth flow.
+    """
+    if not notifications_active():
+        return None
+    try:
+        from utils.mail_provider import auth_configuration_set
+        notification = store.create_notification(
+            kind=kind, member_id=member_id, supplier_domain=supplier_domain,
+            recipient=recipient, configuration_set=auth_configuration_set())
+        if notification is None:
+            return None
+        if provider_message_id:
+            store.set_provider_message_id(notification["id"], provider_message_id)
+        if status == "sent":
+            return store.transition(notification["id"], store.STATE_SENT,
+                                    event_type="Send")
+        if status in ("suppressed", "not_allowlisted", "cap_blocked"):
+            return store.transition(notification["id"], store.STATE_SUPPRESSED,
+                                    event_type=status)
+        if status == "error":
+            return store.transition(notification["id"], store.STATE_FAILED,
+                                    event_type="Error")
+        return notification        # "stubbed" — nothing left, stays QUEUED
+    except Exception as exc:
+        print(f"[Notifications] track_auth_notification failed: {exc}")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # T4 — the RFQ_NEW fan-out, at the rfq_send seam (Q1 RULED)
 # ---------------------------------------------------------------------------

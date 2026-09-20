@@ -7231,6 +7231,18 @@ def supplier_members_invite(body: SupplierInviteBody,
         member_id=member["id"], email=member["email"],
         actor=session["member"]["email"],
         detail={"role": member["role"], "status": member["status"]})
+    # Arc 4 T5/D2: tell the invited person. Flag-gated inside the helper —
+    # NOTIFICATIONS_V1 off ⇒ it returns None and sends nothing, which is
+    # exactly today's behaviour (before arc 4 an invite sent no mail at all,
+    # gate FINDING F5). Fail-soft: a mail failure must not fail the invite,
+    # which has already created the membership.
+    try:
+        supplier_accounts.send_member_invite_email(
+            member["email"], account_domain=session["account"]["supplier_domain"],
+            invited_by_email=session["member"]["email"], member_id=member["id"])
+    except Exception as exc:  # pragma: no cover - the helper is itself fail-soft
+        import logging
+        logging.getLogger(__name__).warning("invite mail failed: %s", exc)
     return JSONResponse(content={"ok": True,
                                  "member": _serialize_account_member(member)},
                         headers=_portal_response_headers({}))
