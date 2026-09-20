@@ -6310,19 +6310,17 @@ def quote_submit(token: str, body: QuoteSubmissionBody, request: Request):
 # (claim-token-auth'd; every route additionally gated on QUOTE_SUBMIT_V1)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/portal/{token}/open-requests")
-def portal_open_requests(token: str, request: Request):
-    """T5: the claimed supplier's OPEN requests — the runs with an un-resolved
-    RFQ addressed to THEIR domain (sent_messages status in OPEN_RFQ_STATUSES),
-    deduped per run, each with the request identity (from the run's specs) and
-    their own quote state on it. THEIR view only: the domain comes from the
-    validated claim token; no other supplier's RFQs, quotes, or existence are
-    visible. Runs that no longer resolve are skipped (never a fabricated
-    row). Fail-soft on the stores ([]), never a 500 on the public surface."""
-    if not _quote_submit_enabled():
-        _quote_flag_off_404()
-    prow = _validate_portal_token(request, token)
-    dom = prow["supplier_domain"]
+def _supplier_open_requests(dom: str) -> list:
+    """Arc 2 T7 / gate F2: the ONE open-requests read service. The runs with
+    an un-resolved RFQ addressed to THIS supplier domain (sent_messages status
+    in OPEN_RFQ_STATUSES), deduped per run, each with the request identity
+    (from the run's specs) and their own quote state on it. Their view only —
+    the caller passes the domain from its own credential (claim token or
+    session); no other supplier's RFQs, quotes, or existence are visible.
+    Runs that no longer resolve are skipped (never a fabricated row).
+    Fail-soft on the stores ([]), never a 500 on a public surface. Both the
+    claim-token route (portal_open_requests) and the session route
+    (supplier_requests) call THIS — one service, two doors."""
     from utils import quote_store, supplier_registry
     requests_out: list = []
     seen_runs: set = set()
@@ -6355,9 +6353,22 @@ def portal_open_requests(token: str, request: Request):
     except Exception as exc:  # public surface: degrade, never 500
         import logging
         logging.getLogger(__name__).warning(
-            "portal open-requests read failed for %s: %s", dom, exc)
+            "open-requests read failed for %s: %s", dom, exc)
         requests_out = []
-    return JSONResponse(content={"requests": requests_out},
+    return requests_out
+
+
+@app.get("/api/portal/{token}/open-requests")
+def portal_open_requests(token: str, request: Request):
+    """T5: the claimed supplier's OPEN requests — the token door over the
+    shared read service ``_supplier_open_requests`` (see its docstring; the
+    session door is Arc 2's /api/supplier/requests). Token-validated; the
+    quote surface must be on (QUOTE_SUBMIT_V1 — off ⇒ this route is absent)."""
+    if not _quote_submit_enabled():
+        _quote_flag_off_404()
+    prow = _validate_portal_token(request, token)
+    dom = prow["supplier_domain"]
+    return JSONResponse(content={"requests": _supplier_open_requests(dom)},
                         headers=_portal_response_headers({}))
 
 
@@ -6804,6 +6815,18 @@ def supplier_logout(session: dict = Depends(_require_supplier_session)):
         actor=session["member"]["email"],
         detail={"session_id": session["session_id"]})
     return JSONResponse(content={"ok": True},
+                        headers=_portal_response_headers({}))
+
+
+@app.get("/api/supplier/requests")
+def supplier_requests(session: dict = Depends(_require_supplier_session)):
+    """Arc 2 T7: the session door over the SAME open-requests read service
+    the claim-token route uses (``_supplier_open_requests`` — no second
+    matching logic), scoped to the SESSION's account domain. Cross-account
+    access is impossible by construction: the domain comes from the validated
+    session, never from a query parameter."""
+    dom = session["account"]["supplier_domain"]
+    return JSONResponse(content={"requests": _supplier_open_requests(dom)},
                         headers=_portal_response_headers({}))
 
 
