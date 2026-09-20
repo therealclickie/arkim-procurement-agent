@@ -62,16 +62,14 @@ function lineOf(src: string, offset: number): number {
 }
 
 describe("T8 — brand discipline (BRAND_NAME is the single source of truth)", () => {
-  it.skip("no hard-coded 'Gofer'/'Arkim' string literal exists in the scan scope", () => {
-    // FINDING (F1): src/components/proc/gofer-mark.tsx:29 renders the brand
-    // mark's alt text as the literal alt="Gofer" — the one hard-coded
+  it("no hard-coded 'Gofer'/'Arkim' string literal exists in the scan scope", () => {
+    // FINDING (F1, fixed): src/components/proc/gofer-mark.tsx rendered the
+    // brand mark's alt text as the literal alt="Gofer" — the one hard-coded
     // title-case brand string literal in the scan scope (src/app/portal,
     // src/app/quote, src/components), outside src/lib/brand.ts. BRAND_NAME
-    // is supposed to be the single source of truth; a rebrand would miss
-    // this alt text (and every screen reader user would hear the old name).
-    // Observed failing against current source (violation reported above);
-    // skipped per the prime directive — the finding is the point, source
-    // stays untouched this arc.
+    // is the single source of truth; a rebrand would have missed that alt
+    // text (and every screen reader user would hear the old name). The mark
+    // now renders alt={BRAND_NAME}.
     const violations: string[] = [];
     for (const root of SCOPE) {
       for (const file of collect(root)) {
