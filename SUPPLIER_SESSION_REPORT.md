@@ -599,3 +599,222 @@ better testing position than arc 1's.** Build has not started; no source file ha
 the two probe files created during the gate were deleted and are not committed.
 
 Awaiting the go-ahead (and a ruling on F2's backend scope) before T1.
+
+---
+---
+
+# BUILD REPORT — T1 through T11
+
+Appended after the gate. All eleven build tasks are **complete**; T11 was
+**not** deferred. Commits are one per task, named for it.
+
+## Final test counts (run, not recalled)
+
+| Suite | Command | Baseline | Final |
+|---|---|---|---|
+| Backend | `uv run pytest -q` | 2425 passed, 73 skipped | **2479 passed, 73 skipped** (2425 + 54) |
+| Frontend | `cd frontend ; npm test` | 64 passed, 12 files | **172 passed, 21 files** (64 + 108) |
+
+**Zero pre-existing test files were edited.** `git diff --name-only 4304ba3 HEAD`
+lists two files under `frontend/src/test-support/` that existed before this arc
+(`fetch-seam.ts`, `fixtures.ts`); both are **strictly append-only** —
+`git diff --numstat` reports `50 0` and `74 0` respectively, i.e. not one line
+removed or altered. They are not test files (vitest collects
+`src/**/*.test.{ts,tsx}` only, `vitest.config.ts:19`) and guardrail 5 directs
+reuse of them. Every other `__tests__` path in the diff is a new file. Arc 1's
+two security files are untouched.
+
+### Additional verification runs
+
+| Run | Result |
+|---|---|
+| `SUPPLIER_ACCOUNTS_V1=0 QUOTE_SUBMIT_V1=0 SUPPLIER_PORTAL_V1=0 uv run pytest -q` | 2479 passed, 73 skipped |
+| `npm test` with `NEXT_PUBLIC_SUPPLIER_SESSION_V1` unset (default off) | 172 passed |
+| `npm test` with `NEXT_PUBLIC_SUPPLIER_SESSION_V1=1` in the ambient env | 172 passed |
+| `npm run type-check` | **5 errors — exactly the 5 pre-existing ones (gate finding F4)**, all in arc-1 test files; this arc adds none |
+
+## Scope note — the backend was larger than D1 anticipated, as the gate predicted
+
+Gate findings F1 and F2 recorded that T7 and T11 had no backend to build on.
+The build took the gate's recommended path and added the missing session
+doors rather than silently reducing T7. That work is commit **T2b**, named so
+it is visible rather than buried inside a frontend task:
+
+- `member.permissions` on `GET /api/supplier/me`, computed from the capability
+  matrix. Nested under `member`, not at the top level, specifically so arc 2's
+  `set(body.keys()) == {"account","member"}` assertion still holds unedited.
+- `GET /api/supplier/profile`, `POST /api/supplier/propose-revision`,
+  `GET /api/supplier/quotes` (history).
+- Each goes through the **same service** its `/api/portal/{token}` sibling uses
+  — `_supplier_profile_body`, `_validate_revision_brands`,
+  `_supplier_quote_history` were extracted for it, following arc 2's
+  `_supplier_open_requests` pattern. Two tests call **both doors** and compare
+  the bodies, so drift fails the suite rather than being caught by eye.
+- It also wires `VIEW_REQUESTS` and `PROPOSE_REVISIONS`, which arc 2 declared
+  in the matrix and gated on no route. Every role holds both today, so nothing
+  is newly refused — but a future VIEWER row now lands correctly.
+
+Token-door behaviour is unchanged: the extraction is a pure move, and arc 1's
+portal tests pass unedited.
+
+## Where each success criterion is evidenced
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | Backend green, 2425 pass unedited, `2425 + N` | 2479 = 2425 + 54; run above |
+| 2 | Frontend green, 64 pass unedited, `64 + M` | 172 = 64 + 108; run above |
+| 3 | Flags off ⇒ suites pass, no new route reachable | explicit flags-off runs above; every new `page.tsx` has a render test at **both** flag values asserting `container.textContent === ""` and zero fetches |
+| 4 | Cookie is HttpOnly + Secure + SameSite=Lax, asserted on the real `Set-Cookie` | `test_supplier_session_cookie.py::TestCookieIssuance::test_verify_sets_cookie_with_all_four_attributes` — reads `response.headers.raw`, not the jar (a jar read loses every attribute) |
+| 5 | Session token never in storage / cookie-as-read-by-JS / console / URL, after a full cycle | `verify-screen.test.tsx::"leaves no trace after a successful sign-in"` (sweeps the magic-link token AND the session token from the response body); `session-chrome.test.tsx::"sweeps clean after load, interaction and sign-out"` — the sweep runs after **sign-out**, not merely after login |
+| 6 | Four verify-failure modes render byte-identical output (equality) | `verify-screen.test.tsx` — Set-size-1 over the four named modes, again over divergent backend shapes (401/403/404/500/throw), again including the no-token case, **plus a contrast case** proving the equality fails on divergent output |
+| 7 | No auth UI copy distinguishes known from unknown | `login-screen.test.tsx` — Set-size-1 over known / unknown / unparseable, with a contrast case; plus explicit assertions that the address is not echoed and that "spam" never appears. Same shape for the T9 bridge |
+| 8 | `git diff --stat` shows no pre-existing test file modified | verified above; the only pre-existing files in the diff are the two append-only `test-support` helpers |
+| 9 | Report contains G1–G8, both counts, FINDINGS, follow-ups | this document |
+
+## Reviewer checklist, answered
+
+- **R3** — The four attributes are read off `response.headers.raw`, filtered to
+  the `gofer_supplier_session` cookie. New cookie tests run on
+  `base_url="https://testserver"`, because `Secure` means an http client never
+  returns the cookie. That same rule is *why* arc 2's bearer suite is
+  structurally immune to T1: its clients are `http://testserver`, so the cookie
+  lands in the jar and is never sent back.
+- **R4** — The sweep runs after login → interact → **sign out**
+  (`session-chrome.test.tsx`), and separately after a rejected verify.
+- **R5** — Set-size-1, with a contrast case in the same file that renders a
+  genuinely different outcome and asserts the set size is 2.
+- **R7** — The CSRF tests drive the **real dependency through the real routes**
+  (`test_supplier_session_csrf.py`); nothing is mocked. A foreign `Origin`, a
+  foreign `Referer`, and the no-header case are each 401; near-miss origins
+  (`...evil.com`, wrong scheme, wrong port, origin-in-a-query-string) are each
+  rejected; a blocked attempt does **not** log the real user out.
+- **R8** — `test_supplier_members_rbac_cookie.py` calls each hidden control's
+  endpoint directly with the MEMBER's own **cookie** session and gets 403. One
+  test guards against the 403 being the CSRF check in disguise by making the
+  identical request as an ADMIN and getting 200. Another asserts `me`'s
+  `permissions` list *predicts* the 403 — what it omits, the server refuses.
+- **R9** — T11 was built, not deferred. FINDINGS below are genuine; F5 in
+  particular is a mistake I made and corrected, reported rather than hidden.
+
+## Decisions taken during the build that a reviewer should see stated
+
+1. **Bearer-first resolution** in the session dependency. The CSRF exemption
+   keys off the resolved mode, so the order is load-bearing: a request
+   presenting both credentials is treated as bearer, which is safe precisely
+   because an attacker who can cause a cookie to be sent cannot set a header.
+2. **No `Origin` and no `Referer` on a cookie-authenticated state-changing
+   request ⇒ reject** (R-G3b). A cookie is by definition ambient; a request
+   presenting one with no provenance cannot be vouched for. Non-browser callers
+   have the bearer path.
+3. **The auth gate is in the pages, not `supplier/layout.tsx`.** `/supplier/login`
+   and `/supplier/verify` are siblings under that layout and must stay reachable
+   without a session. No `supplier/layout.tsx` was created.
+4. **The session empty-state copy lives in `/supplier/requests`, not in
+   `OpenRequests`.** The component still renders literally nothing when both
+   lists are empty — pinned by pre-existing assertions on the claim surface.
+   `OpenRequests` gained an optional `onEmpty` callback and an optional `token`
+   prop; with no provider and a token it behaves exactly as before.
+5. **Member management opts into carrying the HTTP status** on a rejection,
+   alone among the surfaces. The caller is an authenticated admin acting inside
+   their own company, so there is no enumeration concern, and "that person is
+   already on your team" beats "something went wrong". Everywhere else the
+   rejection stays uniform.
+
+---
+
+## FINDINGS
+
+Five. F5 is mine.
+
+### F5 — I converted six pre-existing files from LF to CRLF, and corrected it
+
+The Python one-liners I used to patch existing files wrote with the platform
+default newline, turning six LF files into CRLF: `api_server.py`,
+`claim-page.tsx`, `open-requests.tsx`, `portal-states.tsx`, `fetch-seam.ts`,
+`fixtures.ts`. Nothing behavioural — both suites were green throughout — but it
+made `git diff` report `api_server.py` as 14,613 changed lines, which would
+have made review impossible.
+
+Corrected by normalising every file this arc touched back to LF in a final
+commit. `git diff --stat 4304ba3 HEAD` now reports `api_server.py` as **351**
+changed lines, and no changed file contains a CR.
+
+**The wart that remains:** the per-task commits T1–T11 still carry the
+line-ending noise internally, so reading a *single task's* diff in isolation is
+still unpleasant. The cumulative diff against the branch point — which is what
+the human verification step uses — is clean. I did not rewrite history to fix
+the intermediate commits. If the reviewer wants clean per-task diffs, say so and
+the branch can be rebuilt; I would rather be told than guess.
+
+### F6 — Six flag-off tests were only true because the flag was unset ambiently
+
+The route tests asserting "renders NOTHING when the flag is off" called
+`vi.unstubAllEnvs()`, which falls back to the **ambient** environment. With
+`NEXT_PUBLIC_SUPPLIER_SESSION_V1=1` exported, six of them failed — not because
+anything was broken, but because the assertion was unsatisfiable. Caught by
+running the suite with the flag explicitly on.
+
+Fixed: they now `vi.stubEnv(FLAG, "0")` explicitly, so the assertion is true
+regardless of the developer's environment. The suite is green with the flag
+unset **and** with it set to 1 (both runs above). Worth flagging as a pattern —
+a flag-off test that relies on ambient absence is not really testing the gate.
+
+### F7 — `Referrer-Policy: no-referrer` and the CSRF check could interact in a real browser
+
+`_portal_response_headers` sets `Referrer-Policy: no-referrer` on the supplier
+API responses. That header governs the *API response*, not the page, so it does
+not affect what the `/supplier/*` pages send — and browsers send `Origin` on all
+non-GET requests regardless. So the CSRF check should be satisfied by `Origin`
+alone in the real browser, and `Referer` is only the fallback.
+
+I could not prove this in vitest (jsdom does not model `Origin` emission) and it
+is the one part of T2 that is not covered by an executable assertion. **The
+human verification step should confirm it:** with both flags on, sign in and
+submit a profile revision from `localhost:3000` and confirm it returns 200
+rather than 401. If a future page sets `referrer: no-referrer` in its metadata
+export (as `portal/[token]/page.tsx` does), re-check — under that policy some
+browsers send `Origin: null`, which this check rejects.
+
+### F8 — `SUPPLIER_PORTAL_BASE_URL` must match the origin serving `/supplier/verify`
+
+Carried forward from the gate and now load-bearing, because the verify landing
+exists. `utils/supplier_accounts.py:947-948` defaults to
+`https://procurement.arkim.ai`. If it does not point at the host actually
+serving the route, the emailed link lands somewhere with no cookie jar for the
+API and sign-in silently cannot work. Configuration, not code — but it will bite
+the first live test if unset.
+
+### F9 — The session profile inherits `SUPPLIER_PORTAL_V1`, which is an honest second gate but not an obvious one
+
+`GET /api/supplier/profile` and `POST /api/supplier/propose-revision` go through
+`utils/supplier_portal`, which returns `None` when `SUPPLIER_PORTAL_V1` is off.
+So with `SUPPLIER_ACCOUNTS_V1` on but `SUPPLIER_PORTAL_V1` off, a signed-in
+supplier sees "Your profile isn't ready yet" — accurate, but caused by a flag
+rather than by missing data, and the UI cannot tell the difference. Pinned by a
+test (`test_404_when_the_portal_module_is_dormant`) so the coupling is visible
+rather than surprising. Not worth a dedicated error state at prototype stage;
+worth knowing before someone debugs it as a data problem.
+
+---
+
+## FOLLOW-UPS (not done, deliberately out of scope)
+
+1. **`utils/supplier_accounts_rbac.PROPOSE_REVISIONS` is now wired;
+   `SUBMIT_QUOTES` is still not.** `POST /api/supplier/quotes` (arc 2) is
+   plain-session, not capability-gated, and `GET /api/supplier/requests`
+   likewise. I left arc 2's routes alone — changing their gating is a behaviour
+   change to tested code and belongs in its own change, not smuggled into a
+   frontend arc. Every role holds both capabilities today, so nothing is
+   currently unprotected.
+2. **Ownership transfer** remains unbuilt (arc 2 finding 1). The members UI
+   reflects that honestly by offering no control for it.
+3. **The in-process rate limiter** behind `request-link` / `verify` is
+   single-process (arc 2's noted follow-up). A multi-worker deployment weakens
+   the cap proportionally.
+4. **React 19 / `use()`** stays out of scope and this arc created no pressure
+   toward it — every arc-3 route is a param-free client component and is
+   render-tested under the installed React 18.3.1 (G1, build rule R-G1 held).
+5. **`npm run type-check`'s 5 pre-existing errors** are untouched; fixing them
+   requires editing arc-1 test files, which the prime directive forbids.
+
+**NO PUSH.** 13 commits on `arc3/supplier-session`, none pushed.

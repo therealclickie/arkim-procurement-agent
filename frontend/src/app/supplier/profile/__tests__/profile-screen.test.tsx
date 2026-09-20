@@ -226,7 +226,7 @@ describe("session profile — reach and edge states", () => {
 
 describe("/supplier/profile route — flag gating", () => {
   it("renders NOTHING and makes no request when the flag is off", () => {
-    vi.unstubAllEnvs();
+    vi.stubEnv(FLAG, "0");
     const calls = stubSessionProfile();
     const { container } = render(<SupplierProfilePage />);
     expect(container.textContent).toBe("");

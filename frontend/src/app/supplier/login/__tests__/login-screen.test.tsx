@@ -235,6 +235,7 @@ describe("login screen — hygiene", () => {
 
 describe("/supplier/login route — flag gating", () => {
   it("renders NOTHING and makes no request when the flag is off", () => {
+    vi.stubEnv(FLAG, "0");
     const calls = stubFetch(() => jsonResponse(200, { ok: true }));
     const { container } = render(<SupplierLoginPage />);
     expect(container.textContent).toBe("");

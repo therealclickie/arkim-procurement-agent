@@ -223,6 +223,7 @@ describe("verify — the token is nowhere afterwards", () => {
 
 describe("/supplier/verify route — flag gating", () => {
   it("renders NOTHING and makes no request when the flag is off", () => {
+    vi.stubEnv(FLAG, "0");
     const calls = stubFetch(() => jsonResponse(200, { token: "x" }));
     const { container } = render(<SupplierVerifyPage />);
     expect(container.textContent).toBe("");

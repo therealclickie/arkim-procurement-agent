@@ -284,7 +284,7 @@ describe("/supplier/members route", () => {
   });
 
   it("renders NOTHING and makes no request when the flag is off", () => {
-    vi.unstubAllEnvs();
+    vi.stubEnv(FLAG, "0");
     const calls = stubTeam("ADMIN");
     const { container } = render(<SupplierMembersPage />);
     expect(container.textContent).toBe("");

@@ -202,7 +202,7 @@ describe("claim → account bridge — honesty and non-consumption", () => {
 
 describe("claim → account bridge — flag off", () => {
   it("renders no bridge and makes no extra request", async () => {
-    vi.unstubAllEnvs();
+    vi.stubEnv(FLAG, "0");
     const calls = stubClaim();
     await submitTheClaim();
     expect(screen.queryByTestId("account-bridge")).toBeNull();
@@ -213,7 +213,7 @@ describe("claim → account bridge — flag off", () => {
   });
 
   it("leaves the submitted card's content unchanged", async () => {
-    vi.unstubAllEnvs();
+    vi.stubEnv(FLAG, "0");
     stubClaim();
     await submitTheClaim();
     expect(screen.getByText("Submitted for review")).toBeTruthy();

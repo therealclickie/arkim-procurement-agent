@@ -204,7 +204,7 @@ describe("session inbox — without a session", () => {
 
 describe("/supplier/requests route — flag gating", () => {
   it("renders NOTHING and makes no request when the flag is off", () => {
-    vi.unstubAllEnvs();
+    vi.stubEnv(FLAG, "0");
     const calls = stubInbox([openRequest()], []);
     const { container } = render(<SupplierRequestsPage />);
     expect(container.textContent).toBe("");
