@@ -374,3 +374,113 @@ This is flagged as a build-time decision; extraction is recommended.
 ---
 
 *Gate complete. No implementation written. Stopping before T1 per the brief.*
+
+---
+---
+
+# BUILD LOG (T1–T11) — appended after the build
+
+**Branch:** `arc2/supplier-identity` · **Commits:** one per task, T1→T11, no push.
+**New modules:** `utils/supplier_accounts.py` (store + auth, convention B),
+`utils/supplier_accounts_rbac.py` (the D7 matrix module). **Modified backend:**
+`api_server.py` (flag helper + routes + the T7 shared-service extraction),
+`utils/quote_store.py` (`"account"` joins `VALID_VIAS`), `utils/supplier_registry.py`
+(T9 provenance columns/vocabulary/accessor), `utils/supplier_portal.py` (T9 stamp),
+`utils/procurement_agent/tier1_matcher.py` (self_declared_scope propagation),
+`utils/procurement_agent/ranking_bands.py` (the D3 band guard).
+**Nothing under `frontend/`. No existing test file modified** —
+`git diff --stat 2864339..HEAD -- utils/procurement_agent/tests` is additions-only
+(8 new files, 0 deletions). `conftest.py` untouched (see FINDINGS FB2).
+
+| Task | Commit subject | Notes |
+|---|---|---|
+| T1 | `feat: T1 supplier-identity store ...` | Convention-B store; one-OWNER partial unique index (`WHERE role='OWNER' AND status != 'REVOKED'`) proven at the raw-SQL layer; tokens/sessions SHA-256 at rest (storage-inspected). |
+| T2 | `feat: T2 SUPPLIER_ACCOUNTS_V1 flag ...` | Live-read strict-truthy flag; the flag-off wall test owns the arc's complete route list and stays authoritative as routes landed. |
+| T3 | `feat: T3 magic-link request route ...` | Uniform `{ok:true}` across all email modes (body-equality tested); D2 establishment; send enters at the GmailSender seam — the REAL governance stack blocks non-allowlisted recipients (criterion 5; gate exercised, not mocked — only delivery recording is wrapped); per-email + per-IP limiter before any lookup. |
+| T4 | `feat: T4 magic-link verify -> session ...` | Atomic single-use consume; every rejection mode byte-identical 401; raw session token returned once, hash-only at rest. |
+| T5 | `feat: T5 session dependency + me + logout` | Bearer dependency (flag-off ⇒ 404 — it is the route gate too); uniform 401 across missing/invalid/expired/revoked; logout revokes one session. |
+| T6 | `feat: T6 claim-token -> account bridge ...` | Account created (1:1 idempotent); first domain-proving member becomes OWNER (D7); claim token validated, never consumed (D6, tested). |
+| T7 | `feat: T7 session-authed open requests ...` | Gate F2 resolved by extraction: `_supplier_open_requests(dom)` is the ONE read service; both doors call it; token-route characterization suites pass unmodified; parity asserted on identical fixture data; cross-account reads impossible. |
+| T8 | `feat: T8 session-authed quote submission ...` | Existing store + submission core; `submitted_via="account"`; open-RFQ + flag-not-block unchanged; double-gated (either flag off ⇒ absent). |
+| T9 | `feat: T9 capability provenance + the D3 band guard ...` | Registry columns (`classes.asserted_by`, `brands.source/asserted_by`, `suppliers.ship_area_source/ship_area_asserted_by`) + `CAPABILITY_SOURCES` vocab + NEW `get_capability_provenance` (pinned shapes of `get_supplier_scope`/`get_supplier_territory` untouched, exact-key-set tested). Propose→approve stamps `supplier_self` + proposer **only when the flag is on** (flag off = legacy `manual`, parity-tested). Matcher propagates `self_declared_scope`; `assign_band` guard: self-declared + no independent evidence (no found-PN, no confirmation) ⇒ Band C. Cross-band test proves the SAME candidate WOULD cross to Band B without the flag (`test_the_same_candidate_would_cross_without_the_flag`); within-band influence + quote mobility preserved. `test_ranking_bands.py` / `test_tier1_matcher.py` / `test_supplier_scope.py` / `test_supplier_registry.py` / `test_supplier_portal.py` pass unmodified. |
+| T10 | `feat: T10 admin pending-membership queue ...` | Flag-before-admin ordering (valid admin token still gets byte-identical 404 flag-off); approve ⇒ ACTIVE + role MEMBER (the default lives in the store, so the route names no role); reject ⇒ REVOKED; both audited. Surfaced and fixed FB1. |
+| T11 | `feat: T11 permission matrix + member management (D7)` | The ONE matrix module; `has_permission` + the `_supplier_require_capability` dependency; all role policy (no second OWNER by invite or promotion, no demoting/re-voking the OWNER, cross-account 404) lives in the rbac module — a source-scan test asserts no route handler contains a role literal or role comparison; the matrix is asserted as DATA over every role × capability pair. |
+
+## Final test count
+
+- **`uv run pytest -q` (default, flag off): 2425 passed, 73 skipped, 0 failed** =
+  **2305 pre-existing (unmodified) + 120 new** across 8 new test files.
+- **`SUPPLIER_ACCOUNTS_V1=0 uv run pytest -q` (flag explicitly off): 2425 passed,
+  73 skipped, 0 failed** — the same green in both modes; the pre-existing 2305
+  pass byte-identically with the arc inert (criterion 2).
+- Full-suite checkpoints were run after T3 (2350), after T9 (2396 — the
+  shared-module risk gate), and the final both-modes runs; the purely additive
+  tasks (T4–T8, T10, T11) were verified per-commit against the new files plus
+  the directly-affected existing characterization suites (api_server, quote_*,
+  portal, admin, ranking_bands, tier1_matcher, supplier_scope/registry) before
+  each commit.
+
+## FINDINGS (builder — genuine, all resolved or explicitly scoped)
+
+- **FB1 — a concierge-approved public-mailbox member could never log in (fixed
+  in T10).** The T3 route located the account ONLY by the email's registrable
+  domain, so `bob@gmail.com` (a PENDING-then-approved member of the dxpe.com
+  account) had no account to request a link against — the D2 approval flow
+  dead-ended. Fixed: `supplier_accounts.find_account_for_email` (domain first,
+  then existing membership; uniform 200 either way, so the two-path lookup
+  adds no enumeration oracle). Caught by the T10 integration test
+  (`test_approved_member_can_now_log_in`), not by inspection.
+- **FB2 — conftest.py NOT edited (gate F1 resolved).** `SUPPLIER_ACCOUNTS_V1`
+  was not added to `_FEATURE_FLAG_ENVS`; the flag is live-read everywhere and
+  default-off, so pre-existing tests are safe, and each new test file manages
+  its own flag via `monkeypatch.setenv`. This keeps the "no existing test file
+  modified" directive literal. The reviewer/human may add the env to the
+  conftest pin list later if shell-env leakage is a concern.
+- **FB3 — request-link sends only for ACTIVE members (stated decision).** A
+  PENDING or REVOKED member gets the uniform 200 with NO send — T4's "must
+  not learn they are pending" extended from the verify endpoint to the mailbox
+  channel (nothing is mailed, so nothing is learned).
+- **FB4 — magic-link sends do not ledger into `sent_messages` (gate F7
+  decided).** They follow the quote-ack transactional precedent: the send
+  enters at the same GmailSender governance seam, the `SupplierAuthAudit` row
+  is the audit trail, and no `sent_messages` attempt row is written — so link
+  requests do not consume the RFQ daily cap (link-spam must not be able to
+  starve real RFQ sends). If the reviewer prefers honest cap accounting for
+  transactional mail, it is a one-line change in `send_magic_link_email`.
+- **FB5 — an account established via a non-matching email is ownerless until a
+  domain-proving member arrives.** `establish_account` promotes the first
+  domain-matched ACTIVE member of an ownerless account to OWNER (the
+  gap-closer is tested). A dedicated ownership-transfer route is deliberately
+  NOT built in v1: the `TRANSFER_OWNERSHIP` capability is declared in the
+  matrix but no route consumes it yet, and promotion to OWNER is refused for
+  everyone (the persistence invariant makes a second live OWNER impossible
+  regardless).
+- **FB6 — T9 writes two new nullable columns even flag-off.** The provenance
+  columns are created by `_migrate` on connection regardless of flags (the
+  established convention), and `set_supplier_territory` now always writes
+  `ship_area_source` (value `manual` flag-off — value-identical to pre-arc
+  observable behaviour). Nothing existing reads these columns; the pinned
+  response shapes are exact-key-set tested. Flagged so the reviewer can rule
+  on whether new-column writes on an existing table violate the letter of
+  "inert when off" (we hold they do not: no behaviour, no new table, no read).
+- **FB7 — the T9 guard is deliberately conservative on extractor claims.** A
+  self-declared-scope candidate with a real listing URL + `pn_match_status`
+  partial-match and NO found part number stays Band C (the guard treats a
+  PN *claim* without a found PN as insufficient for a self-declared candidate
+  — the same conservatism as `pn_evidence_for`'s "an unverifiable claim never
+  earns Band A on its own"). Independent evidence (a found PN, or a quote
+  confirmation — gate F3's deliberate mobility path) still earns its band
+  honestly; both are tested.
+
+## Follow-ups (noted, not built)
+
+- Rate limiter → Redis-backed, multi-process (the in-process fixed-window
+  limiter is single-process and lost on restart — guardrail 4's noted follow-up).
+- Ownership-transfer route (D7 `TRANSFER_OWNERSHIP` has no v1 consumer).
+- Multi-account membership (one member email → one account) — out of scope
+  per the brief; `find_account_for_email` resolves collisions oldest-first
+  and should be revisited when lifted.
+- Public-mailbox domain list needs periodic review as providers appear
+  (gate I9 gap).
+- Consider adding `SUPPLIER_ACCOUNTS_V1` to the conftest flag pin (FB2).
+- Consider `sent_messages` ledger accounting for transactional mail (FB4).
