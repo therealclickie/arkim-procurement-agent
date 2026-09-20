@@ -6373,18 +6373,63 @@ def _supplier_open_requests(dom: str) -> list:
     return requests_out
 
 
+def _requests_with_read_state(requests: list, *, dom: str,
+                              member_id: Optional[str] = None) -> list:
+    """Arc 4 T7 / D5: annotate each open request with ``seen``, then record the
+    view — in that order, and in the ROUTE layer, not in the shared read
+    service.
+
+    Why here: ``_supplier_open_requests`` deliberately knows nothing about the
+    caller's identity (one assembly, two doors), while ``RfqView`` is a fact
+    about a *credential* — the session door knows the member, the claim-token
+    door has none (D5's "member_id null + supplier_domain" case).
+
+    Why annotate BEFORE recording: the indicator must say "new" on the render
+    that shows it for the first time. Reading the view set after writing this
+    render's view would mark everything seen the instant it was displayed, and
+    the supplier would never see a single "new" badge.
+
+    Why this is the strong signal: a view here means a human opened the portal
+    and the request was on the screen. That is what D6's ladder is judged
+    against — never an email open, which Apple Mail Privacy Protection fires
+    for everyone whether or not anyone looked.
+
+    Flag OFF ⇒ the list is returned UNTOUCHED (no ``seen`` key, no store
+    write), so both doors' responses are byte-identical to before this arc.
+    """
+    if not _notifications_enabled():
+        return requests
+    from utils import notifications
+    already_seen = notifications.seen_run_ids(dom)
+    annotated = []
+    for row in requests:
+        run_id = row.get("run_id")
+        annotated.append({**row, "seen": run_id in already_seen})
+        if run_id:
+            notifications.record_view(run_id=run_id, supplier_domain=dom,
+                                      member_id=member_id)
+    return annotated
+
+
 @app.get("/api/portal/{token}/open-requests")
 def portal_open_requests(token: str, request: Request):
     """T5: the claimed supplier's OPEN requests — the token door over the
     shared read service ``_supplier_open_requests`` (see its docstring; the
     session door is Arc 2's /api/supplier/requests). Token-validated; the
-    quote surface must be on (QUOTE_SUBMIT_V1 — off ⇒ this route is absent)."""
+    quote surface must be on (QUOTE_SUBMIT_V1 — off ⇒ this route is absent).
+
+    Arc 4 T7: this render is a portal VIEW (D5) and is recorded as one — with
+    no ``member_id``, because a claim token identifies the company, not a
+    person. It still counts as the company having seen the request, which is
+    what the escalation ladder asks."""
     if not _quote_submit_enabled():
         _quote_flag_off_404()
     prow = _validate_portal_token(request, token)
     dom = prow["supplier_domain"]
-    return JSONResponse(content={"requests": _supplier_open_requests(dom)},
-                        headers=_portal_response_headers({}))
+    return JSONResponse(
+        content={"requests": _requests_with_read_state(
+            _supplier_open_requests(dom), dom=dom, member_id=None)},
+        headers=_portal_response_headers({}))
 
 
 def _supplier_quote_history(dom: str) -> list:
@@ -7009,10 +7054,17 @@ def supplier_requests(session: dict = Depends(_require_supplier_session)):
     the claim-token route uses (``_supplier_open_requests`` — no second
     matching logic), scoped to the SESSION's account domain. Cross-account
     access is impossible by construction: the domain comes from the validated
-    session, never from a query parameter."""
+    session, never from a query parameter.
+
+    Arc 4 T7: the session door knows WHO is looking, so the ``RfqView`` it
+    records carries the ``member_id`` — which is what lets D6's ladder stop
+    chasing the member who actually read the request."""
     dom = session["account"]["supplier_domain"]
-    return JSONResponse(content={"requests": _supplier_open_requests(dom)},
-                        headers=_portal_response_headers({}))
+    return JSONResponse(
+        content={"requests": _requests_with_read_state(
+            _supplier_open_requests(dom), dom=dom,
+            member_id=session.get("member_id"))},
+        headers=_portal_response_headers({}))
 
 
 @app.post("/api/supplier/quotes")
