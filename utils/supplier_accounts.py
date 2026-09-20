@@ -870,6 +870,43 @@ def establish_account(supplier_domain: str, email: str) -> tuple[Optional[dict],
     return account, member, account_created
 
 
+def find_account_for_email(email: str) -> Optional[dict]:
+    """Locate the account a link request for ``email`` belongs to:
+
+      1. the account bound to the email's REGISTRABLE DOMAIN (the D2 auto
+         path — sales@dxpe.com → the dxpe.com account), or, when that domain
+         has no account,
+      2. the account an EXISTING MEMBERSHIP (any status) already ties the
+         email to — a concierge-approved public-mailbox member (e.g.
+         bob@gmail.com on the dxpe.com account) must be able to request a
+         login link even though gmail.com will never have an account.
+
+    Uniformity note: the caller returns the same response whether this finds
+    an account or not, so the two-path lookup creates no enumeration oracle.
+    v1 assumes one membership per email (multi-account membership is out of
+    scope — noted follow-up); on a future collision the oldest membership
+    wins deterministically. Fail-soft: None."""
+    norm = normalize_email(email)
+    if not norm:
+        return None
+    dom = email_registrable_domain(norm)
+    if dom:
+        by_domain = get_account_by_domain(dom)
+        if by_domain is not None:
+            return by_domain
+    try:
+        with closing(_get_conn()) as conn:
+            row = conn.execute(
+                "SELECT account_id FROM supplier_members WHERE email = ? "
+                "ORDER BY created_at LIMIT 1", (norm,)).fetchone()
+            if not row:
+                return None
+            return get_account(row[0])
+    except Exception as exc:
+        print(f"[SupplierAccounts] find_account_for_email failed: {exc}")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # D5 — the magic-link email enters at the SAME send seam as every outbound
 # ---------------------------------------------------------------------------

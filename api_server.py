@@ -6630,9 +6630,13 @@ def supplier_request_link(body: SupplierRequestLinkBody, request: Request):
         return JSONResponse(content={"ok": True},
                             headers=_portal_response_headers({}))
     dom = supplier_accounts.email_registrable_domain(email)
-    account = supplier_accounts.get_account_by_domain(dom) if dom else None
+    # Locate the account by the email's registrable domain, OR by an existing
+    # membership (a concierge-approved public-mailbox member's email domain
+    # has no account — the membership is their route in). Same uniform 200
+    # whether or not an account is found.
+    account = supplier_accounts.find_account_for_email(email)
     if account is None:
-        # No supplier account for this domain — indistinguishable from success.
+        # No supplier account for this email — indistinguishable from success.
         supplier_accounts.audit("link_requested", email=email, actor="public",
                                 ip=ip, detail={"outcome": "no_account",
                                                "domain": dom or None})
@@ -6872,6 +6876,99 @@ def supplier_quote_submit(body: PortalQuoteBody,
         requested_quantity=specs.get("quantity"),
     )
     return JSONResponse(content=out, headers=_portal_response_headers({}))
+
+
+# ---------------------------------------------------------------------------
+# T10 — admin: the pending-membership queue (D2's concierge approvals) under
+# the EXISTING admin auth (I3: require_admin bearer token). Gate ordering per
+# the flag-gated-admin convention: the SUPPLIER_ACCOUNTS_V1 check runs BEFORE
+# require_admin so flag-off renders the routes ABSENT (404) for any caller —
+# a 401/403 must not reveal they exist.
+# ---------------------------------------------------------------------------
+
+def _serialize_pending_member(member: dict) -> dict:
+    """The admin-facing shape of one pending membership: identity + which
+    COMPANY account it belongs to (the concierge needs the domain to judge)."""
+    account = supplier_accounts.get_account(member.get("account_id") or "")
+    return {
+        "id": member["id"],
+        "email": member["email"],
+        "registrable_domain": member["registrable_domain"],
+        "role": member["role"],
+        "status": member["status"],
+        "account_id": member["account_id"],
+        "supplier_domain": (account or {}).get("supplier_domain"),
+        "invited_by": member.get("invited_by"),
+        "created_at": member["created_at"],
+    }
+
+
+@app.get("/api/admin/supplier-members/pending")
+def admin_pending_members(authorization: Optional[str] = Header(default=None)):
+    """The concierge queue: every PENDING membership across accounts (the D2
+    non-matching / public-mailbox requests), each with its company domain."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    require_admin(authorization)
+    rows = supplier_accounts.list_pending_members()
+    return {"count": len(rows),
+            "members": [_serialize_pending_member(m) for m in rows]}
+
+
+@app.post("/api/admin/supplier-members/{member_id}/approve")
+def admin_approve_member(member_id: str,
+                         authorization: Optional[str] = Header(default=None)):
+    """Approve a pending membership → the member becomes ACTIVE with role
+    MEMBER (D7 least privilege: a concierge-approved member never arrives as
+    OWNER/ADMIN — ownership exists only via account establishment). Audited.
+    404 unknown member; 409 when not pending."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    role = require_admin(authorization)
+    member = supplier_accounts.get_member(member_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if member["status"] != supplier_accounts.MEMBER_PENDING:
+        raise HTTPException(status_code=409, detail="Member is not pending")
+    # Least privilege FIRST (role), then the status transition.
+    out = supplier_accounts.update_member_role(
+        member_id, supplier_accounts.ROLE_MEMBER)
+    if out is None:
+        raise HTTPException(status_code=500, detail="Member could not be approved")
+    out = supplier_accounts.update_member_status(
+        member_id, supplier_accounts.MEMBER_ACTIVE, updated_by=role)
+    if out is None:
+        raise HTTPException(status_code=500, detail="Member could not be approved")
+    supplier_accounts.audit(
+        "member_approved", account_id=member["account_id"], member_id=member_id,
+        email=member["email"], actor=role,
+        detail={"role": out["role"], "status": out["status"]})
+    return {"ok": True, "member": _serialize_pending_member(out)}
+
+
+@app.post("/api/admin/supplier-members/{member_id}/reject")
+def admin_reject_member(member_id: str,
+                        authorization: Optional[str] = Header(default=None)):
+    """Reject a pending membership → REVOKED (the email cannot re-request its
+    way in; a fresh invitation is the path back). Audited. 404 unknown; 409
+    when not pending."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    role = require_admin(authorization)
+    member = supplier_accounts.get_member(member_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if member["status"] != supplier_accounts.MEMBER_PENDING:
+        raise HTTPException(status_code=409, detail="Member is not pending")
+    out = supplier_accounts.update_member_status(
+        member_id, supplier_accounts.MEMBER_REVOKED, updated_by=role)
+    if out is None:
+        raise HTTPException(status_code=500, detail="Member could not be rejected")
+    supplier_accounts.audit(
+        "member_rejected", account_id=member["account_id"], member_id=member_id,
+        email=member["email"], actor=role,
+        detail={"status": out["status"]})
+    return {"ok": True, "member": _serialize_pending_member(out)}
 
 
 # ---------------------------------------------------------------------------
