@@ -289,6 +289,101 @@ class TestSendGovernance:
 
 
 # ---------------------------------------------------------------------------
+# T4 — verify → session
+# ---------------------------------------------------------------------------
+
+def _capture_link_token(sa_api, monkeypatch, email="sales@dxpe.com"):
+    """Request a link for an ACTIVE member and recover the RAW token the only
+    place it exists outside the store's hash: the emailed link URL (recorded
+    via a delegating sender wrapper — the governance stack still runs)."""
+    recorded = []
+
+    class RecordingSender(sa_api._email_sender.GmailSender):
+        def send(self, message):
+            recorded.append(message)
+            return super().send(message)
+
+    monkeypatch.setattr(sa_api._email_sender, "GmailSender", RecordingSender)
+    r = sa_api.post("/api/supplier/auth/request-link", json={"email": email})
+    assert r.status_code == 200, r.text
+    assert len(recorded) == 1
+    body = recorded[0].body
+    marker = "/supplier/verify?token="
+    assert marker in body
+    return body.split(marker, 1)[1].split("\n", 1)[0].strip()
+
+
+class TestVerifyLink:
+    def test_success_returns_session_token_once(self, sa_api, monkeypatch):
+        _active_member(sa_api)
+        token = _capture_link_token(sa_api, monkeypatch)
+        r = sa_api.post("/api/supplier/auth/verify", json={"token": token})
+        assert r.status_code == 200
+        out = r.json()
+        assert out["token"] and len(out["token"]) >= 32
+        assert out["expires_at"]
+        # The raw session token is not persisted (hash only) — criterion 3.
+        import sqlite3
+        with sqlite3.connect(sa_api._sa._DB_PATH) as conn:
+            dump = "\n".join(str(r_) for r_ in conn.execute(
+                "SELECT * FROM supplier_sessions").fetchall())
+        assert out["token"] not in dump
+        assert sa_api._sa._hash_token(out["token"]) in dump
+        # Audited: link_verified ok + login.
+        events = [row["event"] for row in sa_api._sa.list_audit()]
+        assert "link_verified" in events and "login" in events
+
+    def test_every_rejection_mode_is_identical(self, sa_api, monkeypatch):
+        # (criterion 4: equality across ALL modes, not separate checks)
+        acct, owner = _active_member(sa_api)
+        # A PENDING member's link (concierge has not approved).
+        pending = sa_api._sa.add_member(
+            acct["id"], "newhire@dxpe.com", role=sa_api._sa.ROLE_MEMBER,
+            status=sa_api._sa.MEMBER_PENDING)
+        pending_link = sa_api._sa.mint_magic_link(pending["id"])
+        # An expired link for the ACTIVE member.
+        expired = sa_api._sa.mint_magic_link(owner["id"], expiry_minutes=0)
+        # A used link.
+        used = _capture_link_token(sa_api, monkeypatch)
+        assert sa_api.post("/api/supplier/auth/verify",
+                           json={"token": used}).status_code == 200
+        rejections = [
+            sa_api.post("/api/supplier/auth/verify",
+                        json={"token": "totally-unknown-token"}),
+            sa_api.post("/api/supplier/auth/verify",
+                        json={"token": expired["token"]}),
+            sa_api.post("/api/supplier/auth/verify",
+                        json={"token": used}),                       # replay
+            sa_api.post("/api/supplier/auth/verify",
+                        json={"token": pending_link["token"]}),     # PENDING
+            sa_api.post("/api/supplier/auth/verify", json={"token": ""}),
+        ]
+        assert all(r.status_code == 401 for r in rejections)
+        assert len({r.content for r in rejections}) == 1, \
+            f"rejection bodies differ: {[r.content for r in rejections]}"
+        assert rejections[0].json() == {"detail": "Invalid or expired link"}
+
+    def test_second_use_of_a_valid_link_rejected(self, sa_api, monkeypatch):
+        _active_member(sa_api)
+        token = _capture_link_token(sa_api, monkeypatch)
+        first = sa_api.post("/api/supplier/auth/verify", json={"token": token})
+        second = sa_api.post("/api/supplier/auth/verify", json={"token": token})
+        assert first.status_code == 200
+        assert second.status_code == 401
+
+    def test_pending_member_cannot_log_in(self, sa_api):
+        acct = _account(sa_api)
+        p = sa_api._sa.add_member(acct["id"], "newhire@dxpe.com",
+                                  role=sa_api._sa.ROLE_MEMBER,
+                                  status=sa_api._sa.MEMBER_PENDING)
+        link = sa_api._sa.mint_magic_link(p["id"])
+        r = sa_api.post("/api/supplier/auth/verify",
+                        json={"token": link["token"]})
+        assert r.status_code == 401
+        assert r.json() == {"detail": "Invalid or expired link"}
+
+
+# ---------------------------------------------------------------------------
 # Rate limiting (guardrail 4)
 # ---------------------------------------------------------------------------
 

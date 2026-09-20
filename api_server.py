@@ -6665,3 +6665,80 @@ def supplier_request_link(body: SupplierRequestLinkBody, request: Request):
     return JSONResponse(content={"ok": True},
                         headers=_portal_response_headers({}))
 
+
+class SupplierVerifyBody(BaseModel):
+    token: str
+
+
+def _supplier_verify_reject_401():
+    """The UNIFORM rejection for every verify failure mode — unknown token,
+    expired link, already-used link, PENDING/REVOKED member, store error.
+    One body, one status, for all of them (T4): a caller must not be able to
+    distinguish the modes, and a PENDING member in particular must not learn
+    their status from this endpoint."""
+    raise HTTPException(status_code=401, detail="Invalid or expired link")
+
+
+def _supplier_verify_rate_check(request: Request, token: str) -> None:
+    """429 when the (IP, token-prefix) verify bucket is over its cap — the
+    portal discipline (a garbage-token spray never throttles a legit verify
+    with a distinct prefix). Same bucket store as request-link, separate
+    key space."""
+    cap = _env_int("SUPPLIER_VERIFY_RATE_CAP", 20)
+    if cap <= 0:
+        return
+    import time
+    key = ("verify", _client_ip(request), (token or "")[:8])
+    now = time.monotonic()
+    with _supplier_auth_rate_lock:
+        entry = _supplier_auth_rate_buckets.get(key)
+        if not entry or (now - entry[1]) >= _SUPPLIER_AUTH_RATE_WINDOW_SEC:
+            entry = [0, now]
+            _supplier_auth_rate_buckets[key] = entry
+        entry[0] += 1
+        count = entry[0]
+    if count > cap:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests.",
+            headers={"Retry-After": str(_SUPPLIER_AUTH_RATE_WINDOW_SEC)},
+        )
+
+
+@app.post("/api/supplier/auth/verify")
+def supplier_verify_link(body: SupplierVerifyBody, request: Request):
+    """Verify a magic link → a session (D4: magic links are the only login;
+    the session is the durable identity arc 3 builds on).
+
+    Single-use (the consume is atomic in the store), expiring, hash-lookup.
+    EVERY failure mode — unknown / expired / used / PENDING member / store
+    error — returns the identical 401 (no oracle; a pending member must not
+    learn they are pending). Success returns the RAW session token exactly
+    once (only its hash is stored) + its expiry. Audited (link_verified,
+    login). Flag-off ⇒ route absent."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    ip = _client_ip(request)
+    _supplier_verify_rate_check(request, body.token or "")
+    ctx = supplier_accounts.verify_magic_link(body.token or "")
+    if ctx is None:
+        supplier_accounts.audit("link_verified", actor="public", ip=ip,
+                                detail={"outcome": "rejected"})
+        _supplier_verify_reject_401()
+    sess = supplier_accounts.create_session(ctx["member_id"])
+    if sess is None:
+        supplier_accounts.audit("link_verified", actor="public", ip=ip,
+                                detail={"outcome": "rejected"})
+        _supplier_verify_reject_401()
+    supplier_accounts.audit(
+        "link_verified", account_id=ctx["account_id"],
+        member_id=ctx["member_id"], email=ctx["email"], actor="public", ip=ip,
+        detail={"outcome": "ok"})
+    supplier_accounts.audit(
+        "login", account_id=ctx["account_id"], member_id=ctx["member_id"],
+        email=ctx["email"], actor=ctx["email"], ip=ip,
+        detail={"session_id": sess["session_id"]})
+    return JSONResponse(content={"token": sess["token"],
+                                 "expires_at": sess["expires_at"]},
+                        headers=_portal_response_headers({}))
+
