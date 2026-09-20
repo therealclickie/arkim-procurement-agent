@@ -496,3 +496,206 @@ above) and re-invoke the builder.
 ## Q1 RULING ACKNOWLEDGED (2026-09-20)
 
 Q1 is **RULED** by the brief's GATE RULINGS and the revised T4: `RFQ_NEW` is owned by the **`rfq_send` seam** (the point an RFQ is actually sent and the `sent_messages` row is written), **not** `tier1_notify`. The gate's STOP is resolved; the builder proceeds from this committed gate report without re-running the gate. T1–T12 build begins.
+
+---
+
+# BUILD REPORT — T1–T12 COMPLETE (2026-09-21)
+
+**Branch:** `arc4/notifications` · **Branch point:** `d20ca68` · **NOT PUSHED.**
+T1–T5 were committed by an earlier session (cut off by a session limit after T5); T6–T12
+were built in this session, one commit per task. No file outside the commits listed below
+was created or modified.
+
+| Task | Commit | What landed |
+|---|---|---|
+| T1 | `fc33cfd` | notification models + store (D3 ladder, D4 idempotency, D5 `RfqView`) |
+| T2 | `86c945c` | `NOTIFICATIONS_V1` flag + `MailProvider` adapter (`FakeProvider`, `SesProvider`) |
+| T3 | `968bf8d` | governance integration + auth mail joins the ledger (D1, D9) |
+| T4 | `b1f6383` | `RFQ_NEW` fan-out hooked at the `rfq_send` seam (Q1 RULED) |
+| T5 | `6c46705` | auth mail on the tracking-off configuration set (D2) |
+| T6 | `2c4ad8c` | SES webhook receiver — SNS verification, TopicArn allowlist, idempotency (D4) |
+| T7 | `b7bc4b8` | portal read-state — `RfqView` written from both inbox doors (D5) |
+| T8 | `63a58eb` | escalation ladder + cron entry point (D5, D6) |
+| T9 | `50bcdf3` | bounce/complaint suppression, address-level (D8) |
+| T10 | `b0d2b5d` | notification preferences API + daily digest (D7) |
+| T11 | `d72d2ec` | frontend — preference control + unseen indicator |
+| T12 | `cb36cb8` | admin escalation queue + acknowledge (G6 pattern) + `design/interactions.md` |
+
+## Test counts — AS OBSERVED, not quoted
+
+| Suite | Command | Result |
+|---|---|---|
+| Backend | `uv run pytest -q` | **2806 passed, 73 skipped**, 1 warning, 177s |
+| Backend, flag pinned off | `NOTIFICATIONS_V1=0 uv run pytest -q` | **2806 passed, 73 skipped**, 179s |
+| Frontend | `cd frontend ; npm test` | **197 passed** (24 files), exit 0 |
+
+Against the gate's own measured baseline (`2479` backend / `172` frontend):
+**2479 + 327** and **172 + 25**. The 327 is confirmed directly — running only the eleven
+arc-4 backend test files reports `327 passed`, which is exactly the delta.
+
+**Prime directive 1 holds.** `git diff --name-status d20ca68 HEAD` shows **no `M` on any
+test file** — every `M` is a source file, and all 15 new test-side files (11 backend test
+files + the shared `_arc4_notifications_fixtures.py` + 3 frontend test files) are `A`.
+`conftest.py` was not touched (gate FINDING F4's route: a separate
+`_arc4_notifications_fixtures.py` pins `NOTIFICATIONS_V1` explicitly per test; the
+post-approval conftest pin commit is still recommended).
+
+## The invariants, and the named test that would fail if one broke
+
+| Invariant | Evidence |
+|---|---|
+| D4 — signing cert fetched only from an `amazonaws.com` https URL | `test_ses_webhook.py::test_certificate_url_ok` (9 rows incl. `sns.amazonaws.com.attacker.test`, `notamazonaws.com`, `http://`), `::test_every_rejection_is_403[non_amazonaws_cert / amazonaws_suffix_trick / http_cert_url]` |
+| D4 — TopicArn allowlist checked BEFORE `SubscribeURL` is visited | `::test_a_foreign_topics_subscribe_url_is_never_visited` — asserts on what the server *fetched* (an empty recorder), not on code order |
+| D4 — idempotent on messageId + event type | `::test_a_replayed_event_is_a_noop`, `::test_idempotency_is_keyed_on_message_id_AND_event_type` |
+| D4 — uniform 403 on every rejection | `::test_all_rejections_are_byte_identical` — 12 rejection bodies, comparing status, body bytes and the security headers |
+| D5 — OPENED never counts as seen | `test_notifications_escalation.py::test_an_open_alone_is_never_seen` + the table rows `opened_only_still_reminds` / `opened_only_still_alerts` |
+| D5 — only viewed-in-portal or clicked counts | table rows `clicked_is_seen` / `viewed_in_portal_is_seen`; `test_notifications_read_state.py::test_a_view_makes_the_request_seen_for_the_escalation_ladder` |
+| D6 — at most one reminder per RFQ per member | `::test_a_reminder_is_sent_once_and_only_once` (three runs, one reminder) |
+| D6 — alert once | `::test_the_alert_is_raised_once_and_sends_no_further_supplier_mail`, `::test_running_twice_with_the_same_now_changes_nothing` |
+| D8 — hard bounce / complaint suppresses the member and alerts | `test_notifications_bounces.py::test_a_hard_bounce_suppresses_the_address_and_alerts`, `::test_a_complaint_suppresses_the_address_and_alerts`, `::test_suppression_is_address_level_and_never_touches_the_domain` |
+| D8 — soft bounces count to three | `::test_two_soft_bounces_do_nothing_and_the_third_alerts`, `::test_a_long_run_of_soft_bounces_raises_ONE_alert` |
+| D10 — no live AWS in any test | the only two `boto3.client(` sites in the suite (`test_mail_provider.py:48`, `test_notifications_auth_mail.py:75`) both construct with an inline region **and inline fake credentials** and are immediately wrapped in a botocore `Stubber`; `test_ses_webhook.py` replaces `fetch_certificate_pem`, and `::test_handle_envelope_never_reaches_the_network` fails the test if `urlopen` is called at all |
+| GATE RULINGS — no in-process timers or scheduler libraries | `::test_no_in_process_timer_or_scheduler_library_was_introduced` — over the **AST** of all five arc-4 modules (a grep would false-positive on the docstrings that name APScheduler/Celery to explain their absence) |
+| GATE RULINGS — plain functions with a CLI entry point | `scripts/notifications_scheduler.py {escalations,digest}`; `::test_the_cli_runs_the_ladder_and_reports`, `::test_the_cli_emits_json_and_accepts_an_explicit_now`, `test_notifications_preferences.py::test_the_cli_runs_the_digest` |
+| D1 — nothing bypasses governance (the REAL gate, not a mock) | `test_notifications_governance.py` (T3) drives `send_governance.evaluate` through `GmailSender.send`; every arc-4 fixture allowlists on the real governance store (`_arc4_notifications_fixtures.allowlist`) |
+
+## Two defects found and FIXED while building (not outstanding)
+
+1. **A reminder could arrive after the hand-off to a human** (`utils/notifications.py`, T8).
+   `decide_escalation` guarded the *alert* branch on `escalated_at` but not the *reminder*
+   branch. A notification whose first scheduler pass came in past the 24h threshold alerted
+   without ever reminding; the next run then matched the reminder branch (`reminded_at`
+   still NULL) and mailed the supplier **after** D6 had handed the request to a person.
+   Fixed by returning `None` for any escalated notification before the thresholds are
+   considered. Pinned by the table row `already_escalated_is_done` and
+   `test_notifications_admin_alerts.py::test_acknowledging_does_not_re_open_the_ladder`.
+2. **A soft-bounce alert storm** (`utils/notifications.py` + `notifications_store.py`, T9).
+   The alert deduped on `(address, count)` and fired for every bounce at or above three — a
+   mailbox that soft-bounced fifty times would have produced forty-eight open alerts and an
+   operator would have stopped reading the queue. Deduping on the address alone would have
+   been the opposite failure (the second streak, after a delivery reset the counter, could
+   never alert again). Fixed with a `first_at` streak stamp (PRAGMA-migrated) and a
+   crossing-only condition: one alert per run of consecutive failures, and a later streak
+   gets its own. Pinned by `::test_a_long_run_of_soft_bounces_raises_ONE_alert` and
+   `::test_a_delivery_resets_the_streak_and_a_new_streak_alerts_again`.
+
+## FINDINGS
+
+Numbering continues from the gate's F1–F6. **F1 and F5 are carried forward unchanged**;
+F2, F3, F4 and F6 were resolved in the build (F2 by the `message_class` cap class, F3 by
+address-level suppression in arc 4's own store, F4 by the separate fixtures module, F6 by
+the Q1 ruling placing `RFQ_NEW` at `rfq_send`).
+
+**F7 — with `NOTIFICATIONS_V1` on and SES unconfigured, ALL outbound mail fails; it does
+not fall back to Gmail.** `utils/email_sender.py:230-246` selects the provider and returns
+its result; `mail_provider.active_provider()` returns `SesProvider` whenever the flag is on
+(`utils/mail_provider.py:359-373`, `MAIL_PROVIDER` defaulting to `ses`), and
+`SesProvider.send` with no `AWS_REGION` and no credentials returns `status="error"`
+(`:290-321`). So the Gmail branch below is unreachable while the flag is on, and every send
+in the repo — RFQ mail included — degrades to `error`. That is arguably the honest behaviour
+for a deliberate provider switch, and it is fail-soft (nothing raises), but it is **not**
+CLAUDE.md §9's "no-op cleanly without a key": turning the flag on before the SES infra
+exists silently stops all mail rather than leaving today's channel working.
+`MAIL_PROVIDER=fake` is the dev escape hatch. **Flagged rather than changed** because
+"flag on ⇒ SES" is exactly what D1/T2 specify, and falling back to Gmail after an SES
+failure would be a new policy decision (it would also make a misconfigured production
+environment look healthy). Recommend turning `NOTIFICATIONS_V1` on only once the SES
+identity, configuration sets and task role are in place.
+
+**F8 — notification mail is JUDGED by the RFQ daily cap but INVISIBLE to it.**
+`_send_notification_mail` (`utils/notifications.py:238-281`) sets no `message_class`, so
+`send_governance._check_caps` counts it in the historical `rfq` class
+(`utils/send_governance.py:341-360`), while the notification itself writes **no**
+`sent_messages` row (only `rfq_send` and auth mail do). Two consequences, the first
+verified empirically against the real gate: **(a)** once the day's RFQ-class cap is spent,
+every RFQ_NEW notification, reminder and digest that day is `cap_blocked` → `SUPPRESSED`
+and the supplier is never told (probe: daily cap 2, two prior ledger rows, one fan-out ⇒
+notification `SUPPRESSED`, zero mails); **(b)** notification volume never appears in the
+ledger or the digest, so "how much mail did we send today" is understated by exactly the
+notification traffic. The reminder case deserves naming: `mark_reminded` is claimed
+*before* the send (deliberately — it is the one-reminder guard), so a cap-blocked reminder
+is never retried; the 24h alert still fires, which is the safe direction. This is the same
+class of decision as gate FINDING F2 and is left to the human for the same reason: giving
+notifications their own cap class changes what "caps apply" means. Default cap is 10
+(`SEND_GOVERNANCE_DAILY_CAP`), and one RFQ to a three-member account is 1 ledger row plus
+3 notification sends judged against it.
+
+**F9 — `run_escalations` considers every RFQ_NEW ever written, with no age or state bound.**
+`utils/notifications.py:603` iterates `store.list_notifications(kind=KIND_RFQ_NEW)` and
+filters in Python. Correct, idempotent and fast at prototype scale (and the
+`ix_notifications_kind_state` index exists), but it is a full scan of a monotonically
+growing table on every hourly run, and the `considered` counter it reports grows without
+bound. An age floor (nothing older than, say, `alert_hours * 2` can produce a new action,
+since both rungs are one-shot) or an `escalated_at IS NULL` predicate in SQL would bound
+it. Not fixed: it is a performance shape rather than a behaviour, and the fix belongs with
+whatever indexing pass the Postgres migration brings.
+
+**F10 — the SES webhook has no rate limit, unlike the other public routes.**
+`api_server.py:7518-7546`. The token routes deliberately apply `_portal_rate_check`
+**before** the token check so a garbage spray is throttled regardless of validity
+(`api_server.py:5555-5566`); this endpoint has no equivalent. The cheap-rejection ordering
+limits the damage — an envelope on a non-allowlisted topic is refused before any fetch or
+signature work, and the certificate is cached — but a flood of allowlisted-topic,
+bad-signature envelopes costs one RSA verification each and nothing sheds that load. A
+rate limit here needs a key (SNS posts from many AWS source IPs, so per-IP would be wrong),
+which is why it is reported rather than guessed at.
+
+**F1 (carried, unchanged) — the verify page auto-submits the magic-link token on load.**
+`frontend/src/app/supplier/verify/verify-screen.tsx:58-77`. Per GATE RULINGS, reported and
+**not changed** — the arc-3 test
+`frontend/src/app/supplier/verify/__tests__/verify-screen.test.tsx` pins the auto-verify
+behaviour, so changing it would fail a protected test. Arc 4b if wanted. D2's tracking-off
+`gofer-auth` set removes the SES-introduced prefetch vector; this screen is the residual one.
+
+**F5 (carried, now live behind the flag) — MEMBER_INVITE is NEW mail to real people, not a
+migration.** Before arc 4 the invite path created a member row and an audit row and sent
+nothing. `utils/supplier_accounts.py:send_member_invite_email` adds the channel, called
+from `POST /api/supplier/members/invite`. In scope per D7/T5, but worth attention before
+the flag goes on in a live environment: the first flag-on invite is the first email an
+invited colleague has ever received from this system.
+
+## REQUIRED ENV CONFIG (live verification)
+
+Set in the app's environment. Flags stay OFF until the SES/SNS infra below exists (F7).
+
+| Var | Purpose | Unset ⇒ |
+|---|---|---|
+| `NOTIFICATIONS_V1` | the backend arc flag | OFF — Gmail path, no notification rows, webhook 404, schedulers no-op, preference + alert routes absent |
+| `NEXT_PUBLIC_NOTIFICATIONS_V1` | the frontend surface flag (build-time) | OFF — no preference control, no "New" badge |
+| `AWS_REGION` | SES/SNS region | `SesProvider` no-ops ⇒ **all mail errors while the flag is on** (F7) |
+| `SES_CONFIGURATION_SET_NOTIFICATIONS` | D2 tracking-ON set (`gofer-notifications`) | no configuration set is sent; SES applies the account default |
+| `SES_CONFIGURATION_SET_AUTH` | D2 tracking-OFF set (`gofer-auth`) | **auth mail is REFUSED** — fail-closed, never downgraded onto a tracking-enabled set |
+| `SES_FROM_ADDRESS` | the verified SES identity to send as | falls back to `gmail_client.gmail_sender_address()` |
+| `SES_SNS_TOPIC_ARN_ALLOWLIST` | D4 TopicArn allowlist, comma-separated | **empty ⇒ every envelope 403** (fail-closed) |
+| `MAIL_PROVIDER` | transport override: `ses` (default when the flag is on) or `fake` | `ses` |
+| `ESCALATE_REMIND_HOURS` | D6 reminder threshold, wall-clock hours | `4` |
+| `ESCALATE_ALERT_HOURS` | D6 concierge-alert threshold, wall-clock hours | `24` |
+| `SEND_GOVERNANCE_AUTH_DAILY_CAP` | the auth-class daily cap (gate FINDING F2) | `50` |
+| `SEND_GOVERNANCE_V1` / `SEND_GOVERNANCE_DAILY_CAP` / `SEND_GOVERNANCE_OPEN_RFQ_CAP` | pre-existing; arc-4 mail is judged by them (see F8) | governance off / `10` / `1` |
+| `EMAIL_SEND_ENABLED` | pre-existing delivery gate, ABOVE the provider | off ⇒ every send is `stubbed` and no provider is reached |
+| `ARKIM_ADMIN_TOKEN` | the alert queue's admin bearer (pre-existing) | admin surface disabled (503) |
+
+AWS credentials are deliberately **not** env vars: the ECS task role supplies them and
+boto3 resolves them from the standard chain.
+
+**Infra that must exist first** (unchanged from the brief): SES domain identity for
+`mygofer.ai` with Easy DKIM plus a custom MAIL FROM subdomain and DMARC; SES **production
+access** (sandbox = verified recipients only); the two configuration sets
+(`gofer-notifications` tracking ON, `gofer-auth` tracking OFF); one SNS topic with an HTTPS
+subscription to `https://<app>/api/webhooks/ses`, its ARN in
+`SES_SNS_TOPIC_ARN_ALLOWLIST`; an ECS task role with `ses:SendEmail` scoped to the identity
+and both configuration sets.
+
+**Cron (UTC), once the flags are on:**
+
+```
+0 * * * *  cd /srv/arkim && uv run python scripts/notifications_scheduler.py escalations
+0 7 * * *  cd /srv/arkim && uv run python scripts/notifications_scheduler.py digest
+```
+
+## Scope
+
+Nothing in the brief's OUT OF SCOPE list was built (no SMS/voice, no business-hours
+escalation, no SES receipt rules, no dedicated IPs, no React 19, no supplier analytics, no
+live SES/SNS provisioning). No scope question arose that the brief's GATE RULINGS did not
+already answer, so the builder did not stop. **Not pushed.**
