@@ -346,16 +346,34 @@ def assign_band(candidate: dict, searched_pn: Optional[str]) -> str:
       2. An explicit confirmation record → Band A (even for an otherwise Band-C
          onboarded class-match — this is the §3 band-mobility promotion).
       3. Capability pivots → Band C (inferred capability only).
-      4. Exact/canonical found-PN + real URL → Band A.
-      5. Compatible found-PN, exact/canonical PN without a URL, an extractor
+      4. D3 guard (Arc 2): a supplier-SELF-declared capability is evidence
+         WITHIN a band, never authority ACROSS bands. A candidate whose scope
+         credit is self-declared (``self_declared_scope`` — set by
+         tier1_matcher from the registry's SUPPLIER_SELF provenance) stays in
+         Band C unless INDEPENDENT evidence lifts it out: a confirmation
+         record (check 2 above) or a found part number (pn_evidence != none).
+         Scope-derived URL / extractor-claim credit (source_url from the
+         registry domain, pn_match_status without a found PN) may NOT lift a
+         self-declared candidate out of Band C — the same conservatism as the
+         "an unverifiable claim never earns Band A on its own" rule.
+      5. Exact/canonical found-PN + real URL → Band A.
+      6. Compatible found-PN, exact/canonical PN without a URL, an extractor
          partial-match, or a part-referencing discovered listing → Band B.
-      6. Everything else (registry class-match, URL-less seeds) → Band C.
+      7. Everything else (registry class-match, URL-less seeds) → Band C.
     """
     if candidate.get("is_mock"):
         return BAND_C
     if has_confirmation(candidate):
         return BAND_A
     if candidate.get("search_type") == "capability_pivot":
+        return BAND_C
+    if candidate.get("self_declared_scope") \
+            and pn_evidence_for(candidate, searched_pn) == "none":
+        # D3 guard: self-declared capability alone never crosses bands. The
+        # within-band inputs (scope-declared evidence-quality points, capped
+        # Band-B suitability ordering) remain fully available — that is the
+        # influence D3 permits. Independent evidence (confirmation above, or
+        # a found PN below) still earns its band honestly.
         return BAND_C
 
     pn_ev = pn_evidence_for(candidate, searched_pn)

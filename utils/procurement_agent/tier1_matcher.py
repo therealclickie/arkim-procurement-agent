@@ -230,6 +230,12 @@ class Tier1Match:
     score: float                          # the composite rank score (higher = better)
     # match-explanation metadata (human-reviewable, surfaces in the card / audit)
     match_explanation: dict = field(default_factory=dict)
+    # Arc 2 T9 (D3): the capability coverage that drove this match is
+    # supplier-SELF-declared (source == supplier_self on the matched class or
+    # brand row). The matcher still matches on it (eligibility + within-tier
+    # ordering are the permitted influence); ranking_bands uses this flag to
+    # enforce that it never moves the candidate ACROSS an evidence band.
+    self_declared_scope: bool = False
 
     @property
     def relationship_ordinal(self) -> int:
@@ -353,6 +359,8 @@ def match_tier1(
             else _BRAND_NEUTRAL_ORDINAL,
             is_core, terr_rank, perf,
         )
+        # Arc 2 T9 (D3): is the coverage that drove this match self-declared?
+        self_declared = _match_scope_self_declared(domain, req_class, mfg)
         explanation = {
             "class_gate": req_class,                 # the hard gate that admitted this supplier
             "is_core": is_core,
@@ -362,6 +370,7 @@ def match_tier1(
             "buyer_state": buyer_state,              # None when the request carried no location (I2)
             "buyer_zip": buyer_zip,
             "onboarded": True,                       # registry-backed relationship badge
+            "self_declared_scope": self_declared,    # T9 provenance (D3 band guard input)
         }
         matches.append(Tier1Match(
             supplier_id=sup.get("id") or "",
@@ -375,6 +384,7 @@ def match_tier1(
             performance=_performance_for(domain),
             score=score,
             match_explanation=explanation,
+            self_declared_scope=self_declared,
         ))
 
     # Stable, deterministic ordering: score desc, then vendor name (so equal-score
@@ -397,6 +407,36 @@ def _class_is_core(domain: str, class_id: str) -> bool:
     for r in rows:
         if (r.get("class_id") or "").upper().strip() == (class_id or "").upper().strip():
             return bool(r.get("is_core"))
+    return False
+
+
+def _match_scope_self_declared(supplier_domain: str, class_id: str,
+                               manufacturer: Optional[str]) -> bool:
+    """Arc 2 T9 (D3): True when the capability coverage that drove this match
+    — the matched CLASS row (the hard gate), or the BRAND row for the
+    requested manufacturer (the amplifier) — is supplier-SELF-declared
+    (``source == CAP_SOURCE_SUPPLIER_SELF``, stamped by the Arc-2
+    propose→approve path). The matcher still matches on it (class
+    eligibility and within-tier composite ordering are the influence D3
+    permits); this flag exists so ranking_bands can enforce that a
+    self-declared capability never moves the candidate ACROSS an evidence
+    band. Legacy/un-attributed rows (source None/manual/apollo/inferred) are
+    NOT self-declared. Fail-soft False on any registry error."""
+    mfg = (manufacturer or "").strip().lower()
+    try:
+        prov = sr.get_capability_provenance(supplier_domain) or {}
+    except Exception:
+        return False
+    for c in prov.get("classes") or []:
+        if (c.get("class_id") or "").upper().strip() == (class_id or "").upper().strip():
+            if c.get("source") == sr.CAP_SOURCE_SUPPLIER_SELF:
+                return True
+    if mfg and mfg not in _NULL_MFG_TOKENS:
+        for b in prov.get("brands") or []:
+            if (b.get("brand_id") or "").strip().lower() == mfg:
+                if b.get("source") == sr.CAP_SOURCE_SUPPLIER_SELF:
+                    return True
+                break  # the matched row is the only one that matters
     return False
 
 
@@ -557,6 +597,9 @@ def to_candidate(match: Tier1Match, *, manufacturer: str,
         "aftermarket_disclosure": _AFTERMARKET_DISCLOSURE if is_aftermarket else None,
         "tier1_match_explanation": dict(match.match_explanation),
         "confirmation_needed": True,                   # Tier 1 two-mode display (existing convention)
+        # Arc 2 T9 (D3): carried through so ranking_bands' band guard can see
+        # it; absent/False on every pre-Arc-2 candidate (inert).
+        "self_declared_scope": bool(match.self_declared_scope),
     }
     return candidate
 

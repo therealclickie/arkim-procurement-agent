@@ -306,6 +306,31 @@ SCOPE_SOURCE_APOLLO = "apollo"
 SCOPE_SOURCE_INFERRED = "inferred"
 SCOPE_SOURCES: tuple[str, ...] = (SCOPE_SOURCE_MANUAL, SCOPE_SOURCE_APOLLO, SCOPE_SOURCE_INFERRED)
 
+# Arc 2 T9 (D3) — capability PROVENANCE vocabulary, distinct from the legacy
+# scope sources above: WHO originated a capability entry. ``supplier_self`` is
+# the load-bearing value: anything a supplier member asserted about their own
+# capability (brands, classes, ship area) enters with it, and the matcher must
+# treat it as evidence WITHIN an evidence band, never authority ACROSS bands
+# (same invariant as paid placement). ``asserted_by`` names the originator
+# (member email / concierge identity).
+CAP_SOURCE_SUPPLIER_SELF = "supplier_self"
+CAP_SOURCE_CONCIERGE = "concierge"
+CAP_SOURCE_SCRAPED = "scraped"
+CAP_SOURCE_VERIFIED = "verified"
+CAPABILITY_SOURCES: tuple[str, ...] = (
+    CAP_SOURCE_SUPPLIER_SELF, CAP_SOURCE_CONCIERGE, CAP_SOURCE_SCRAPED,
+    CAP_SOURCE_VERIFIED,
+)
+
+# Arc 2 T9 — capability-provenance columns, added idempotently by _migrate
+# (nullable ADD COLUMN, no backfill — pre-Arc-2 rows read as None = legacy
+# un-attributed, which the D3 guard treats as NOT self-declared).
+_CAPABILITY_PROV_COLUMNS: dict[str, dict[str, str]] = {
+    "supplier_classes": {"asserted_by": "TEXT"},
+    "supplier_brands": {"source": "TEXT", "asserted_by": "TEXT"},
+    "suppliers": {"ship_area_source": "TEXT", "ship_area_asserted_by": "TEXT"},
+}
+
 # JSON-valued TIER1 columns decoded on read.
 _TIER1_JSON_FIELDS = {"ship_area_json", "verticals_json", "performance_json"}
 
@@ -482,6 +507,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "UPDATE supplier_notifications SET is_test = 1 "
             "WHERE is_test = 0 AND run_id IN ('run-1', 'run-test')"
         )
+
+    # Arc 2 T9 — capability-provenance columns (D3): per-entry source +
+    # asserted_by on classes/brands, whole-scope ship-area provenance on the
+    # supplier row. Nullable, no backfill (legacy rows = un-attributed).
+    for table, cols in _CAPABILITY_PROV_COLUMNS.items():
+        t_existing = {row[1] for row in conn.execute(
+            f"PRAGMA table_info({table})").fetchall()}
+        for col, coltype in cols.items():
+            if col not in t_existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+                added.append(f"{table}.{col}")
 
     if added:
         conn.commit()
@@ -1398,11 +1434,15 @@ def _decode_json_field(raw: Any, default: Any) -> Any:
 
 def set_supplier_classes(domain: str, classes: list[dict],
                          *, source: str = SCOPE_SOURCE_MANUAL,
-                         set_by: Optional[str] = None) -> bool:
+                         set_by: Optional[str] = None,
+                         asserted_by: Optional[str] = None) -> bool:
     """Replace a supplier's class coverage with the given list (idempotent full
     replace). Each class dict: {class_id, subtype?, unspsc?, is_core?, confidence?,
-    source?}. `class_id` is a NounClass canonical (e.g. 'SEAL'). Returns True on a
-    write. No-ops (returns False) when TIER1_V2 is off.
+    source?, asserted_by?}. `class_id` is a NounClass canonical (e.g. 'SEAL').
+    Per-row ``source``/``asserted_by`` override the call-level defaults (Arc 2
+    T9 provenance — ``CAP_SOURCE_SUPPLIER_SELF`` marks a supplier-asserted
+    entry). Returns True on a write. No-ops (returns False) when TIER1_V2 is
+    off.
     """
     if _tier1_dormant():
         return False
@@ -1420,11 +1460,12 @@ def set_supplier_classes(domain: str, classes: list[dict],
                 conn.execute(
                     """INSERT OR IGNORE INTO supplier_classes
                        (id, supplier_id, class_id, subtype, unspsc, is_core,
-                        confidence, source, created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                        confidence, source, asserted_by, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                     (str(uuid.uuid4()), sid, cid, c.get("subtype"),
                      c.get("unspsc"), int(bool(c.get("is_core"))),
-                     c.get("confidence"), c.get("source") or source, now, now),
+                     c.get("confidence"), c.get("source") or source,
+                     c.get("asserted_by") or asserted_by, now, now),
                 )
             # Provenance stamp on the supplier row.
             conn.execute(
@@ -1440,7 +1481,8 @@ def set_supplier_classes(domain: str, classes: list[dict],
 
 
 def get_supplier_classes(domain: str) -> list[dict]:
-    """Return the supplier's class coverage rows. Empty list when TIER1_V2 is off
+    """Return the supplier's class coverage rows (incl. the T9 provenance
+    columns ``source`` + ``asserted_by``). Empty list when TIER1_V2 is off
     or no coverage is set."""
     if _tier1_dormant():
         return []
@@ -1451,7 +1493,8 @@ def get_supplier_classes(domain: str) -> list[dict]:
         with closing(_get_conn()) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT class_id, subtype, unspsc, is_core, confidence, source "
+                "SELECT class_id, subtype, unspsc, is_core, confidence, source, "
+                "asserted_by "
                 "FROM supplier_classes WHERE supplier_id = ? ORDER BY class_id",
                 (sid,),
             ).fetchall()
@@ -1464,11 +1507,15 @@ def get_supplier_classes(domain: str) -> list[dict]:
 
 def set_supplier_brands(domain: str, brands: list[dict],
                         *, source: str = SCOPE_SOURCE_MANUAL,
-                        set_by: Optional[str] = None) -> bool:
+                        set_by: Optional[str] = None,
+                        asserted_by: Optional[str] = None) -> bool:
     """Replace a supplier's brand coverage. Each brand dict:
     {brand_id, relationship, authorized_territory?, classes_for_brand?, evidence?,
-    confidence?}. `relationship` must be one of BRAND_RELATIONSHIPS. Returns True
-    on a write. No-ops (False) when TIER1_V2 is off.
+    confidence?, source?, asserted_by?}. `relationship` must be one of
+    BRAND_RELATIONSHIPS. Per-row ``source``/``asserted_by`` override the
+    call-level defaults (Arc 2 T9 provenance — ``CAP_SOURCE_SUPPLIER_SELF``
+    marks a supplier-asserted entry). Returns True on a write. No-ops (False)
+    when TIER1_V2 is off.
     """
     if _tier1_dormant():
         return False
@@ -1489,10 +1536,13 @@ def set_supplier_brands(domain: str, brands: list[dict],
                 conn.execute(
                     """INSERT OR IGNORE INTO supplier_brands
                        (id, supplier_id, brand_id, relationship, authorized_territory,
-                        classes_for_brand_json, evidence, confidence, created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                        classes_for_brand_json, evidence, confidence, source,
+                        asserted_by, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (str(uuid.uuid4()), sid, bid, rel, b.get("authorized_territory"),
-                     cfb_json, b.get("evidence"), b.get("confidence"), now, now),
+                     cfb_json, b.get("evidence"), b.get("confidence"),
+                     b.get("source") or source, b.get("asserted_by") or asserted_by,
+                     now, now),
                 )
             conn.execute(
                 "UPDATE suppliers SET scope_source = ?, scope_set_by = ?, scope_set_at = ? "
@@ -1507,7 +1557,8 @@ def set_supplier_brands(domain: str, brands: list[dict],
 
 
 def get_supplier_brands(domain: str) -> list[dict]:
-    """Return the supplier's brand coverage rows (classes_for_brand decoded). Empty
+    """Return the supplier's brand coverage rows (classes_for_brand decoded,
+    incl. the T9 provenance columns ``source`` + ``asserted_by``). Empty
     when TIER1_V2 is off or none set."""
     if _tier1_dormant():
         return []
@@ -1519,7 +1570,8 @@ def get_supplier_brands(domain: str) -> list[dict]:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT brand_id, relationship, authorized_territory, "
-                "classes_for_brand_json, evidence, confidence "
+                "classes_for_brand_json, evidence, confidence, source, "
+                "asserted_by "
                 "FROM supplier_brands WHERE supplier_id = ? ORDER BY brand_id",
                 (sid,),
             ).fetchall()
@@ -1538,13 +1590,17 @@ def get_supplier_brands(domain: str) -> list[dict]:
 def set_supplier_territory(domain: str, ship_area: dict,
                            local_service: Optional[list[dict]] = None,
                            *, source: str = SCOPE_SOURCE_MANUAL,
-                           set_by: Optional[str] = None) -> bool:
+                           set_by: Optional[str] = None,
+                           asserted_by: Optional[str] = None) -> bool:
     """Set the supplier's ship_area + local_service_area[].
 
     ship_area is either {"kind": "NATIONWIDE_US"} or {"kind": "STATES",
     "states": ["NY", ...]}. local_service is a list of
-    {branch_zip, radius?, services?}. Returns True on a write; no-ops (False)
-    when TIER1_V2 is off.
+    {branch_zip, radius?, services?}. Arc 2 T9: the whole-scope ship-area
+    provenance is recorded on ``ship_area_source``/``ship_area_asserted_by``
+    (read via ``get_capability_provenance`` — ``get_supplier_territory``'s
+    return shape is a pinned contract and is deliberately unchanged).
+    Returns True on a write; no-ops (False) when TIER1_V2 is off.
     """
     if _tier1_dormant():
         return False
@@ -1560,8 +1616,10 @@ def set_supplier_territory(domain: str, ship_area: dict,
         with closing(_get_conn()) as conn:
             conn.execute(
                 "UPDATE suppliers SET ship_area_json = ?, scope_source = ?, "
-                "scope_set_by = ?, scope_set_at = ? WHERE id = ?",
-                (json.dumps(ship_area), source, set_by, now, sid),
+                "scope_set_by = ?, scope_set_at = ?, ship_area_source = ?, "
+                "ship_area_asserted_by = ? WHERE id = ?",
+                (json.dumps(ship_area), source, set_by, now, source,
+                 asserted_by, sid),
             )
             conn.execute(
                 "DELETE FROM supplier_local_service WHERE supplier_id = ?", (sid,)
@@ -1877,6 +1935,39 @@ def get_supplier_scope(domain: str) -> dict:
         "scope_source": rec.get("scope_source"),
         "scope_set_by": rec.get("scope_set_by"),
         "scope_set_at": rec.get("scope_set_at"),
+    }
+
+
+def get_capability_provenance(domain: str) -> dict:
+    """Arc 2 T9 (D3): the per-entry capability provenance in one read —
+    classes (class_id, source, asserted_by), brands (brand_id, source,
+    asserted_by), and the whole-scope ship-area provenance. This is the
+    accessor the matcher's self-declared detection reads; it is a NEW
+    function so the pinned shapes of get_supplier_scope /
+    get_supplier_territory are untouched. Legacy rows read source=None
+    (un-attributed ⇒ NOT self-declared). Empty shape when TIER1_V2 is off."""
+    empty = {"classes": [], "brands": [],
+             "ship_area": {"source": None, "asserted_by": None}}
+    if _tier1_dormant():
+        return empty
+    rec = lookup_by_domain(domain)
+    if not rec:
+        return empty
+    classes = [
+        {"class_id": c.get("class_id"), "source": c.get("source"),
+         "asserted_by": c.get("asserted_by")}
+        for c in get_supplier_classes(domain)
+    ]
+    brands = [
+        {"brand_id": b.get("brand_id"), "source": b.get("source"),
+         "asserted_by": b.get("asserted_by")}
+        for b in get_supplier_brands(domain)
+    ]
+    return {
+        "classes": classes,
+        "brands": brands,
+        "ship_area": {"source": rec.get("ship_area_source"),
+                      "asserted_by": rec.get("ship_area_asserted_by")},
     }
 
 
