@@ -972,6 +972,24 @@ def send_magic_link_email(email: str, raw_token: str, *,
     status ("ok"-ish pass-through: "stubbed" | "sent" | "error", or the
     blocked verdict "suppressed" | "not_allowlisted" | "cap_blocked")."""
     from utils.email_sender import EmailMessage, GmailSender
+    dom = _normalize_domain(account_domain)
+    metadata = {"supplier_domain": dom, "magic_link": True,
+                "member_id": member_id}
+    # NOTIFICATIONS_V1 (arc 4 T3 / D2 + D9). Two additive facts, both flag-gated
+    # so the flag-off message is byte-identical to before:
+    #   auth_mail    — the MailProvider routes this onto the TRACKING-OFF
+    #                  configuration set, or refuses to send it (D2). Click
+    #                  tracking would rewrite the link through SES's tracking
+    #                  domain, where a corporate link scanner pre-fetches it and
+    #                  burns the single-use token before the human ever clicks.
+    #   message_class— this send now writes a sent_messages row (D9 closes arc 2
+    #                  review finding 2), in the "auth" cap class so it cannot
+    #                  starve the RFQ daily cap (gate FINDING F2).
+    from utils import notifications
+    ledgered = notifications.notifications_active()
+    if ledgered:
+        metadata["auth_mail"] = True
+        metadata["message_class"] = "auth"
     msg = EmailMessage(
         to=[email],
         subject="Your Arkim supplier sign-in link",
@@ -983,10 +1001,20 @@ def send_magic_link_email(email: str, raw_token: str, *,
             "If you did not request it, you can ignore this email.\n\n"
             "Regards,\nArkim Procurement\nprocurement@arkim.ai"
         ),
-        metadata={"supplier_domain": _normalize_domain(account_domain),
-                  "magic_link": True, "member_id": member_id},
+        metadata=metadata,
     )
+    # Record BEFORE the attempt (rfq_send's discipline): a crash mid-send leaves
+    # an auditable "released" row, never a delivered-but-unrecorded message. The
+    # body is deliberately NOT ledgered — it contains the raw token, which lives
+    # in the delivered message and nowhere else.
+    row_id = notifications.record_auth_send(
+        supplier_domain=dom, recipient=email, subject=msg.subject) if ledgered else None
     result = GmailSender().send(msg)
+    if row_id:
+        from utils import supplier_registry
+        supplier_registry.update_sent_message_status(
+            row_id, result.status, message_id=result.message_id,
+            thread_id=result.thread_id)
     # Log the OUTCOME only — the token must be absent from every log line.
     print(f"[SupplierAccounts] magic-link send {result.status} -> {email}")
     return result.status
