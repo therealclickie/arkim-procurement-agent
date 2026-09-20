@@ -5576,6 +5576,40 @@ def _portal_response_headers(headers: dict) -> dict:
     return headers
 
 
+def _supplier_profile_body(dom: str) -> Optional[dict]:
+    """THE supplier-profile read, shared by both doors (the claim token's and
+    arc 3's session) exactly as ``_supplier_open_requests`` is — one assembly,
+    never two that drift. Returns None when the supplier is unknown or the
+    portal module is dormant; each door decides what that means for it.
+
+    HERO first in the contract (the research's demand-as-hero placement)."""
+    from utils import supplier_portal
+    profile = supplier_portal.read_profile(dom)
+    if profile is None:
+        return None
+    return {
+        "teaser": supplier_portal.demand_teaser(dom),
+        "supplier_domain": profile["supplier_domain"],
+        "name": profile["name"],
+        "brands": profile["brands"],
+        "classes": profile["classes"],
+        "ship_area": profile["ship_area"],
+        "aftermarket_disclosure": profile["aftermarket_disclosure"],
+    }
+
+
+def _validate_revision_brands(brands: Optional[List[dict]]) -> None:
+    """422 on a malformed brand relationship (the tri-state relationship is the
+    highest-value field and must be well-formed) — a silent drop would lose the
+    one thing only the supplier authoritatively knows. Shared by both doors."""
+    from utils import supplier_registry
+    for b in (brands or []):
+        rel = (b.get("relationship") or "").upper().strip()
+        if rel and rel not in supplier_registry.BRAND_RELATIONSHIPS:
+            raise HTTPException(status_code=422,
+                                detail=f"Invalid brand relationship: {rel}")
+
+
 @app.get("/api/portal/{token}/profile")
 def portal_profile(token: str, request: Request):
     """The public supplier claim page contract: the read-only demand teaser
@@ -5584,23 +5618,11 @@ def portal_profile(token: str, request: Request):
     lifecycle / performance / other suppliers. Zero-state teaser -> honest
     category/network framing (never a "0" hero, never a fabricated count)."""
     row = _validate_portal_token(request, token)
-    from utils import supplier_portal
-    profile = supplier_portal.read_profile(row["supplier_domain"])
-    if profile is None:
+    body = _supplier_profile_body(row["supplier_domain"])
+    if body is None:
         # The token is valid but the supplier vanished (deleted mid-session) -
         # uniform rejection (do not reveal the supplier existed).
         _portal_reject_404()
-    teaser = supplier_portal.demand_teaser(row["supplier_domain"])
-    # HERO first in the contract (the research's demand-as-hero placement).
-    body = {
-        "teaser": teaser,
-        "supplier_domain": profile["supplier_domain"],
-        "name": profile["name"],
-        "brands": profile["brands"],
-        "classes": profile["classes"],
-        "ship_area": profile["ship_area"],
-        "aftermarket_disclosure": profile["aftermarket_disclosure"],
-    }
     return JSONResponse(content=body, headers=_portal_response_headers({}))
 
 
@@ -5623,16 +5645,7 @@ def portal_propose_revision(token: str, body: PortalProposeRevisionRequest,
     row = _validate_portal_token(request, token)
     from utils import supplier_portal
     revisions = {k: v for k, v in body.model_dump().items() if v is not None}
-    # Validate brand relationships up front (422, not a silent drop) - the
-    # tri-state relationship is the highest-value field and must be well-formed.
-    for b in (revisions.get("brands") or []):
-        rel = (b.get("relationship") or "").upper().strip()
-        from utils import supplier_registry
-        if rel and rel not in supplier_registry.BRAND_RELATIONSHIPS:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Invalid brand relationship: {rel}",
-            )
+    _validate_revision_brands(revisions.get("brands"))
     revision_id = supplier_portal.propose_revision(
         row["supplier_domain"], revisions, proposed_by="supplier")
     if revision_id is None:
@@ -6374,17 +6387,14 @@ def portal_open_requests(token: str, request: Request):
                         headers=_portal_response_headers({}))
 
 
-@app.get("/api/portal/{token}/quotes")
-def portal_quote_history(token: str, request: Request):
-    """T5: the supplier's OWN quote history — every quote from their domain
-    (all lifecycles, effective status shown honestly incl. read-time expiry),
-    newest first. Nothing cross-supplier: the domain is the token's; the rows
-    expose no buyer identity and no other suppliers. Fail-soft ([])."""
-    if not _quote_submit_enabled():
-        _quote_flag_off_404()
-    prow = _validate_portal_token(request, token)
+def _supplier_quote_history(dom: str) -> list:
+    """THE quote-history read, shared by the token door and arc 3's session
+    door (the ``_supplier_open_requests`` pattern). Every quote from ``dom``,
+    all lifecycles, effective status shown honestly including read-time
+    expiry, newest first. Exposes no buyer identity and no other supplier.
+    Fail-soft ([])."""
     from utils import quote_store
-    history = [
+    return [
         {
             "quote_id": q["id"],
             "run_id": q.get("run_id"),
@@ -6398,10 +6408,22 @@ def portal_quote_history(token: str, request: Request):
             "submitted_via": q["submitted_via"],
             "valid_until": q.get("valid_until"),
         }
-        for q in quote_store.get_quotes(supplier_domain=prow["supplier_domain"])
+        for q in quote_store.get_quotes(supplier_domain=dom)
     ]
-    return JSONResponse(content={"quotes": history},
-                        headers=_portal_response_headers({}))
+
+
+@app.get("/api/portal/{token}/quotes")
+def portal_quote_history(token: str, request: Request):
+    """T5: the supplier's OWN quote history — every quote from their domain
+    (all lifecycles, effective status shown honestly incl. read-time expiry),
+    newest first. Nothing cross-supplier: the domain is the token's; the rows
+    expose no buyer identity and no other suppliers. Fail-soft ([])."""
+    if not _quote_submit_enabled():
+        _quote_flag_off_404()
+    prow = _validate_portal_token(request, token)
+    return JSONResponse(
+        content={"quotes": _supplier_quote_history(prow["supplier_domain"])},
+        headers=_portal_response_headers({}))
 
 
 @app.post("/api/portal/{token}/quotes")
@@ -6949,6 +6971,17 @@ def supplier_me(session: dict = Depends(_require_supplier_session)):
             "email": member["email"],
             "role": member["role"],
             "status": member["status"],
+            # Arc 3 (gate finding F1): the member's capabilities, computed from
+            # THE matrix. Nested under `member` deliberately — capabilities are
+            # a property of the person's role, and the top-level shape stays
+            # the two-level identity arc 2 pinned.
+            #
+            # D6: this is what the UI REFLECTS. It is not the control — the
+            # server re-checks has_permission on every gated route, and a
+            # client that forges this list gains exactly nothing.
+            "permissions": sorted(
+                c for c in supplier_accounts_rbac.CAPABILITIES
+                if supplier_accounts_rbac.has_permission(member, c)),
         },
     }, headers=_portal_response_headers({}))
 
@@ -7248,6 +7281,83 @@ def supplier_member_revoke(member_id: str,
         detail={"status": member["status"]})
     return JSONResponse(content={"ok": True,
                                  "member": _serialize_account_member(member)},
+                        headers=_portal_response_headers({}))
+
+
+# ---------------------------------------------------------------------------
+# Arc 3 (gate finding F2) — the SESSION doors for the surfaces arc 2 left
+# token-only. Each is the session sibling of an existing /api/portal/{token}
+# route and goes through the SAME shared read/write service, so the two doors
+# cannot drift. The supplier domain always comes from the validated session,
+# never from a parameter — cross-account access is impossible by construction.
+#
+# Capability gating: arc 2 declared VIEW_REQUESTS / PROPOSE_REVISIONS in the
+# matrix and wired neither (they had no route to gate). These routes wire
+# them, so the matrix rows are now enforced rather than aspirational. Every
+# role holds both today, so nothing is newly refused — but a future VIEWER row
+# lands correctly instead of silently.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/supplier/profile")
+def supplier_profile(session: dict = Depends(_require_supplier_session)):
+    """The session door over the SAME profile assembly the claim-token route
+    uses. Any ACTIVE member may read their own company's profile — there is no
+    "view profile" capability and inventing one to gate this would be policy
+    by accident.
+
+    404 when the portal module is dormant (SUPPLIER_PORTAL_V1 off) or the
+    supplier record is gone. The session already proves account membership, so
+    an honest detail here reveals nothing an attacker could use."""
+    body = _supplier_profile_body(session["account"]["supplier_domain"])
+    if body is None:
+        raise HTTPException(status_code=404,
+                            detail="No supplier profile for this account")
+    return JSONResponse(content=body, headers=_portal_response_headers({}))
+
+
+@app.post("/api/supplier/propose-revision")
+def supplier_propose_revision(
+    body: PortalProposeRevisionRequest,
+    session: dict = Depends(_supplier_require_capability(
+        supplier_accounts_rbac.PROPOSE_REVISIONS)),
+):
+    """Session-authed profile revision → a PENDING review item, via the SAME
+    service the token door uses. Self-declaration stays a PROPOSAL: nothing
+    writes the registry here, the concierge approve is the only writer.
+
+    Provenance records the member id, so an account with several people has an
+    audit trail of who proposed what — the one thing the token door cannot
+    offer."""
+    revisions = {k: v for k, v in body.model_dump().items() if v is not None}
+    _validate_revision_brands(revisions.get("brands"))
+    from utils import supplier_portal
+    revision_id = supplier_portal.propose_revision(
+        session["account"]["supplier_domain"], revisions,
+        proposed_by=f"member:{session['member_id']}")
+    if revision_id is None:
+        raise HTTPException(status_code=404,
+                            detail="No supplier profile for this account")
+    supplier_accounts.audit(
+        "revision_proposed", account_id=session["account_id"],
+        member_id=session["member_id"], email=session["member"]["email"],
+        actor=session["member"]["email"],
+        detail={"revision_id": revision_id})
+    return JSONResponse(
+        content={"ok": True, "revision_id": revision_id, "status": "pending"},
+        headers=_portal_response_headers({}))
+
+
+@app.get("/api/supplier/quotes")
+def supplier_quote_history(session: dict = Depends(
+        _supplier_require_capability(supplier_accounts_rbac.VIEW_REQUESTS))):
+    """The account's OWN quote history — the session sibling of
+    ``GET /api/portal/{token}/quotes``, same rows, same honest effective
+    status (incl. read-time expiry), newest first. Double-gated on
+    QUOTE_SUBMIT_V1 like its POST sibling. Nothing cross-supplier."""
+    if not _quote_submit_enabled():
+        _quote_flag_off_404()
+    dom = session["account"]["supplier_domain"]
+    return JSONResponse(content={"quotes": _supplier_quote_history(dom)},
                         headers=_portal_response_headers({}))
 
 
