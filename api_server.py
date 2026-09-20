@@ -78,6 +78,29 @@ def _quote_submit_enabled() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# SUPPLIER_ACCOUNTS_V1 — the supplier-identity surface flag (Arc 2).
+# ---------------------------------------------------------------------------
+# Independent kill switch for the durable supplier-login layer (magic links,
+# sessions, member management, the claim-token → account bridge, session-
+# authed requests/quotes, and the admin pending-membership queue). Flag off ⇒
+# every new route is ABSENT (byte-identical 404 {"detail":"Not Found"}), no
+# new table is read, and the platform is indistinguishable from pre-Arc-2 —
+# the same posture as SUPPLIER_PORTAL_V1 / QUOTE_SUBMIT_V1. Read live so a
+# monkeypatched os.environ is honored. Token flows (claim/quote) are untouched
+# (D6 — this arc adds a second door, it does not move the first).
+def _supplier_accounts_enabled() -> bool:
+    """Live check for the supplier-accounts route gate (honors monkeypatched
+    os.environ)."""
+    return _env_truthy(os.environ.get("SUPPLIER_ACCOUNTS_V1"))
+
+
+def _supplier_accounts_flag_off_404():
+    """Raise the byte-identical-to-unknown-route 404 when SUPPLIER_ACCOUNTS_V1
+    is off (mirrors _portal_flag_off_404 — flag-off = the route never existed)."""
+    raise HTTPException(status_code=404, detail="Not Found")
+
+
+# ---------------------------------------------------------------------------
 # DEMO_MODE — public no-login demo spine (procurement-dev.arkim.ai cold outreach)
 # ---------------------------------------------------------------------------
 # Guards active ONLY when env DEMO_MODE is truthy, all completely inert otherwise
@@ -150,6 +173,8 @@ from utils.procurement_agent.state.phases import Phase
 from utils.procurement_agent import tier1_matcher, tier1_notify
 from utils import claim_tokens  # Night 6 — supplier claim-portal token store (T1)
 from utils import intake_channels  # Night 8 — channel-agnostic intake spine
+from utils import supplier_accounts  # Arc 2 — supplier identity (accounts/members/sessions)
+from utils import supplier_accounts_rbac  # Arc 2 T11 — the D7 permission matrix
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -6286,19 +6311,17 @@ def quote_submit(token: str, body: QuoteSubmissionBody, request: Request):
 # (claim-token-auth'd; every route additionally gated on QUOTE_SUBMIT_V1)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/portal/{token}/open-requests")
-def portal_open_requests(token: str, request: Request):
-    """T5: the claimed supplier's OPEN requests — the runs with an un-resolved
-    RFQ addressed to THEIR domain (sent_messages status in OPEN_RFQ_STATUSES),
-    deduped per run, each with the request identity (from the run's specs) and
-    their own quote state on it. THEIR view only: the domain comes from the
-    validated claim token; no other supplier's RFQs, quotes, or existence are
-    visible. Runs that no longer resolve are skipped (never a fabricated
-    row). Fail-soft on the stores ([]), never a 500 on the public surface."""
-    if not _quote_submit_enabled():
-        _quote_flag_off_404()
-    prow = _validate_portal_token(request, token)
-    dom = prow["supplier_domain"]
+def _supplier_open_requests(dom: str) -> list:
+    """Arc 2 T7 / gate F2: the ONE open-requests read service. The runs with
+    an un-resolved RFQ addressed to THIS supplier domain (sent_messages status
+    in OPEN_RFQ_STATUSES), deduped per run, each with the request identity
+    (from the run's specs) and their own quote state on it. Their view only —
+    the caller passes the domain from its own credential (claim token or
+    session); no other supplier's RFQs, quotes, or existence are visible.
+    Runs that no longer resolve are skipped (never a fabricated row).
+    Fail-soft on the stores ([]), never a 500 on a public surface. Both the
+    claim-token route (portal_open_requests) and the session route
+    (supplier_requests) call THIS — one service, two doors."""
     from utils import quote_store, supplier_registry
     requests_out: list = []
     seen_runs: set = set()
@@ -6331,9 +6354,22 @@ def portal_open_requests(token: str, request: Request):
     except Exception as exc:  # public surface: degrade, never 500
         import logging
         logging.getLogger(__name__).warning(
-            "portal open-requests read failed for %s: %s", dom, exc)
+            "open-requests read failed for %s: %s", dom, exc)
         requests_out = []
-    return JSONResponse(content={"requests": requests_out},
+    return requests_out
+
+
+@app.get("/api/portal/{token}/open-requests")
+def portal_open_requests(token: str, request: Request):
+    """T5: the claimed supplier's OPEN requests — the token door over the
+    shared read service ``_supplier_open_requests`` (see its docstring; the
+    session door is Arc 2's /api/supplier/requests). Token-validated; the
+    quote surface must be on (QUOTE_SUBMIT_V1 — off ⇒ this route is absent)."""
+    if not _quote_submit_enabled():
+        _quote_flag_off_404()
+    prow = _validate_portal_token(request, token)
+    dom = prow["supplier_domain"]
+    return JSONResponse(content={"requests": _supplier_open_requests(dom)},
                         headers=_portal_response_headers({}))
 
 
@@ -6495,4 +6531,648 @@ def admin_reject_quote(quote_id: str,
     if out is None:
         raise HTTPException(status_code=409, detail="Quote is not in review")
     return {"ok": True, "quote": out}
+
+
+# ===========================================================================
+# Arc 2 — SUPPLIER ACCOUNTS (durable supplier identity; SUPPLIER_ACCOUNTS_V1)
+#
+# Magic links only, no passwords (D4). The account belongs to a COMPANY (1:1
+# registry supplier_domain); people are members (D1). Domain-matched emails
+# join ACTIVE, everything else lands PENDING for the concierge (D2). Sends go
+# through send governance at the GmailSender seam (D5). Claim/quote token
+# flows are untouched (D6). Roles are enforced through the permission matrix
+# in utils/supplier_accounts_rbac.py — never inline role comparisons (D7).
+# ===========================================================================
+
+# Rate limiting for the auth surface (guardrail 4). Two buckets per request:
+# per normalized email (an account cannot be link-spammed for one address)
+# and per client IP (a spray across many emails from one source). Read LIVE
+# from the env so tests tune caps per-case. In-process fixed-window limiter
+# — the existing house pattern (portal/quote); single-process only, noted
+# follow-up (Redis-backed in production).
+_SUPPLIER_AUTH_RATE_WINDOW_SEC: int = _env_int("SUPPLIER_AUTH_RATE_WINDOW_SEC", 600)
+_supplier_auth_rate_lock = threading.Lock()
+_supplier_auth_rate_buckets: Dict[tuple, list] = {}
+
+
+def _supplier_auth_rate_bump(request: Request, email: str) -> None:
+    """Raise 429 (with Retry-After) when either the (email) or the (ip)
+    bucket is over its cap in the window. Applied BEFORE any account/member
+    logic so throttling is uniform across known and unknown emails (no
+    existence oracle via the limiter either). Inert when a cap is <= 0."""
+    import time
+    email_key = ("email", supplier_accounts.normalize_email(email) or email)
+    ip_key = ("ip", _client_ip(request))
+    now = time.monotonic()
+
+    def _cap(var: str, default: int) -> int:
+        return _env_int(var, default)
+
+    checks = (
+        (email_key, _cap("SUPPLIER_AUTH_RATE_CAP_EMAIL", 3)),
+        (ip_key, _cap("SUPPLIER_AUTH_RATE_CAP_IP", 20)),
+    )
+    tripped = False
+    with _supplier_auth_rate_lock:
+        for key, cap in checks:
+            if cap <= 0:
+                continue
+            entry = _supplier_auth_rate_buckets.get(key)
+            if not entry or (now - entry[1]) >= _SUPPLIER_AUTH_RATE_WINDOW_SEC:
+                entry = [0, now]
+                _supplier_auth_rate_buckets[key] = entry
+            entry[0] += 1
+            if entry[0] > cap:
+                tripped = True
+    if tripped:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests.",
+            headers={"Retry-After": str(_SUPPLIER_AUTH_RATE_WINDOW_SEC)},
+        )
+
+
+class SupplierRequestLinkBody(BaseModel):
+    email: str
+
+
+@app.post("/api/supplier/auth/request-link")
+def supplier_request_link(body: SupplierRequestLinkBody, request: Request):
+    """Request a magic sign-in link for ``email`` (D4 — the only login mode).
+
+    UNIFORM RESPONSE (guardrail 3): always ``{"ok": true}`` / 200 whether the
+    email is known, unknown, pending, or on a public-mailbox provider — no
+    enumeration oracle. The differences live only in the audit trail and the
+    mailbox of the actual member:
+
+      - no account for the email's registrable domain → 200, no member, no
+        send, audited;
+      - account + unknown email, domain match → member created ACTIVE (D2),
+        link minted + emailed via send governance (D5);
+      - account + unknown email, non-match / public mailbox → member created
+        PENDING (concierge approves; a public mailbox can never auto-match),
+        no send;
+      - known ACTIVE member → link minted + emailed;
+      - known PENDING / REVOKED member → no send (PENDING cannot log in and
+        must not learn their status from this endpoint, T4).
+
+    The raw link token is never in the response, never persisted (hash at
+    rest), never logged. Rate-limited per email + per IP BEFORE any lookup.
+    Flag-off ⇒ route absent (byte-identical 404)."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    ip = _client_ip(request)
+    raw_email = body.email or ""
+    _supplier_auth_rate_bump(request, raw_email)
+    email = supplier_accounts.normalize_email(raw_email)
+    if not email:
+        supplier_accounts.audit("link_requested", email=raw_email, actor="public",
+                                ip=ip, detail={"outcome": "unparseable_email"})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    dom = supplier_accounts.email_registrable_domain(email)
+    # Locate the account by the email's registrable domain, OR by an existing
+    # membership (a concierge-approved public-mailbox member's email domain
+    # has no account — the membership is their route in). Same uniform 200
+    # whether or not an account is found.
+    account = supplier_accounts.find_account_for_email(email)
+    if account is None:
+        # No supplier account for this email — indistinguishable from success.
+        supplier_accounts.audit("link_requested", email=email, actor="public",
+                                ip=ip, detail={"outcome": "no_account",
+                                               "domain": dom or None})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    member, created = supplier_accounts.ensure_member_for_link(account["id"], email)
+    if member is None:
+        supplier_accounts.audit("link_requested", account_id=account["id"],
+                                email=email, actor="public", ip=ip,
+                                detail={"outcome": "store_error"})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    if created:
+        supplier_accounts.audit(
+            "member_created", account_id=account["id"], member_id=member["id"],
+            email=email, actor="link_request", ip=ip,
+            detail={"status": member["status"], "role": member["role"]})
+    if member["status"] != supplier_accounts.MEMBER_ACTIVE:
+        # PENDING (or REVOKED): no send, same 200 — the mailbox is the only
+        # place a member ever learns anything, and we send nothing.
+        supplier_accounts.audit(
+            "link_requested", account_id=account["id"], member_id=member["id"],
+            email=email, actor="public", ip=ip,
+            detail={"outcome": "member_not_active", "member_status": member["status"]})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    link = supplier_accounts.mint_magic_link(member["id"])
+    if link is None:
+        supplier_accounts.audit(
+            "link_requested", account_id=account["id"], member_id=member["id"],
+            email=email, actor="public", ip=ip, detail={"outcome": "mint_failed"})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    send_status = supplier_accounts.send_magic_link_email(
+        email, link["token"], account_domain=account["supplier_domain"],
+        member_id=member["id"])
+    supplier_accounts.audit(
+        "link_requested", account_id=account["id"], member_id=member["id"],
+        email=email, actor="public", ip=ip,
+        detail={"outcome": "send_attempted", "send_status": send_status})
+    return JSONResponse(content={"ok": True},
+                        headers=_portal_response_headers({}))
+
+
+class SupplierVerifyBody(BaseModel):
+    token: str
+
+
+def _supplier_verify_reject_401():
+    """The UNIFORM rejection for every verify failure mode — unknown token,
+    expired link, already-used link, PENDING/REVOKED member, store error.
+    One body, one status, for all of them (T4): a caller must not be able to
+    distinguish the modes, and a PENDING member in particular must not learn
+    their status from this endpoint."""
+    raise HTTPException(status_code=401, detail="Invalid or expired link")
+
+
+def _supplier_verify_rate_check(request: Request, token: str) -> None:
+    """429 when the (IP, token-prefix) verify bucket is over its cap — the
+    portal discipline (a garbage-token spray never throttles a legit verify
+    with a distinct prefix). Same bucket store as request-link, separate
+    key space."""
+    cap = _env_int("SUPPLIER_VERIFY_RATE_CAP", 20)
+    if cap <= 0:
+        return
+    import time
+    key = ("verify", _client_ip(request), (token or "")[:8])
+    now = time.monotonic()
+    with _supplier_auth_rate_lock:
+        entry = _supplier_auth_rate_buckets.get(key)
+        if not entry or (now - entry[1]) >= _SUPPLIER_AUTH_RATE_WINDOW_SEC:
+            entry = [0, now]
+            _supplier_auth_rate_buckets[key] = entry
+        entry[0] += 1
+        count = entry[0]
+    if count > cap:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests.",
+            headers={"Retry-After": str(_SUPPLIER_AUTH_RATE_WINDOW_SEC)},
+        )
+
+
+@app.post("/api/supplier/auth/verify")
+def supplier_verify_link(body: SupplierVerifyBody, request: Request):
+    """Verify a magic link → a session (D4: magic links are the only login;
+    the session is the durable identity arc 3 builds on).
+
+    Single-use (the consume is atomic in the store), expiring, hash-lookup.
+    EVERY failure mode — unknown / expired / used / PENDING member / store
+    error — returns the identical 401 (no oracle; a pending member must not
+    learn they are pending). Success returns the RAW session token exactly
+    once (only its hash is stored) + its expiry. Audited (link_verified,
+    login). Flag-off ⇒ route absent."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    ip = _client_ip(request)
+    _supplier_verify_rate_check(request, body.token or "")
+    ctx = supplier_accounts.verify_magic_link(body.token or "")
+    if ctx is None:
+        supplier_accounts.audit("link_verified", actor="public", ip=ip,
+                                detail={"outcome": "rejected"})
+        _supplier_verify_reject_401()
+    sess = supplier_accounts.create_session(ctx["member_id"])
+    if sess is None:
+        supplier_accounts.audit("link_verified", actor="public", ip=ip,
+                                detail={"outcome": "rejected"})
+        _supplier_verify_reject_401()
+    supplier_accounts.audit(
+        "link_verified", account_id=ctx["account_id"],
+        member_id=ctx["member_id"], email=ctx["email"], actor="public", ip=ip,
+        detail={"outcome": "ok"})
+    supplier_accounts.audit(
+        "login", account_id=ctx["account_id"], member_id=ctx["member_id"],
+        email=ctx["email"], actor=ctx["email"], ip=ip,
+        detail={"session_id": sess["session_id"]})
+    return JSONResponse(content={"token": sess["token"],
+                                 "expires_at": sess["expires_at"]},
+                        headers=_portal_response_headers({}))
+
+
+# ---------------------------------------------------------------------------
+# The session dependency (guardrail 6 — opaque bearer over a server-side
+# session record; expiry enforced; logout revokes). Every /api/supplier/*
+# authenticated route depends on this. Flag-off ⇒ absent (404), so the
+# dependency doubles as the route gate for the whole session surface.
+# ---------------------------------------------------------------------------
+
+def _supplier_session_reject_401():
+    """The UNIFORM session rejection — missing, invalid, expired, revoked:
+    one 401 body for all four (no oracle beyond valid/invalid)."""
+    raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+
+def _require_supplier_session(authorization: Optional[str] = Header(default=None)) -> dict:
+    """FastAPI dependency: validate the ``Authorization: Bearer <session>``
+    header against the session store (hash lookup; expiry + revoke + member
+    still ACTIVE enforced there). Returns the session context
+    ``{session_id, member_id, account_id, member, account}``."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    if not authorization or not authorization.startswith("Bearer "):
+        _supplier_session_reject_401()
+    ctx = supplier_accounts.validate_session(authorization[len("Bearer "):].strip())
+    if ctx is None:
+        _supplier_session_reject_401()
+    return ctx
+
+
+@app.get("/api/supplier/me")
+def supplier_me(session: dict = Depends(_require_supplier_session)):
+    """Who am I: the account (the company) + the member (the person) — D1's
+    two-level identity in one summary. Nothing else (no other members, no
+    registry internals)."""
+    acct, member = session["account"], session["member"]
+    return JSONResponse(content={
+        "account": {
+            "id": acct["id"],
+            "supplier_domain": acct["supplier_domain"],
+            "status": acct["status"],
+            "created_at": acct["created_at"],
+        },
+        "member": {
+            "id": member["id"],
+            "email": member["email"],
+            "role": member["role"],
+            "status": member["status"],
+        },
+    }, headers=_portal_response_headers({}))
+
+
+@app.post("/api/supplier/auth/logout")
+def supplier_logout(session: dict = Depends(_require_supplier_session)):
+    """Revoke the presented session (guardrail 6). Idempotent-safe: a second
+    logout with the same token is the uniform 401 (the session is gone)."""
+    supplier_accounts.revoke_session(session["session_id"])
+    supplier_accounts.audit(
+        "logout", account_id=session["account_id"],
+        member_id=session["member_id"], email=session["member"]["email"],
+        actor=session["member"]["email"],
+        detail={"session_id": session["session_id"]})
+    return JSONResponse(content={"ok": True},
+                        headers=_portal_response_headers({}))
+
+
+@app.get("/api/supplier/requests")
+def supplier_requests(session: dict = Depends(_require_supplier_session)):
+    """Arc 2 T7: the session door over the SAME open-requests read service
+    the claim-token route uses (``_supplier_open_requests`` — no second
+    matching logic), scoped to the SESSION's account domain. Cross-account
+    access is impossible by construction: the domain comes from the validated
+    session, never from a query parameter."""
+    dom = session["account"]["supplier_domain"]
+    return JSONResponse(content={"requests": _supplier_open_requests(dom)},
+                        headers=_portal_response_headers({}))
+
+
+@app.post("/api/supplier/quotes")
+def supplier_quote_submit(body: PortalQuoteBody,
+                          session: dict = Depends(_require_supplier_session)):
+    """Arc 2 T8: session-authed structured-quote submission — the EXISTING
+    QUOTE_SUBMIT_V1 store and submission core (``_record_structured_quote``:
+    supersede, wrong-part gate, sanity flag-not-block, the ack seam), with the
+    supplier identity coming from the SESSION (D1: the company account) and
+    provenance submitted_via="account" / submitted_by=<member id>. Gated on
+    BOTH flags (the accounts surface + the quote surface, mirroring path B's
+    double gate). The supplier may quote only a run with an OPEN RFQ addressed
+    to their account's domain — same rule as path B."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    if not _quote_submit_enabled():
+        _quote_flag_off_404()
+    dom = session["account"]["supplier_domain"]
+    _validate_quote_fields(body)
+    from utils import supplier_registry
+    open_rfqs = [
+        m for m in supplier_registry.get_sent_messages(run_id=body.run_id,
+                                                       domain=dom)
+        if m.get("status") in supplier_registry.OPEN_RFQ_STATUSES
+    ]
+    if not open_rfqs:
+        raise HTTPException(status_code=404,
+                            detail="No open request for this supplier")
+    specs = _run_specs_for_quote(body.run_id) or {}
+    rec = supplier_registry.lookup_by_domain(dom)
+    out = _record_structured_quote(
+        body,
+        submitted_via="account",
+        submitted_by=session["member_id"],
+        supplier_domain=dom,
+        vendor_name=(rec or {}).get("name"),
+        run_id=body.run_id,
+        rfq_id=open_rfqs[0].get("id"),       # newest open RFQ row id
+        part_key=open_rfqs[0].get("part_key"),
+        manufacturer=specs.get("manufacturer"),
+        requested_part_number=specs.get("part_number"),
+        requested_quantity=specs.get("quantity"),
+    )
+    return JSONResponse(content=out, headers=_portal_response_headers({}))
+
+
+# ---------------------------------------------------------------------------
+# T10 — admin: the pending-membership queue (D2's concierge approvals) under
+# the EXISTING admin auth (I3: require_admin bearer token). Gate ordering per
+# the flag-gated-admin convention: the SUPPLIER_ACCOUNTS_V1 check runs BEFORE
+# require_admin so flag-off renders the routes ABSENT (404) for any caller —
+# a 401/403 must not reveal they exist.
+# ---------------------------------------------------------------------------
+
+def _serialize_pending_member(member: dict) -> dict:
+    """The admin-facing shape of one pending membership: identity + which
+    COMPANY account it belongs to (the concierge needs the domain to judge)."""
+    account = supplier_accounts.get_account(member.get("account_id") or "")
+    return {
+        "id": member["id"],
+        "email": member["email"],
+        "registrable_domain": member["registrable_domain"],
+        "role": member["role"],
+        "status": member["status"],
+        "account_id": member["account_id"],
+        "supplier_domain": (account or {}).get("supplier_domain"),
+        "invited_by": member.get("invited_by"),
+        "created_at": member["created_at"],
+    }
+
+
+@app.get("/api/admin/supplier-members/pending")
+def admin_pending_members(authorization: Optional[str] = Header(default=None)):
+    """The concierge queue: every PENDING membership across accounts (the D2
+    non-matching / public-mailbox requests), each with its company domain."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    require_admin(authorization)
+    rows = supplier_accounts.list_pending_members()
+    return {"count": len(rows),
+            "members": [_serialize_pending_member(m) for m in rows]}
+
+
+@app.post("/api/admin/supplier-members/{member_id}/approve")
+def admin_approve_member(member_id: str,
+                         authorization: Optional[str] = Header(default=None)):
+    """Approve a pending membership → ACTIVE with role MEMBER (D7 least
+    privilege — the default lives in the store's approve_pending_member, so
+    this handler names no role). Audited. 404 unknown member; 409 when not
+    pending."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    role = require_admin(authorization)
+    member = supplier_accounts.get_member(member_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if member["status"] != supplier_accounts.MEMBER_PENDING:
+        raise HTTPException(status_code=409, detail="Member is not pending")
+    out = supplier_accounts.approve_pending_member(member_id, approved_by=role)
+    if out is None:
+        raise HTTPException(status_code=500, detail="Member could not be approved")
+    supplier_accounts.audit(
+        "member_approved", account_id=member["account_id"], member_id=member_id,
+        email=member["email"], actor=role,
+        detail={"role": out["role"], "status": out["status"]})
+    return {"ok": True, "member": _serialize_pending_member(out)}
+
+
+@app.post("/api/admin/supplier-members/{member_id}/reject")
+def admin_reject_member(member_id: str,
+                        authorization: Optional[str] = Header(default=None)):
+    """Reject a pending membership → REVOKED (the email cannot re-request its
+    way in; a fresh invitation is the path back). Audited. 404 unknown; 409
+    when not pending."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    role = require_admin(authorization)
+    member = supplier_accounts.get_member(member_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if member["status"] != supplier_accounts.MEMBER_PENDING:
+        raise HTTPException(status_code=409, detail="Member is not pending")
+    out = supplier_accounts.reject_pending_member(member_id, rejected_by=role)
+    if out is None:
+        raise HTTPException(status_code=500, detail="Member could not be rejected")
+    supplier_accounts.audit(
+        "member_rejected", account_id=member["account_id"], member_id=member_id,
+        email=member["email"], actor=role,
+        detail={"status": out["status"]})
+    return {"ok": True, "member": _serialize_pending_member(out)}
+
+
+# ---------------------------------------------------------------------------
+# T11 — member management (D7): the capability dependency + the routes.
+#
+# Enforcement is MATRIX-DRIVEN: every route depends on
+# _supplier_require_capability(<capability>), which delegates to
+# supplier_accounts_rbac.has_permission against THE declared matrix. The
+# role-policy rules (no second OWNER, no demoting/re-voking the OWNER, …)
+# live in the rbac module too — NO route handler names or compares roles.
+# ---------------------------------------------------------------------------
+
+def _supplier_require_capability(capability: str):
+    """Dependency factory: the session dependency + the matrix check. This is
+    the ONLY enforcement seam — adding a fourth role is one row in
+    utils/supplier_accounts_rbac.CAPABILITY_MATRIX, not a route change."""
+    def dep(session: dict = Depends(_require_supplier_session)) -> dict:
+        if not supplier_accounts_rbac.has_permission(session["member"],
+                                                     capability):
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return session
+    return dep
+
+
+def _supplier_rbac_error(exc: supplier_accounts.SupplierAccountsError):
+    """Map an rbac/store policy violation to its HTTP response. Codes only —
+    no role knowledge here (that lives in the matrix module)."""
+    status = {
+        "forbidden": 403,
+        "owner_transfer_required": 403,
+        "cannot_demote_owner": 403,
+        "cannot_revoke_owner": 403,
+        "invalid_role": 422,
+        "invalid_email": 422,
+        "already_member": 409,
+        "member_not_found": 404,
+        "store_error": 500,
+    }.get(exc.code, 400)
+    raise HTTPException(status_code=status, detail=exc.message)
+
+
+def _serialize_account_member(member: dict) -> dict:
+    """The member-list shape (own account only): person identity + role +
+    status. No session/account internals, no other accounts."""
+    return {
+        "id": member["id"],
+        "email": member["email"],
+        "registrable_domain": member["registrable_domain"],
+        "role": member["role"],
+        "status": member["status"],
+        "created_at": member["created_at"],
+    }
+
+
+@app.get("/api/supplier/members")
+def supplier_members(session: dict = Depends(
+        _supplier_require_capability(supplier_accounts_rbac.VIEW_MEMBERS))):
+    """The account's member list (own account only — the account comes from
+    the session). Every role may view their colleagues; managing them is a
+    separate capability."""
+    rows = supplier_accounts.list_members(session["account_id"])
+    return JSONResponse(content={"members": [_serialize_account_member(m)
+                                              for m in rows]},
+                        headers=_portal_response_headers({}))
+
+
+class SupplierInviteBody(BaseModel):
+    email: str
+    role: str = supplier_accounts.ROLE_MEMBER  # least-privilege default
+
+
+@app.post("/api/supplier/members/invite")
+def supplier_members_invite(body: SupplierInviteBody,
+                            session: dict = Depends(
+                                _supplier_require_capability(
+                                    supplier_accounts_rbac.MANAGE_MEMBERS))):
+    """Invite a member (capability-gated; D2 establishment rules and the
+    no-invited-OWNER rule live in the rbac module). Audited."""
+    try:
+        member = supplier_accounts_rbac.invite_member(
+            session["member"], body.email or "", (body.role or "").upper())
+    except supplier_accounts.SupplierAccountsError as exc:
+        _supplier_rbac_error(exc)
+    supplier_accounts.audit(
+        "member_invited", account_id=session["account_id"],
+        member_id=member["id"], email=member["email"],
+        actor=session["member"]["email"],
+        detail={"role": member["role"], "status": member["status"]})
+    return JSONResponse(content={"ok": True,
+                                 "member": _serialize_account_member(member)},
+                        headers=_portal_response_headers({}))
+
+
+class SupplierRoleBody(BaseModel):
+    role: str
+
+
+@app.post("/api/supplier/members/{member_id}/role")
+def supplier_member_role(member_id: str, body: SupplierRoleBody,
+                         session: dict = Depends(
+                             _supplier_require_capability(
+                                 supplier_accounts_rbac.CHANGE_ROLES))):
+    """Change a member's role (capability-gated; the ownership invariants —
+    no promotion to OWNER, no demoting the OWNER — live in the rbac module).
+    Audited. Cross-account ids are a 404 (no existence reveal)."""
+    try:
+        member = supplier_accounts_rbac.change_member_role(
+            session["member"], member_id, (body.role or "").upper())
+    except supplier_accounts.SupplierAccountsError as exc:
+        _supplier_rbac_error(exc)
+    supplier_accounts.audit(
+        "role_changed", account_id=session["account_id"],
+        member_id=member["id"], email=member["email"],
+        actor=session["member"]["email"], detail={"role": member["role"]})
+    return JSONResponse(content={"ok": True,
+                                 "member": _serialize_account_member(member)},
+                        headers=_portal_response_headers({}))
+
+
+@app.post("/api/supplier/members/{member_id}/revoke")
+def supplier_member_revoke(member_id: str,
+                           session: dict = Depends(
+                               _supplier_require_capability(
+                                   supplier_accounts_rbac.MANAGE_MEMBERS))):
+    """Revoke a member (capability-gated; the OWNER-can-never-be-revoked rule
+    — including self-revoke — lives in the rbac module). Audited."""
+    try:
+        member = supplier_accounts_rbac.revoke_member(session["member"],
+                                                      member_id)
+    except supplier_accounts.SupplierAccountsError as exc:
+        _supplier_rbac_error(exc)
+    supplier_accounts.audit(
+        "member_revoked", account_id=session["account_id"],
+        member_id=member["id"], email=member["email"],
+        actor=session["member"]["email"],
+        detail={"status": member["status"]})
+    return JSONResponse(content={"ok": True,
+                                 "member": _serialize_account_member(member)},
+                        headers=_portal_response_headers({}))
+
+
+# ---------------------------------------------------------------------------
+# T6 — the claim-token → account bridge (the arc-3 funnel seam: "create your
+# account"). A VALID claim token may request a magic link for its own supplier
+# domain. The claim token is VALIDATED, never consumed (D6 — the first door
+# keeps working exactly as today). Same D2 rules; same uniform response.
+# ---------------------------------------------------------------------------
+
+class PortalRequestAccountBody(BaseModel):
+    email: str
+
+
+@app.post("/api/portal/{token}/request-account")
+def portal_request_account(token: str, body: PortalRequestAccountBody,
+                           request: Request):
+    """Request a supplier account for the claim token's domain. Gated on
+    SUPPLIER_ACCOUNTS_V1 (off ⇒ absent) AND the portal token gate
+    (SUPPLIER_PORTAL_V1 + rate limit + the uniform 404 on a bad token — an
+    invalid token reveals nothing). Uniform ``{"ok": true}`` for every email
+    outcome; the claim token stays usable afterwards."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    prow = _validate_portal_token(request, token)  # validates, does NOT consume
+    dom = prow["supplier_domain"]
+    ip = _client_ip(request)
+    _supplier_auth_rate_bump(request, body.email or "")
+    email = supplier_accounts.normalize_email(body.email or "")
+    if not email:
+        supplier_accounts.audit("account_requested", email=body.email,
+                                actor="claim_token", ip=ip,
+                                detail={"outcome": "unparseable_email",
+                                        "supplier_domain": dom})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    account, member, account_created = supplier_accounts.establish_account(dom, email)
+    if account is None or member is None:
+        supplier_accounts.audit("account_requested", email=email,
+                                actor="claim_token", ip=ip,
+                                detail={"outcome": "store_error",
+                                        "supplier_domain": dom})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    supplier_accounts.audit(
+        "account_requested", account_id=account["id"], member_id=member["id"],
+        email=email, actor="claim_token", ip=ip,
+        detail={"outcome": "established" if account_created else "existing",
+                "supplier_domain": dom, "member_status": member["status"],
+                "member_role": member["role"]})
+    if member["status"] != supplier_accounts.MEMBER_ACTIVE:
+        supplier_accounts.audit(
+            "link_requested", account_id=account["id"], member_id=member["id"],
+            email=email, actor="claim_token", ip=ip,
+            detail={"outcome": "member_not_active",
+                    "member_status": member["status"]})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    link = supplier_accounts.mint_magic_link(member["id"])
+    if link is not None:
+        send_status = supplier_accounts.send_magic_link_email(
+            email, link["token"], account_domain=account["supplier_domain"],
+            member_id=member["id"])
+        supplier_accounts.audit(
+            "link_requested", account_id=account["id"], member_id=member["id"],
+            email=email, actor="claim_token", ip=ip,
+            detail={"outcome": "send_attempted", "send_status": send_status})
+    else:
+        supplier_accounts.audit(
+            "link_requested", account_id=account["id"], member_id=member["id"],
+            email=email, actor="claim_token", ip=ip,
+            detail={"outcome": "mint_failed"})
+    return JSONResponse(content={"ok": True},
+                        headers=_portal_response_headers({}))
 

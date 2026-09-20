@@ -318,7 +318,18 @@ def _apply_scope_no_lifecycle(domain: str, payload: dict,
     """Apply the proposed scope via the four setters WITHOUT driving the
     lifecycle (mirrors concierge._apply_scope_to_registry minus the lifecycle
     drive). Brand relationships + class_ids are validated/canonicalized so a
-    supplier can't write a malformed scope (the approve is still the gate)."""
+    supplier can't write a malformed scope (the approve is still the gate).
+
+    Arc 2 T9 (D3): with SUPPLIER_ACCOUNTS_V1 on, an approved supplier-originated
+    revision is stamped source=SUPPLIER_SELF + asserted_by=<proposer> so the
+    matcher can honour "self-declaration is evidence WITHIN an evidence band,
+    never authority ACROSS bands". Flag off stamps the legacy MANUAL source —
+    byte-identical to pre-Arc-2."""
+    from utils import supplier_accounts as _accounts
+    self_declared = _accounts.supplier_accounts_active()
+    cap_source = (sr.CAP_SOURCE_SUPPLIER_SELF if self_declared
+                  else sr.SCOPE_SOURCE_MANUAL)
+    asserted_by = (payload.get("proposed_by") or "supplier") if self_declared else None
     try:
         sid = sr._ensure_supplier_row(domain, name=payload.get("name"))
         if not sid:
@@ -328,12 +339,14 @@ def _apply_scope_no_lifecycle(domain: str, payload: dict,
             {"class_id": (c.get("class_id") or "").upper().strip(),
              "is_core": bool(c.get("is_core")),
              "confidence": c.get("confidence", 0.8),
-             "source": sr.SCOPE_SOURCE_MANUAL}
+             "source": cap_source}
             for c in (payload.get("classes") or [])
             if (c.get("class_id") or "").strip()
         ]
         if classes:
-            ok = sr.set_supplier_classes(domain, classes, set_by=set_by)
+            ok = sr.set_supplier_classes(domain, classes, set_by=set_by,
+                                         source=cap_source,
+                                         asserted_by=asserted_by)
             if not ok:
                 return None
         # Brands (tri-state relationship - validated against BRAND_RELATIONSHIPS).
@@ -346,14 +359,18 @@ def _apply_scope_no_lifecycle(domain: str, payload: dict,
             and (b.get("relationship") or "").upper().strip() in sr.BRAND_RELATIONSHIPS
         ]
         if brands:
-            ok = sr.set_supplier_brands(domain, brands, set_by=set_by)
+            ok = sr.set_supplier_brands(domain, brands, set_by=set_by,
+                                        source=cap_source,
+                                        asserted_by=asserted_by)
             if not ok:
                 return None
         # Territory.
         ship = payload.get("ship_area")
         if isinstance(ship, dict) and ship.get("kind") in (
                 sr.SHIP_AREA_NATIONWIDE_US, "STATES"):
-            ok = sr.set_supplier_territory(domain, ship, set_by=set_by)
+            ok = sr.set_supplier_territory(domain, ship, set_by=set_by,
+                                           source=cap_source,
+                                           asserted_by=asserted_by)
             if not ok:
                 return None
         return sr.lookup_by_domain(domain)
