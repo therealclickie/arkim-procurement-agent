@@ -570,13 +570,22 @@ def decide_escalation(notification: dict, *, now: datetime,
         return None                       # bounced/complained: mail is not the channel
     if notification.get("deferred"):
         return None                       # the digest owns it until it goes out
+    if notification.get("escalated_at"):
+        # The ladder's last rung has been climbed: a human owns this request
+        # now, and D6 is explicit that escalation sends NO further email to the
+        # supplier. Without this the reminder branch below would fire on the
+        # next run for a notification whose first scheduler pass came in late
+        # (past the alert threshold, so it alerted without ever reminding) —
+        # a reminder arriving after the hand-off to a human, which is exactly
+        # the wrong order.
+        return None
     if is_seen(notification):
         return None
     reference = _parse(notification.get("sent_at")) or _parse(notification.get("created_at"))
     if reference is None:
         return None
     age_hours = (now - reference).total_seconds() / 3600.0
-    if age_hours >= alert_after and not notification.get("escalated_at"):
+    if age_hours >= alert_after:
         return "alert"
     if age_hours >= remind_after and not notification.get("reminded_at"):
         return "remind"
