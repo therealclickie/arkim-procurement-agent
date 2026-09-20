@@ -30,6 +30,7 @@ import {
 import { ProfileForm, type FormState } from "./profile-form";
 import { OpenRequests } from "./open-requests";
 import { PortalTeaser, PortalRejection, PortalSubmitted } from "./portal-states";
+import { AccountBridge } from "./account-bridge";
 import { GoferLoader } from "@/components/ui/gofer-loader";
 
 type Phase =
@@ -116,7 +117,14 @@ export function ClaimPage({ token }: { token: string }) {
   }
 
   if (phase === "submitted") {
-    return <PortalSubmitted />;
+    // Arc 3 D4: the claim flow no longer dead-ends. The supplier has just
+    // shown they care about their profile — that is the moment a durable
+    // account is worth offering. The claim token is NOT consumed by it.
+    return (
+      <PortalSubmitted>
+        <AccountBridge token={tokenRef.current} />
+      </PortalSubmitted>
+    );
   }
 
   // ready OR soft-error: render the hero + form. soft-error re-shows the form

@@ -1499,3 +1499,27 @@
   gap: 8px;
   align-items: center;
 }
+
+/* The claim → account bridge (arc 3 D4): a quiet offer inside the pending
+   confirmation card, never competing with it for attention. */
+.supplier-bridge {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--portal-line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+.supplier-bridge-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--portal-graphite);
+}
+.supplier-bridge-body {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--portal-slate);
+}
+.supplier-bridge .portal-brand-add-btn { align-self: flex-start; }
