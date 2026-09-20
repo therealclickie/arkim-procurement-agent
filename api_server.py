@@ -6835,6 +6835,65 @@ def _supplier_session_reject_401():
     raise HTTPException(status_code=401, detail="Invalid or expired session")
 
 
+# ---------------------------------------------------------------------------
+# Arc 3 D2 — CSRF defence for the cookie-authenticated session.
+#
+# SameSite=Lax (D1) already blocks cross-site POSTs in every current browser.
+# This is the belt to that pair of braces: a cookie-authenticated
+# state-changing request must also carry an Origin (or a Referer to derive one
+# from) that matches a CONFIGURED app origin.
+#
+# Bearer requests are EXEMPT, and that is the whole design. CSRF is an attack
+# on AMBIENT credentials — the browser attaches a cookie to a cross-site form
+# post without the page ever seeing it. An Authorization header is not
+# ambient: an attacker's page cannot make the browser add one, so there is
+# nothing to defend and arc 2's API clients stay untouched.
+#
+# The origin list is ``_cors_origins`` — the SAME list CORSMiddleware already
+# enforces, deliberately not a second configuration surface that could drift.
+#
+# Neither header present ⇒ REJECT (R-G3b). A cookie is by definition a browser
+# credential and browsers send Origin on every cross-site POST and on
+# same-origin POSTs; a request that presents an ambient credential with no
+# provenance at all is exactly the shape we cannot vouch for. Non-browser
+# callers have the bearer path.
+#
+# Rejection is the SAME uniform session 401 arc 2 established — a CSRF refusal
+# must not be distinguishable from any other auth failure.
+# ---------------------------------------------------------------------------
+
+_SUPPLIER_STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _origin_of(url: str) -> str:
+    """scheme://host[:port] of ``url`` — the comparable part of a Referer."""
+    from urllib.parse import urlparse
+    try:
+        parts = urlparse(url)
+    except ValueError:
+        return ""
+    if not parts.scheme or not parts.netloc:
+        return ""
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _supplier_csrf_check(request: Request, mode: Optional[str]) -> None:
+    """Enforce D2 on a cookie-authenticated state-changing request. No-op for
+    bearer auth and for safe methods."""
+    if mode != "cookie":
+        return
+    if request.method.upper() not in _SUPPLIER_STATE_CHANGING_METHODS:
+        return
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin:
+        # Fall back to the Referer's origin — some browsers omit Origin on
+        # same-origin navigations, and a Referer is equally attacker-proof
+        # (a cross-site post cannot forge either).
+        origin = _origin_of((request.headers.get("referer") or "").strip())
+    if not origin or origin not in _cors_origins:
+        _supplier_session_reject_401()
+
+
 def _require_supplier_session(
     request: Request,
     authorization: Optional[str] = Header(default=None),
@@ -6868,6 +6927,7 @@ def _require_supplier_session(
     if ctx is None:
         _supplier_session_reject_401()
     request.state.supplier_auth_mode = mode
+    _supplier_csrf_check(request, mode)   # D2 — cookie auth only; bearer exempt
     return ctx
 
 
