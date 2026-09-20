@@ -147,7 +147,8 @@ from utils import run_capture as _run_capture  # Night 1 — RUN_CAPTURE flag-ga
 
 import secrets
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, Header, HTTPException, UploadFile, File
+from fastapi import (BackgroundTasks, Cookie, Depends, FastAPI, Form, Header,
+                     HTTPException, UploadFile, File)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -6721,6 +6722,65 @@ def _supplier_verify_rate_check(request: Request, token: str) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Arc 3 D1 — the BROWSER session cookie.
+#
+# Arc 2 returns the raw session token once from verify; for an API client that
+# is correct and stays. For a browser it is not: anything a script can read is
+# XSS-readable, and arc 1 locked in "no credential in any JS-readable storage".
+# So verify ADDITIONALLY sets an httpOnly cookie carrying the same session
+# token. The JSON body is unchanged (the bearer path and its arc-2 tests are
+# untouched), and the frontend never reads, writes or sees the cookie value.
+#
+# Attributes (all four are asserted on the real Set-Cookie header in
+# test_supplier_session_cookie.py): HttpOnly, Secure, SameSite=Lax, Path=/.
+# `Secure` means the cookie is only ever returned over https — which is also
+# why arc 2's http://testserver clients cannot be perturbed by this change:
+# the cookie lands in their jar and is never sent back.
+# ---------------------------------------------------------------------------
+
+SUPPLIER_SESSION_COOKIE = "gofer_supplier_session"
+
+
+def _supplier_session_cookie_max_age(expires_at: Optional[str]) -> Optional[int]:
+    """Seconds until ``expires_at`` (tz-aware ISO8601 from create_session), so
+    the cookie dies with the server-side session rather than outliving it.
+    None (a session cookie) when the expiry is unparseable — fail-soft toward
+    the SHORTER lifetime, never toward a longer one."""
+    if not expires_at:
+        return None
+    try:
+        exp = datetime.fromisoformat(expires_at)
+    except (TypeError, ValueError):
+        return None
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return max(0, int((exp - datetime.now(timezone.utc)).total_seconds()))
+
+
+def _set_supplier_session_cookie(response: JSONResponse, token: str,
+                                 expires_at: Optional[str]) -> JSONResponse:
+    """Attach the D1 session cookie to ``response`` and return it."""
+    response.set_cookie(
+        key=SUPPLIER_SESSION_COOKIE,
+        value=token,
+        max_age=_supplier_session_cookie_max_age(expires_at),
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+    return response
+
+
+def _clear_supplier_session_cookie(response: JSONResponse) -> JSONResponse:
+    """Clear the D1 cookie on logout. The path MUST match the one it was set
+    with or the browser keeps the old cookie."""
+    response.delete_cookie(key=SUPPLIER_SESSION_COOKIE, path="/",
+                           httponly=True, secure=True, samesite="lax")
+    return response
+
+
 @app.post("/api/supplier/auth/verify")
 def supplier_verify_link(body: SupplierVerifyBody, request: Request):
     """Verify a magic link → a session (D4: magic links are the only login;
@@ -6754,9 +6814,12 @@ def supplier_verify_link(body: SupplierVerifyBody, request: Request):
         "login", account_id=ctx["account_id"], member_id=ctx["member_id"],
         email=ctx["email"], actor=ctx["email"], ip=ip,
         detail={"session_id": sess["session_id"]})
-    return JSONResponse(content={"token": sess["token"],
+    resp = JSONResponse(content={"token": sess["token"],
                                  "expires_at": sess["expires_at"]},
                         headers=_portal_response_headers({}))
+    # D1: the browser's copy of the SAME session, httpOnly so no script can
+    # read it. The body keeps the raw token for API clients (arc 2's contract).
+    return _set_supplier_session_cookie(resp, sess["token"], sess["expires_at"])
 
 
 # ---------------------------------------------------------------------------
@@ -6772,18 +6835,39 @@ def _supplier_session_reject_401():
     raise HTTPException(status_code=401, detail="Invalid or expired session")
 
 
-def _require_supplier_session(authorization: Optional[str] = Header(default=None)) -> dict:
-    """FastAPI dependency: validate the ``Authorization: Bearer <session>``
-    header against the session store (hash lookup; expiry + revoke + member
-    still ACTIVE enforced there). Returns the session context
-    ``{session_id, member_id, account_id, member, account}``."""
+def _require_supplier_session(
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    gofer_supplier_session: Optional[str] = Cookie(default=None),
+) -> dict:
+    """FastAPI dependency: validate a session presented EITHER as
+    ``Authorization: Bearer <session>`` (arc 2 — API clients) OR as the arc-3
+    ``gofer_supplier_session`` httpOnly cookie (D1 — browsers), against the
+    session store (hash lookup; expiry + revoke + member still ACTIVE enforced
+    there). Returns ``{session_id, member_id, account_id, member, account}``.
+
+    BEARER FIRST, deliberately. The chosen mode is recorded on
+    ``request.state.supplier_auth_mode`` because T2's CSRF origin check keys
+    off it: a bearer is an explicit, non-ambient credential and is exempt,
+    while a cookie is sent by the browser automatically and is not. Resolving
+    bearer first means a request that presents one is treated as an API call
+    even if a cookie happens to be in the jar — the exemption can never be
+    reached by an attacker, who cannot set the header cross-site.
+
+    Every failure mode stays the ONE uniform 401 arc 2 established."""
     if not _supplier_accounts_enabled():
         _supplier_accounts_flag_off_404()
-    if not authorization or not authorization.startswith("Bearer "):
+    raw, mode = None, None
+    if authorization and authorization.startswith("Bearer "):
+        raw, mode = authorization[len("Bearer "):].strip(), "bearer"
+    elif gofer_supplier_session:
+        raw, mode = gofer_supplier_session.strip(), "cookie"
+    if not raw:
         _supplier_session_reject_401()
-    ctx = supplier_accounts.validate_session(authorization[len("Bearer "):].strip())
+    ctx = supplier_accounts.validate_session(raw)
     if ctx is None:
         _supplier_session_reject_401()
+    request.state.supplier_auth_mode = mode
     return ctx
 
 
@@ -6819,8 +6903,11 @@ def supplier_logout(session: dict = Depends(_require_supplier_session)):
         member_id=session["member_id"], email=session["member"]["email"],
         actor=session["member"]["email"],
         detail={"session_id": session["session_id"]})
-    return JSONResponse(content={"ok": True},
+    resp = JSONResponse(content={"ok": True},
                         headers=_portal_response_headers({}))
+    # D1: the server-side session is revoked above; clear the browser's copy
+    # too so a logged-out tab stops sending a dead credential.
+    return _clear_supplier_session_cookie(resp)
 
 
 @app.get("/api/supplier/requests")
