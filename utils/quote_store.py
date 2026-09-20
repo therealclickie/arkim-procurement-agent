@@ -83,7 +83,10 @@ STATUS_SUPERSEDED = "superseded"
 STATUS_EXPIRED = "expired"          # computed at read time, never stored by submit
 STATUS_WITHDRAWN = "withdrawn"
 
-VALID_VIAS = ("rfq_link", "portal", "concierge")
+# Arc 2 T8 adds "account": the session-authed supplier door (identity from a
+# supplier-account session instead of a quote token). Same store, same record
+# shape — a fourth entry path, not a second store.
+VALID_VIAS = ("rfq_link", "portal", "concierge", "account")
 
 # Sanity-check thresholds (spec §6). Price: >3x / <0.2x the price_db median
 # where a band exists (band-absent SKIPS — absence of data must not flag every

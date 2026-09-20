@@ -196,3 +196,113 @@ class TestSessionOpenRequests:
         r = req_api.get("/api/supplier/requests",
                         headers={"Authorization": f"Bearer {bearer}"})
         assert r.json()["requests"] == []
+
+
+# ---------------------------------------------------------------------------
+# T8 — session-authed quote submission (the existing store, session identity)
+# ---------------------------------------------------------------------------
+
+class TestSessionQuoteSubmit:
+    def _bearer(self, req_api):
+        return req_api._login()
+
+    def test_quote_lands_in_existing_store_with_session_identity(self, req_api):
+        from utils import quote_store
+        rid = _make_run(req_api)
+        _rfq(req_api, rid)
+        bearer = self._bearer(req_api)
+        r = req_api.post("/api/supplier/quotes",
+                         headers={"Authorization": f"Bearer {bearer}"},
+                         json=_valid_quote_body(run_id=rid))
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert out["ok"] is True and out["status"] == "active"
+        (q,) = quote_store.get_quotes(run_id=rid, supplier_domain="dxpe.com")
+        assert q["submitted_via"] == "account"
+        assert q["supplier_domain"] == "dxpe.com"     # identity from the session
+        assert q["unit_price"] == 189.0
+        # The quote shows up in the session open-requests view (quoted marker).
+        rr = req_api.get("/api/supplier/requests",
+                         headers={"Authorization": f"Bearer {bearer}"})
+        (row,) = rr.json()["requests"]
+        assert row["quoted"]["status"] == "active"
+        assert row["quoted"]["unit_price"] == 189.0
+
+    def test_wrong_part_gate_flags_review_not_blocks(self, req_api):
+        # The sanity flag-not-block behaviour is UNCHANGED through the new
+        # door: an edited PN lands in review, never silently dropped.
+        rid = _make_run(req_api)
+        _rfq(req_api, rid)
+        bearer = self._bearer(req_api)
+        r = req_api.post("/api/supplier/quotes",
+                         headers={"Authorization": f"Bearer {bearer}"},
+                         json=_valid_quote_body(run_id=rid,
+                                                part_number="84004-28SP"))
+        assert r.status_code == 200
+        assert r.json()["status"] == "review"
+        assert r.json()["pn_differs"] is True
+        assert "pn_differs" in r.json()["review_reasons"]
+
+    def test_no_open_rfq_rejected(self, req_api):
+        rid = _make_run(req_api)  # a run, but no RFQ sent to dxpe.com
+        bearer = self._bearer(req_api)
+        r = req_api.post("/api/supplier/quotes",
+                         headers={"Authorization": f"Bearer {bearer}"},
+                         json=_valid_quote_body(run_id=rid))
+        assert r.status_code == 404
+        assert r.json()["detail"] == "No open request for this supplier"
+
+    def test_cross_account_quote_impossible(self, req_api):
+        # An open RFQ for dxpe.com; a grainger.com session cannot quote it.
+        from utils import supplier_accounts as sa
+        rid = _make_run(req_api)
+        _rfq(req_api, rid, domain="dxpe.com")
+        acct_b = req_api._sa.create_account("grainger.com")
+        sa.add_member(acct_b["id"], "sales@grainger.com",
+                      role=sa.ROLE_OWNER, status=sa.MEMBER_ACTIVE)
+        bearer_b = req_api._login(email="sales@grainger.com")
+        r = req_api.post("/api/supplier/quotes",
+                         headers={"Authorization": f"Bearer {bearer_b}"},
+                         json=_valid_quote_body(run_id=rid))
+        assert r.status_code == 404  # no open request for GRAINGER
+        from utils import quote_store
+        assert quote_store.get_quotes(run_id=rid) == []
+
+    def test_requires_session_and_both_flags(self, req_api, monkeypatch):
+        rid = _make_run(req_api)
+        _rfq(req_api, rid)
+        assert req_api.post("/api/supplier/quotes",
+                            json=_valid_quote_body(run_id=rid)).status_code == 401
+        bearer = self._bearer(req_api)
+        headers = {"Authorization": f"Bearer {bearer}"}
+        # Quote surface off ⇒ the route is absent even with a valid session.
+        monkeypatch.setenv("QUOTE_SUBMIT_V1", "")
+        unknown = req_api.get("/api/definitely-not-a-route")
+        r = req_api.post("/api/supplier/quotes", headers=headers,
+                         json=_valid_quote_body(run_id=rid))
+        assert r.status_code == 404
+        assert r.content == unknown.content
+        monkeypatch.setenv("QUOTE_SUBMIT_V1", "1")
+        # Accounts flag off ⇒ absent too (the T2 wall covers this, pinned here
+        # for the quote door specifically).
+        monkeypatch.setenv("SUPPLIER_ACCOUNTS_V1", "")
+        r = req_api.post("/api/supplier/quotes", headers=headers,
+                         json=_valid_quote_body(run_id=rid))
+        assert r.status_code == 404
+        assert r.content == unknown.content
+
+    def test_resubmission_supersedes(self, req_api):
+        from utils import quote_store
+        rid = _make_run(req_api)
+        _rfq(req_api, rid)
+        bearer = self._bearer(req_api)
+        headers = {"Authorization": f"Bearer {bearer}"}
+        req_api.post("/api/supplier/quotes", headers=headers,
+                     json=_valid_quote_body(run_id=rid, unit_price=189.0))
+        r = req_api.post("/api/supplier/quotes", headers=headers,
+                         json=_valid_quote_body(run_id=rid, unit_price=179.0,
+                                                quote_number="DXP-0092"))
+        assert r.status_code == 200
+        quotes = quote_store.get_quotes(run_id=rid, supplier_domain="dxpe.com")
+        statuses = sorted(q["effective_status"] for q in quotes)
+        assert statuses == ["active", "superseded"]  # the new one wins

@@ -6830,6 +6830,50 @@ def supplier_requests(session: dict = Depends(_require_supplier_session)):
                         headers=_portal_response_headers({}))
 
 
+@app.post("/api/supplier/quotes")
+def supplier_quote_submit(body: PortalQuoteBody,
+                          session: dict = Depends(_require_supplier_session)):
+    """Arc 2 T8: session-authed structured-quote submission — the EXISTING
+    QUOTE_SUBMIT_V1 store and submission core (``_record_structured_quote``:
+    supersede, wrong-part gate, sanity flag-not-block, the ack seam), with the
+    supplier identity coming from the SESSION (D1: the company account) and
+    provenance submitted_via="account" / submitted_by=<member id>. Gated on
+    BOTH flags (the accounts surface + the quote surface, mirroring path B's
+    double gate). The supplier may quote only a run with an OPEN RFQ addressed
+    to their account's domain — same rule as path B."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    if not _quote_submit_enabled():
+        _quote_flag_off_404()
+    dom = session["account"]["supplier_domain"]
+    _validate_quote_fields(body)
+    from utils import supplier_registry
+    open_rfqs = [
+        m for m in supplier_registry.get_sent_messages(run_id=body.run_id,
+                                                       domain=dom)
+        if m.get("status") in supplier_registry.OPEN_RFQ_STATUSES
+    ]
+    if not open_rfqs:
+        raise HTTPException(status_code=404,
+                            detail="No open request for this supplier")
+    specs = _run_specs_for_quote(body.run_id) or {}
+    rec = supplier_registry.lookup_by_domain(dom)
+    out = _record_structured_quote(
+        body,
+        submitted_via="account",
+        submitted_by=session["member_id"],
+        supplier_domain=dom,
+        vendor_name=(rec or {}).get("name"),
+        run_id=body.run_id,
+        rfq_id=open_rfqs[0].get("id"),       # newest open RFQ row id
+        part_key=open_rfqs[0].get("part_key"),
+        manufacturer=specs.get("manufacturer"),
+        requested_part_number=specs.get("part_number"),
+        requested_quantity=specs.get("quantity"),
+    )
+    return JSONResponse(content=out, headers=_portal_response_headers({}))
+
+
 # ---------------------------------------------------------------------------
 # T6 — the claim-token → account bridge (the arc-3 funnel seam: "create your
 # account"). A VALID claim token may request a magic link for its own supplier
