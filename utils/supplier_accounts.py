@@ -809,6 +809,67 @@ def ensure_member_for_link(account_id: str, email: str) -> tuple[Optional[dict],
     return member, member is not None
 
 
+def has_live_owner(account_id: str) -> bool:
+    """True when the account has an OWNER member who is not REVOKED (the
+    partial index counts exactly these rows). Fail-soft False."""
+    if not account_id:
+        return False
+    try:
+        with closing(_get_conn()) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM supplier_members WHERE account_id = ? "
+                "AND role = ? AND status != ? LIMIT 1",
+                (account_id, ROLE_OWNER, MEMBER_REVOKED)).fetchone()
+            return row is not None
+    except Exception as exc:
+        print(f"[SupplierAccounts] has_live_owner failed for {account_id!r}: {exc}")
+        return False
+
+
+def establish_account(supplier_domain: str, email: str) -> tuple[Optional[dict], Optional[dict], bool]:
+    """T6 establishment via a validated claim token (the funnel seam arc 3
+    surfaces as "create your account"). Returns ``(account, member,
+    account_created)``.
+
+      - The account is created if absent (1:1 idempotent on the domain).
+      - The requesting member lands under D2 (``ensure_member_for_link``):
+        domain-matching email → ACTIVE, else PENDING (public mailboxes never
+        auto-match).
+      - D7's "the first member to establish an account becomes OWNER": when
+        the account has NO live OWNER and the new member is domain-matched
+        ACTIVE, that member is promoted to OWNER — the matching-domain email
+        is the only self-serve proof of company membership, so it is also the
+        only self-serve path to ownership. (An account established with only
+        a non-matching PENDING email is ownerless until a matching-domain
+        member arrives or a future admin assignment — noted follow-up.)
+
+    Fail-soft: (None, None, False) on flag-off / bad input / store failure."""
+    if _dormant():
+        return None, None, False
+    dom = _normalize_domain(supplier_domain)
+    norm = normalize_email(email)
+    if not dom or not norm:
+        return None, None, False
+    account = get_account_by_domain(dom)
+    account_created = False
+    if account is None:
+        account = create_account(dom, created_by="claim_token")
+        account_created = account is not None
+        if account is None:
+            return None, None, False
+    member, member_created = ensure_member_for_link(account["id"], norm)
+    if member is None:
+        return account, None, account_created
+    if member_created and member["status"] == MEMBER_ACTIVE \
+            and member["registrable_domain"] == dom \
+            and not has_live_owner(account["id"]):
+        # First (domain-proving) member of an ownerless account → OWNER.
+        promoted = update_member_role(member["id"], ROLE_OWNER)
+        if promoted is not None:
+            member = promoted
+    return account, member, account_created
+
+
 # ---------------------------------------------------------------------------
 # D5 — the magic-link email enters at the SAME send seam as every outbound
 # ---------------------------------------------------------------------------

@@ -6806,3 +6806,76 @@ def supplier_logout(session: dict = Depends(_require_supplier_session)):
     return JSONResponse(content={"ok": True},
                         headers=_portal_response_headers({}))
 
+
+# ---------------------------------------------------------------------------
+# T6 — the claim-token → account bridge (the arc-3 funnel seam: "create your
+# account"). A VALID claim token may request a magic link for its own supplier
+# domain. The claim token is VALIDATED, never consumed (D6 — the first door
+# keeps working exactly as today). Same D2 rules; same uniform response.
+# ---------------------------------------------------------------------------
+
+class PortalRequestAccountBody(BaseModel):
+    email: str
+
+
+@app.post("/api/portal/{token}/request-account")
+def portal_request_account(token: str, body: PortalRequestAccountBody,
+                           request: Request):
+    """Request a supplier account for the claim token's domain. Gated on
+    SUPPLIER_ACCOUNTS_V1 (off ⇒ absent) AND the portal token gate
+    (SUPPLIER_PORTAL_V1 + rate limit + the uniform 404 on a bad token — an
+    invalid token reveals nothing). Uniform ``{"ok": true}`` for every email
+    outcome; the claim token stays usable afterwards."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    prow = _validate_portal_token(request, token)  # validates, does NOT consume
+    dom = prow["supplier_domain"]
+    ip = _client_ip(request)
+    _supplier_auth_rate_bump(request, body.email or "")
+    email = supplier_accounts.normalize_email(body.email or "")
+    if not email:
+        supplier_accounts.audit("account_requested", email=body.email,
+                                actor="claim_token", ip=ip,
+                                detail={"outcome": "unparseable_email",
+                                        "supplier_domain": dom})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    account, member, account_created = supplier_accounts.establish_account(dom, email)
+    if account is None or member is None:
+        supplier_accounts.audit("account_requested", email=email,
+                                actor="claim_token", ip=ip,
+                                detail={"outcome": "store_error",
+                                        "supplier_domain": dom})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    supplier_accounts.audit(
+        "account_requested", account_id=account["id"], member_id=member["id"],
+        email=email, actor="claim_token", ip=ip,
+        detail={"outcome": "established" if account_created else "existing",
+                "supplier_domain": dom, "member_status": member["status"],
+                "member_role": member["role"]})
+    if member["status"] != supplier_accounts.MEMBER_ACTIVE:
+        supplier_accounts.audit(
+            "link_requested", account_id=account["id"], member_id=member["id"],
+            email=email, actor="claim_token", ip=ip,
+            detail={"outcome": "member_not_active",
+                    "member_status": member["status"]})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    link = supplier_accounts.mint_magic_link(member["id"])
+    if link is not None:
+        send_status = supplier_accounts.send_magic_link_email(
+            email, link["token"], account_domain=account["supplier_domain"],
+            member_id=member["id"])
+        supplier_accounts.audit(
+            "link_requested", account_id=account["id"], member_id=member["id"],
+            email=email, actor="claim_token", ip=ip,
+            detail={"outcome": "send_attempted", "send_status": send_status})
+    else:
+        supplier_accounts.audit(
+            "link_requested", account_id=account["id"], member_id=member["id"],
+            email=email, actor="claim_token", ip=ip,
+            detail={"outcome": "mint_failed"})
+    return JSONResponse(content={"ok": True},
+                        headers=_portal_response_headers({}))
+
