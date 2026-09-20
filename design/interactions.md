@@ -1054,3 +1054,76 @@ the RFQ template carries no quote link, and behavior is byte-identical.**
   surfaces; zero live sends.
 - **No auto-order.** Property-tested: no quote endpoint or promotion read
   reaches `orders.create_order`/`place_order`.
+
+---
+
+## Supplier sign-in and the session surfaces (Arc 3 — `NEXT_PUBLIC_SUPPLIER_SESSION_V1` + `SUPPLIER_ACCOUNTS_V1`, both default OFF)
+
+The supplier portal now has two doors into the same surfaces: a claim token
+(first touch, unchanged) and a session (the returning supplier). Both flags
+off ⇒ nothing below exists and the portal is exactly the claim-token surface
+Night 11 shipped.
+
+- **The session is an httpOnly cookie the frontend never reads.**
+  `POST /api/supplier/auth/verify` sets `gofer_supplier_session`
+  (HttpOnly; Secure; SameSite=Lax; Path=/, expiring with the server-side
+  session) *in addition to* returning the raw bearer token in the body for API
+  clients. The browser client ignores that body. Nothing supplier-authenticating
+  ever lands in `localStorage`, `sessionStorage`, `document.cookie` as read by
+  JS, the console, or a URL — the same posture the public token surfaces hold.
+- **Two auth modes, one set of components.** `ClaimPage`, `ProfileForm`,
+  `OpenRequests` and `QuoteForm` are unchanged in behaviour and do not know
+  which door they were entered by; the mode object (`lib/supplier-mode`)
+  resolves a logical operation to a concrete request. Token mode emits exactly
+  the requests it emitted before. Session mode sends `credentials: "include"`
+  and never an `Authorization` header.
+- **CSRF.** `SameSite=Lax` plus an `Origin`/`Referer` check against the
+  configured app origins on every cookie-authenticated state-changing
+  `/api/supplier/*` request. Neither header present ⇒ reject. Bearer requests
+  are exempt — an `Authorization` header is not an ambient credential, so
+  there is no cross-site request to defend against. A CSRF refusal is the same
+  uniform 401 as any other session failure, so it is not an oracle.
+- **`/supplier/login`.** Email → magic link. ONE confirmation — "if that
+  address is on file, we've sent a sign-in link" — for a known member, an
+  unknown address, no account, a pending member and an unparseable string
+  alike. No address echo, no "not found", no "check your spam" (which would
+  imply a send definitely happened), and no client-side domain validation. A
+  rate limit shows the same retry copy as a network failure and names no
+  address.
+- **`/supplier/verify?token=…`.** Exchanges the token for a session and
+  `replace`s to the inbox, so the token-bearing URL leaves history. ONE
+  rejection for every failure mode (unknown / expired / used / pending member /
+  missing token), with a path back to login. The exchange happens exactly once
+  per landing — a single-use link is not burned twice.
+- **`/supplier/requests`.** The RFQ inbox: the account's open requests and its
+  quote history, with inline quoting through `POST /api/supplier/quotes`.
+  `OpenRequests` still renders literally nothing when both lists are empty; the
+  honest "no open requests right now" copy belongs to the page. Nothing is
+  fabricated — no sample row, no placeholder count.
+- **`/supplier/profile`.** The same profile form, submitting to
+  `POST /api/supplier/propose-revision`. Signing in does NOT promote an edit to
+  a save: the revision lands PENDING exactly as the token door's does, the
+  confirmation says "submitted for review", and the word "saved" appears
+  nowhere. The session adds provenance — the revision records which member
+  proposed it.
+- **`/supplier/members`.** Team list, invite, change role, remove. Controls the
+  signed-in member's capabilities do not cover are hidden, and the endpoint
+  behind each hidden control returns 403 when called directly with that
+  member's own cookie. **The 403 is the control; hiding is a courtesy.** The
+  OWNER row shows no remove and no role selector for anyone, including the
+  owner — that is the ownership invariant (v1 has no transfer flow), not a
+  permission, and the server refuses it for everybody. OWNER is never an
+  assignable role.
+- **Sign-out.** A server call that revokes the session and clears the cookie.
+  The redirect to login happens whatever the call returns: a supplier kept on
+  an authenticated screen after asking to leave would reasonably read that as
+  "still signed in".
+- **Claim → account bridge.** After a successful claim submit, the pending
+  confirmation offers "create your account" →
+  `POST /api/portal/{token}/request-account`. The claim token is validated, not
+  consumed, so ignoring the email costs the supplier nothing. The copy says a
+  link is being emailed and never that they are signed in, and — like the login
+  screen — it is one confirmation for every outcome.
+- **Protected routes without a session** redirect to login and render nothing,
+  including when the session expires mid-visit. The redirect is a courtesy; the
+  routes 401 server-side regardless.

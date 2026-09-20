@@ -147,7 +147,8 @@ from utils import run_capture as _run_capture  # Night 1 — RUN_CAPTURE flag-ga
 
 import secrets
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, Header, HTTPException, UploadFile, File
+from fastapi import (BackgroundTasks, Cookie, Depends, FastAPI, Form, Header,
+                     HTTPException, UploadFile, File)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -5575,6 +5576,40 @@ def _portal_response_headers(headers: dict) -> dict:
     return headers
 
 
+def _supplier_profile_body(dom: str) -> Optional[dict]:
+    """THE supplier-profile read, shared by both doors (the claim token's and
+    arc 3's session) exactly as ``_supplier_open_requests`` is — one assembly,
+    never two that drift. Returns None when the supplier is unknown or the
+    portal module is dormant; each door decides what that means for it.
+
+    HERO first in the contract (the research's demand-as-hero placement)."""
+    from utils import supplier_portal
+    profile = supplier_portal.read_profile(dom)
+    if profile is None:
+        return None
+    return {
+        "teaser": supplier_portal.demand_teaser(dom),
+        "supplier_domain": profile["supplier_domain"],
+        "name": profile["name"],
+        "brands": profile["brands"],
+        "classes": profile["classes"],
+        "ship_area": profile["ship_area"],
+        "aftermarket_disclosure": profile["aftermarket_disclosure"],
+    }
+
+
+def _validate_revision_brands(brands: Optional[List[dict]]) -> None:
+    """422 on a malformed brand relationship (the tri-state relationship is the
+    highest-value field and must be well-formed) — a silent drop would lose the
+    one thing only the supplier authoritatively knows. Shared by both doors."""
+    from utils import supplier_registry
+    for b in (brands or []):
+        rel = (b.get("relationship") or "").upper().strip()
+        if rel and rel not in supplier_registry.BRAND_RELATIONSHIPS:
+            raise HTTPException(status_code=422,
+                                detail=f"Invalid brand relationship: {rel}")
+
+
 @app.get("/api/portal/{token}/profile")
 def portal_profile(token: str, request: Request):
     """The public supplier claim page contract: the read-only demand teaser
@@ -5583,23 +5618,11 @@ def portal_profile(token: str, request: Request):
     lifecycle / performance / other suppliers. Zero-state teaser -> honest
     category/network framing (never a "0" hero, never a fabricated count)."""
     row = _validate_portal_token(request, token)
-    from utils import supplier_portal
-    profile = supplier_portal.read_profile(row["supplier_domain"])
-    if profile is None:
+    body = _supplier_profile_body(row["supplier_domain"])
+    if body is None:
         # The token is valid but the supplier vanished (deleted mid-session) -
         # uniform rejection (do not reveal the supplier existed).
         _portal_reject_404()
-    teaser = supplier_portal.demand_teaser(row["supplier_domain"])
-    # HERO first in the contract (the research's demand-as-hero placement).
-    body = {
-        "teaser": teaser,
-        "supplier_domain": profile["supplier_domain"],
-        "name": profile["name"],
-        "brands": profile["brands"],
-        "classes": profile["classes"],
-        "ship_area": profile["ship_area"],
-        "aftermarket_disclosure": profile["aftermarket_disclosure"],
-    }
     return JSONResponse(content=body, headers=_portal_response_headers({}))
 
 
@@ -5622,16 +5645,7 @@ def portal_propose_revision(token: str, body: PortalProposeRevisionRequest,
     row = _validate_portal_token(request, token)
     from utils import supplier_portal
     revisions = {k: v for k, v in body.model_dump().items() if v is not None}
-    # Validate brand relationships up front (422, not a silent drop) - the
-    # tri-state relationship is the highest-value field and must be well-formed.
-    for b in (revisions.get("brands") or []):
-        rel = (b.get("relationship") or "").upper().strip()
-        from utils import supplier_registry
-        if rel and rel not in supplier_registry.BRAND_RELATIONSHIPS:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Invalid brand relationship: {rel}",
-            )
+    _validate_revision_brands(revisions.get("brands"))
     revision_id = supplier_portal.propose_revision(
         row["supplier_domain"], revisions, proposed_by="supplier")
     if revision_id is None:
@@ -6373,17 +6387,14 @@ def portal_open_requests(token: str, request: Request):
                         headers=_portal_response_headers({}))
 
 
-@app.get("/api/portal/{token}/quotes")
-def portal_quote_history(token: str, request: Request):
-    """T5: the supplier's OWN quote history — every quote from their domain
-    (all lifecycles, effective status shown honestly incl. read-time expiry),
-    newest first. Nothing cross-supplier: the domain is the token's; the rows
-    expose no buyer identity and no other suppliers. Fail-soft ([])."""
-    if not _quote_submit_enabled():
-        _quote_flag_off_404()
-    prow = _validate_portal_token(request, token)
+def _supplier_quote_history(dom: str) -> list:
+    """THE quote-history read, shared by the token door and arc 3's session
+    door (the ``_supplier_open_requests`` pattern). Every quote from ``dom``,
+    all lifecycles, effective status shown honestly including read-time
+    expiry, newest first. Exposes no buyer identity and no other supplier.
+    Fail-soft ([])."""
     from utils import quote_store
-    history = [
+    return [
         {
             "quote_id": q["id"],
             "run_id": q.get("run_id"),
@@ -6397,10 +6408,22 @@ def portal_quote_history(token: str, request: Request):
             "submitted_via": q["submitted_via"],
             "valid_until": q.get("valid_until"),
         }
-        for q in quote_store.get_quotes(supplier_domain=prow["supplier_domain"])
+        for q in quote_store.get_quotes(supplier_domain=dom)
     ]
-    return JSONResponse(content={"quotes": history},
-                        headers=_portal_response_headers({}))
+
+
+@app.get("/api/portal/{token}/quotes")
+def portal_quote_history(token: str, request: Request):
+    """T5: the supplier's OWN quote history — every quote from their domain
+    (all lifecycles, effective status shown honestly incl. read-time expiry),
+    newest first. Nothing cross-supplier: the domain is the token's; the rows
+    expose no buyer identity and no other suppliers. Fail-soft ([])."""
+    if not _quote_submit_enabled():
+        _quote_flag_off_404()
+    prow = _validate_portal_token(request, token)
+    return JSONResponse(
+        content={"quotes": _supplier_quote_history(prow["supplier_domain"])},
+        headers=_portal_response_headers({}))
 
 
 @app.post("/api/portal/{token}/quotes")
@@ -6721,6 +6744,65 @@ def _supplier_verify_rate_check(request: Request, token: str) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Arc 3 D1 — the BROWSER session cookie.
+#
+# Arc 2 returns the raw session token once from verify; for an API client that
+# is correct and stays. For a browser it is not: anything a script can read is
+# XSS-readable, and arc 1 locked in "no credential in any JS-readable storage".
+# So verify ADDITIONALLY sets an httpOnly cookie carrying the same session
+# token. The JSON body is unchanged (the bearer path and its arc-2 tests are
+# untouched), and the frontend never reads, writes or sees the cookie value.
+#
+# Attributes (all four are asserted on the real Set-Cookie header in
+# test_supplier_session_cookie.py): HttpOnly, Secure, SameSite=Lax, Path=/.
+# `Secure` means the cookie is only ever returned over https — which is also
+# why arc 2's http://testserver clients cannot be perturbed by this change:
+# the cookie lands in their jar and is never sent back.
+# ---------------------------------------------------------------------------
+
+SUPPLIER_SESSION_COOKIE = "gofer_supplier_session"
+
+
+def _supplier_session_cookie_max_age(expires_at: Optional[str]) -> Optional[int]:
+    """Seconds until ``expires_at`` (tz-aware ISO8601 from create_session), so
+    the cookie dies with the server-side session rather than outliving it.
+    None (a session cookie) when the expiry is unparseable — fail-soft toward
+    the SHORTER lifetime, never toward a longer one."""
+    if not expires_at:
+        return None
+    try:
+        exp = datetime.fromisoformat(expires_at)
+    except (TypeError, ValueError):
+        return None
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return max(0, int((exp - datetime.now(timezone.utc)).total_seconds()))
+
+
+def _set_supplier_session_cookie(response: JSONResponse, token: str,
+                                 expires_at: Optional[str]) -> JSONResponse:
+    """Attach the D1 session cookie to ``response`` and return it."""
+    response.set_cookie(
+        key=SUPPLIER_SESSION_COOKIE,
+        value=token,
+        max_age=_supplier_session_cookie_max_age(expires_at),
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+    return response
+
+
+def _clear_supplier_session_cookie(response: JSONResponse) -> JSONResponse:
+    """Clear the D1 cookie on logout. The path MUST match the one it was set
+    with or the browser keeps the old cookie."""
+    response.delete_cookie(key=SUPPLIER_SESSION_COOKIE, path="/",
+                           httponly=True, secure=True, samesite="lax")
+    return response
+
+
 @app.post("/api/supplier/auth/verify")
 def supplier_verify_link(body: SupplierVerifyBody, request: Request):
     """Verify a magic link → a session (D4: magic links are the only login;
@@ -6754,9 +6836,12 @@ def supplier_verify_link(body: SupplierVerifyBody, request: Request):
         "login", account_id=ctx["account_id"], member_id=ctx["member_id"],
         email=ctx["email"], actor=ctx["email"], ip=ip,
         detail={"session_id": sess["session_id"]})
-    return JSONResponse(content={"token": sess["token"],
+    resp = JSONResponse(content={"token": sess["token"],
                                  "expires_at": sess["expires_at"]},
                         headers=_portal_response_headers({}))
+    # D1: the browser's copy of the SAME session, httpOnly so no script can
+    # read it. The body keeps the raw token for API clients (arc 2's contract).
+    return _set_supplier_session_cookie(resp, sess["token"], sess["expires_at"])
 
 
 # ---------------------------------------------------------------------------
@@ -6772,18 +6857,99 @@ def _supplier_session_reject_401():
     raise HTTPException(status_code=401, detail="Invalid or expired session")
 
 
-def _require_supplier_session(authorization: Optional[str] = Header(default=None)) -> dict:
-    """FastAPI dependency: validate the ``Authorization: Bearer <session>``
-    header against the session store (hash lookup; expiry + revoke + member
-    still ACTIVE enforced there). Returns the session context
-    ``{session_id, member_id, account_id, member, account}``."""
+# ---------------------------------------------------------------------------
+# Arc 3 D2 — CSRF defence for the cookie-authenticated session.
+#
+# SameSite=Lax (D1) already blocks cross-site POSTs in every current browser.
+# This is the belt to that pair of braces: a cookie-authenticated
+# state-changing request must also carry an Origin (or a Referer to derive one
+# from) that matches a CONFIGURED app origin.
+#
+# Bearer requests are EXEMPT, and that is the whole design. CSRF is an attack
+# on AMBIENT credentials — the browser attaches a cookie to a cross-site form
+# post without the page ever seeing it. An Authorization header is not
+# ambient: an attacker's page cannot make the browser add one, so there is
+# nothing to defend and arc 2's API clients stay untouched.
+#
+# The origin list is ``_cors_origins`` — the SAME list CORSMiddleware already
+# enforces, deliberately not a second configuration surface that could drift.
+#
+# Neither header present ⇒ REJECT (R-G3b). A cookie is by definition a browser
+# credential and browsers send Origin on every cross-site POST and on
+# same-origin POSTs; a request that presents an ambient credential with no
+# provenance at all is exactly the shape we cannot vouch for. Non-browser
+# callers have the bearer path.
+#
+# Rejection is the SAME uniform session 401 arc 2 established — a CSRF refusal
+# must not be distinguishable from any other auth failure.
+# ---------------------------------------------------------------------------
+
+_SUPPLIER_STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _origin_of(url: str) -> str:
+    """scheme://host[:port] of ``url`` — the comparable part of a Referer."""
+    from urllib.parse import urlparse
+    try:
+        parts = urlparse(url)
+    except ValueError:
+        return ""
+    if not parts.scheme or not parts.netloc:
+        return ""
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _supplier_csrf_check(request: Request, mode: Optional[str]) -> None:
+    """Enforce D2 on a cookie-authenticated state-changing request. No-op for
+    bearer auth and for safe methods."""
+    if mode != "cookie":
+        return
+    if request.method.upper() not in _SUPPLIER_STATE_CHANGING_METHODS:
+        return
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin:
+        # Fall back to the Referer's origin — some browsers omit Origin on
+        # same-origin navigations, and a Referer is equally attacker-proof
+        # (a cross-site post cannot forge either).
+        origin = _origin_of((request.headers.get("referer") or "").strip())
+    if not origin or origin not in _cors_origins:
+        _supplier_session_reject_401()
+
+
+def _require_supplier_session(
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    gofer_supplier_session: Optional[str] = Cookie(default=None),
+) -> dict:
+    """FastAPI dependency: validate a session presented EITHER as
+    ``Authorization: Bearer <session>`` (arc 2 — API clients) OR as the arc-3
+    ``gofer_supplier_session`` httpOnly cookie (D1 — browsers), against the
+    session store (hash lookup; expiry + revoke + member still ACTIVE enforced
+    there). Returns ``{session_id, member_id, account_id, member, account}``.
+
+    BEARER FIRST, deliberately. The chosen mode is recorded on
+    ``request.state.supplier_auth_mode`` because T2's CSRF origin check keys
+    off it: a bearer is an explicit, non-ambient credential and is exempt,
+    while a cookie is sent by the browser automatically and is not. Resolving
+    bearer first means a request that presents one is treated as an API call
+    even if a cookie happens to be in the jar — the exemption can never be
+    reached by an attacker, who cannot set the header cross-site.
+
+    Every failure mode stays the ONE uniform 401 arc 2 established."""
     if not _supplier_accounts_enabled():
         _supplier_accounts_flag_off_404()
-    if not authorization or not authorization.startswith("Bearer "):
+    raw, mode = None, None
+    if authorization and authorization.startswith("Bearer "):
+        raw, mode = authorization[len("Bearer "):].strip(), "bearer"
+    elif gofer_supplier_session:
+        raw, mode = gofer_supplier_session.strip(), "cookie"
+    if not raw:
         _supplier_session_reject_401()
-    ctx = supplier_accounts.validate_session(authorization[len("Bearer "):].strip())
+    ctx = supplier_accounts.validate_session(raw)
     if ctx is None:
         _supplier_session_reject_401()
+    request.state.supplier_auth_mode = mode
+    _supplier_csrf_check(request, mode)   # D2 — cookie auth only; bearer exempt
     return ctx
 
 
@@ -6805,6 +6971,17 @@ def supplier_me(session: dict = Depends(_require_supplier_session)):
             "email": member["email"],
             "role": member["role"],
             "status": member["status"],
+            # Arc 3 (gate finding F1): the member's capabilities, computed from
+            # THE matrix. Nested under `member` deliberately — capabilities are
+            # a property of the person's role, and the top-level shape stays
+            # the two-level identity arc 2 pinned.
+            #
+            # D6: this is what the UI REFLECTS. It is not the control — the
+            # server re-checks has_permission on every gated route, and a
+            # client that forges this list gains exactly nothing.
+            "permissions": sorted(
+                c for c in supplier_accounts_rbac.CAPABILITIES
+                if supplier_accounts_rbac.has_permission(member, c)),
         },
     }, headers=_portal_response_headers({}))
 
@@ -6819,8 +6996,11 @@ def supplier_logout(session: dict = Depends(_require_supplier_session)):
         member_id=session["member_id"], email=session["member"]["email"],
         actor=session["member"]["email"],
         detail={"session_id": session["session_id"]})
-    return JSONResponse(content={"ok": True},
+    resp = JSONResponse(content={"ok": True},
                         headers=_portal_response_headers({}))
+    # D1: the server-side session is revoked above; clear the browser's copy
+    # too so a logged-out tab stops sending a dead credential.
+    return _clear_supplier_session_cookie(resp)
 
 
 @app.get("/api/supplier/requests")
@@ -7101,6 +7281,83 @@ def supplier_member_revoke(member_id: str,
         detail={"status": member["status"]})
     return JSONResponse(content={"ok": True,
                                  "member": _serialize_account_member(member)},
+                        headers=_portal_response_headers({}))
+
+
+# ---------------------------------------------------------------------------
+# Arc 3 (gate finding F2) — the SESSION doors for the surfaces arc 2 left
+# token-only. Each is the session sibling of an existing /api/portal/{token}
+# route and goes through the SAME shared read/write service, so the two doors
+# cannot drift. The supplier domain always comes from the validated session,
+# never from a parameter — cross-account access is impossible by construction.
+#
+# Capability gating: arc 2 declared VIEW_REQUESTS / PROPOSE_REVISIONS in the
+# matrix and wired neither (they had no route to gate). These routes wire
+# them, so the matrix rows are now enforced rather than aspirational. Every
+# role holds both today, so nothing is newly refused — but a future VIEWER row
+# lands correctly instead of silently.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/supplier/profile")
+def supplier_profile(session: dict = Depends(_require_supplier_session)):
+    """The session door over the SAME profile assembly the claim-token route
+    uses. Any ACTIVE member may read their own company's profile — there is no
+    "view profile" capability and inventing one to gate this would be policy
+    by accident.
+
+    404 when the portal module is dormant (SUPPLIER_PORTAL_V1 off) or the
+    supplier record is gone. The session already proves account membership, so
+    an honest detail here reveals nothing an attacker could use."""
+    body = _supplier_profile_body(session["account"]["supplier_domain"])
+    if body is None:
+        raise HTTPException(status_code=404,
+                            detail="No supplier profile for this account")
+    return JSONResponse(content=body, headers=_portal_response_headers({}))
+
+
+@app.post("/api/supplier/propose-revision")
+def supplier_propose_revision(
+    body: PortalProposeRevisionRequest,
+    session: dict = Depends(_supplier_require_capability(
+        supplier_accounts_rbac.PROPOSE_REVISIONS)),
+):
+    """Session-authed profile revision → a PENDING review item, via the SAME
+    service the token door uses. Self-declaration stays a PROPOSAL: nothing
+    writes the registry here, the concierge approve is the only writer.
+
+    Provenance records the member id, so an account with several people has an
+    audit trail of who proposed what — the one thing the token door cannot
+    offer."""
+    revisions = {k: v for k, v in body.model_dump().items() if v is not None}
+    _validate_revision_brands(revisions.get("brands"))
+    from utils import supplier_portal
+    revision_id = supplier_portal.propose_revision(
+        session["account"]["supplier_domain"], revisions,
+        proposed_by=f"member:{session['member_id']}")
+    if revision_id is None:
+        raise HTTPException(status_code=404,
+                            detail="No supplier profile for this account")
+    supplier_accounts.audit(
+        "revision_proposed", account_id=session["account_id"],
+        member_id=session["member_id"], email=session["member"]["email"],
+        actor=session["member"]["email"],
+        detail={"revision_id": revision_id})
+    return JSONResponse(
+        content={"ok": True, "revision_id": revision_id, "status": "pending"},
+        headers=_portal_response_headers({}))
+
+
+@app.get("/api/supplier/quotes")
+def supplier_quote_history(session: dict = Depends(
+        _supplier_require_capability(supplier_accounts_rbac.VIEW_REQUESTS))):
+    """The account's OWN quote history — the session sibling of
+    ``GET /api/portal/{token}/quotes``, same rows, same honest effective
+    status (incl. read-time expiry), newest first. Double-gated on
+    QUOTE_SUBMIT_V1 like its POST sibling. Nothing cross-supplier."""
+    if not _quote_submit_enabled():
+        _quote_flag_off_404()
+    dom = session["account"]["supplier_domain"]
+    return JSONResponse(content={"quotes": _supplier_quote_history(dom)},
                         headers=_portal_response_headers({}))
 
 

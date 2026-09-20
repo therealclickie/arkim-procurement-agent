@@ -12,16 +12,26 @@
  * Flag posture: when QUOTE_SUBMIT_V1 is off the endpoints 404 uniformly and
  * this component renders NOTHING — the claim portal looks exactly as it did
  * before Night 11 (no empty shells, no flag plumbing in the UI).
+ *
+ * ARC 3: the same component now also serves the SESSION inbox
+ * (/supplier/requests). It does not know which door it came in by — the
+ * auth-mode object supplies the operations (see lib/supplier-mode).
+ *
+ * TWO THINGS HERE ARE LOAD-BEARING and must not be "improved":
+ *
+ *  1. `token` stays an ordinary optional prop and, with NO provider above,
+ *     behaviour is byte-identical to before arc 3. That is exactly how the
+ *     pre-existing characterisation tests render it.
+ *  2. When both lists are empty this renders LITERALLY NOTHING — no heading,
+ *     no empty card, no "no requests yet". A supplier with no open RFQs gets
+ *     a blank component, and the honest empty-state copy lives in the
+ *     /supplier/requests PAGE instead. Putting that copy in here is the
+ *     single easiest way to break the pre-existing empty-state assertions.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  getOpenRequests,
-  getQuoteHistory,
-  submitPortalQuote,
-  type OpenRequest,
-  type QuoteHistoryRow,
-} from "@/lib/portal-api";
+import type { OpenRequest, QuoteHistoryRow } from "@/lib/portal-api";
+import { useSupplierMode } from "@/lib/supplier-mode";
 import { QuoteForm, type QuoteFormState } from "../../quote/[token]/quote-form";
 
 /** Effective quote statuses (portal-api QuoteHistoryRow.status) → chip labels.
@@ -34,8 +44,19 @@ const STATUS_LABEL: Record<string, string> = {
   withdrawn: "Withdrawn",
 };
 
-export function OpenRequests({ token }: { token: string }) {
-  const tokenRef = useRef(token);
+export function OpenRequests({
+  token,
+  onEmpty,
+}: {
+  token?: string;
+  /** Called once the first load settles, with whether BOTH lists came back
+   *  empty. Lets the session page own its empty-state copy without this
+   *  component ever rendering one (see the header note). */
+  onEmpty?: (isEmpty: boolean) => void;
+}) {
+  const mode = useSupplierMode(token);
+  const onEmptyRef = useRef(onEmpty);
+  onEmptyRef.current = onEmpty;
   const [requests, setRequests] = useState<OpenRequest[] | null>(null);
   const [history, setHistory] = useState<QuoteHistoryRow[] | null>(null);
   const [openRun, setOpenRun] = useState<string | null>(null);
@@ -45,13 +66,18 @@ export function OpenRequests({ token }: { token: string }) {
 
   const refresh = useCallback(async () => {
     const [reqs, hist] = await Promise.all([
-      getOpenRequests(tokenRef.current),
-      getQuoteHistory(tokenRef.current),
+      mode.getOpenRequests(),
+      mode.getQuoteHistory(),
     ]);
     // Feature off / any failure ⇒ render nothing (uniform rejection).
-    setRequests(reqs.ok ? reqs.data.requests : null);
-    setHistory(hist.ok ? hist.data.quotes : null);
-  }, []);
+    const nextRequests = reqs.ok ? reqs.data.requests : null;
+    const nextHistory = hist.ok ? hist.data.quotes : null;
+    setRequests(nextRequests);
+    setHistory(nextHistory);
+    onEmptyRef.current?.(
+      (nextRequests?.length ?? 0) === 0 && (nextHistory?.length ?? 0) === 0,
+    );
+  }, [mode]);
 
   useEffect(() => {
     void refresh();
@@ -79,7 +105,7 @@ export function OpenRequests({ token }: { token: string }) {
     setForm(f);
     setSubmitting(true);
     setSubmitFailed(false);
-    const res = await submitPortalQuote(tokenRef.current, {
+    const res = await mode.submitQuote({
       run_id: runId,
       quote_number: f.quoteNumber.trim(),
       unit_price: Number(f.unitPrice),

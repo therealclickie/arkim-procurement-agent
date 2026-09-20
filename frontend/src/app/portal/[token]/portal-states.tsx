@@ -152,7 +152,7 @@ export function PortalRejection() {
 // clock + the words.
 // ---------------------------------------------------------------------------
 
-export function PortalSubmitted() {
+export function PortalSubmitted({ children }: { children?: React.ReactNode }) {
   return (
     <div className="portal-surface portal-submitted">
       <div className="portal-submitted-card">
@@ -165,6 +165,9 @@ export function PortalSubmitted() {
           Your edits are pending. Nothing changes on your profile until your {BRAND_NAME}{" "}
           representative approves them. We&apos;ll be in touch if anything needs clarifying.
         </p>
+        {/* Arc 3 D4: the account invitation. Flag-gated, so with the arc off
+            this slot is empty and the card is byte-identical to before. */}
+        {children}
       </div>
     </div>
   );
