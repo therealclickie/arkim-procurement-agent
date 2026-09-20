@@ -227,6 +227,23 @@ class GmailSender(EmailSender):
         if not EMAIL_SEND_ENABLED:
             print(f"[EmailSender] STUBBED (EMAIL_SEND_ENABLED=False) -> {message.all_recipients}")
             return SendResult(status="stubbed")
+        # NOTIFICATIONS_V1 (arc 4 T2/D1) — TRANSPORT selection, and nothing
+        # more. It sits BELOW both gates above on purpose: the governance
+        # stack and the delivery gate have already run, so a provider swap
+        # can never become a governance bypass (gate G1). Flag OFF ⇒
+        # active_provider() is None ⇒ the Gmail code below runs unchanged,
+        # byte-identical to before this arc.
+        from utils import mail_provider
+        provider = mail_provider.active_provider()
+        if provider is not None:
+            outcome = provider.send(message, sender=self._sender)
+            if outcome.status == "sent":
+                print(f"[EmailSender] SENT via {outcome.provider} -> "
+                      f"{message.all_recipients} (id={outcome.provider_message_id})")
+                return SendResult(status="sent",
+                                  message_id=outcome.provider_message_id)
+            print(f"[EmailSender] provider {outcome.provider} failed: {outcome.error}")
+            return SendResult(status="error", error=outcome.error)
         service = self._service or gmail_client.build_gmail_service()
         if service is None:
             # Flag on but no usable credentials: surface the misconfig (fail-soft),
