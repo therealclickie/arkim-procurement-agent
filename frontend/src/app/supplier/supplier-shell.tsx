@@ -11,12 +11,21 @@
  * The nav reflects capabilities (D6): a link to a surface the member cannot
  * use is hidden. Hiding is a courtesy — the server 403s regardless, and a
  * member who types the URL gets the same refusal.
+ *
+ * Sign-out (T10) lives here because it has to be reachable from every
+ * authenticated surface. It revokes the session SERVER-side — clearing the
+ * client's idea of who it is would be theatre, since the credential is an
+ * httpOnly cookie only the server can invalidate.
  */
 
 import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { SupplierSession } from "@/lib/use-supplier-session";
 import type { SupplierCapability } from "@/lib/supplier-api";
 import { SupplierSurface } from "./supplier-chrome";
+
+export const LOGIN_PATH = "/supplier/login";
 
 interface NavItem {
   href: string;
@@ -55,6 +64,7 @@ export function SupplierShell({
             {account?.supplier_domain}
           </span>
           <span className="supplier-identity-email">{member?.email}</span>
+          <SignOutButton session={session} />
           {actions}
         </span>
       }
@@ -72,5 +82,34 @@ export function SupplierShell({
       </nav>
       {children}
     </SupplierSurface>
+  );
+}
+
+
+/**
+ * Sign out: revoke the session on the server, then leave.
+ *
+ * The navigation happens whatever the call returns. A supplier who asked to
+ * leave and was kept on an authenticated screen because a request failed
+ * would reasonably conclude they are still signed in — and on a shared
+ * machine that is the dangerous reading. The revoke is the control; the
+ * redirect is the honest acknowledgement.
+ */
+function SignOutButton({ session }: { session: SupplierSession }) {
+  const router = useRouter();
+  const [leaving, setLeaving] = useState(false);
+  return (
+    <button
+      type="button"
+      className="supplier-link-btn"
+      disabled={leaving}
+      onClick={async () => {
+        setLeaving(true);
+        await session.logout();
+        router.replace(LOGIN_PATH);
+      }}
+    >
+      {leaving ? "Signing out…" : "Sign out"}
+    </button>
   );
 }
