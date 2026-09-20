@@ -762,6 +762,108 @@ def revoke_session(session_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# D2 — domain-matched membership by default (request-link establishment)
+# ---------------------------------------------------------------------------
+
+def ensure_member_for_link(account_id: str, email: str) -> tuple[Optional[dict], bool]:
+    """The D2 establishment rule for a link request against an EXISTING
+    account. Returns ``(member, created)``:
+
+      - already a member (any status) → ``(member, False)`` — never mutated
+        here (a REVOKED member is not resurrected by re-requesting; a PENDING
+        member stays pending until the concierge decides);
+      - unknown email whose registrable domain MATCHES the account's
+        ``supplier_domain`` and is not a public-mailbox provider → created
+        ACTIVE (the email itself proves domain membership — sales@dxpe.com
+        may join the dxpe.com account);
+      - anything else (non-matching domain, public mailbox, unparseable) →
+        created PENDING (the concierge approves — the propose→approve
+        pattern; a public mailbox can never auto-match, D2).
+
+    New members default to role MEMBER (least privilege, D7; OWNER exists only
+    via account establishment — T6). Fail-soft: (None, False) on flag-off /
+    unknown account / store failure."""
+    if _dormant():
+        return None, False
+    account = get_account(account_id)
+    if not account:
+        return None, False
+    existing = get_member_by_email(account_id, email)
+    if existing is not None:
+        return existing, False
+    norm = normalize_email(email)
+    if not norm:
+        return None, False
+    email_dom = email_registrable_domain(norm)
+    auto_active = (
+        bool(email_dom)
+        and email_dom == _normalize_domain(account.get("supplier_domain") or "")
+        and not is_public_mailbox_email(norm)
+    )
+    member = add_member(
+        account_id, norm,
+        role=ROLE_MEMBER,
+        status=MEMBER_ACTIVE if auto_active else MEMBER_PENDING,
+        invited_by="link_request",
+    )
+    return member, member is not None
+
+
+# ---------------------------------------------------------------------------
+# D5 — the magic-link email enters at the SAME send seam as every outbound
+# ---------------------------------------------------------------------------
+
+# Where the link points. Arc 3 owns the real UI route; this is the data
+# contract (env-overridable so a deploy can point it elsewhere).
+_PORTAL_BASE_URL_ENV = "SUPPLIER_PORTAL_BASE_URL"
+_DEFAULT_PORTAL_BASE_URL = "https://procurement.arkim.ai"
+
+
+def magic_link_url(raw_token: str) -> str:
+    """The URL emailed to the member. Arc 3 converts the portal to consume it;
+    the backend contract is fixed here so the email is stable."""
+    base = (os.environ.get(_PORTAL_BASE_URL_ENV) or "").strip() or _DEFAULT_PORTAL_BASE_URL
+    return f"{base.rstrip('/')}/supplier/verify?token={raw_token}"
+
+
+def send_magic_link_email(email: str, raw_token: str, *,
+                          account_domain: str,
+                          member_id: Optional[str] = None,
+                          is_test: bool = True) -> str:
+    """Build the magic-link email and hand it to ``GmailSender().send`` — the
+    SAME last-seam every outbound uses (rfq_send, tier1_notify, the quote
+    ack), so the send-governance stack (suppression → allowlist → caps) and
+    the EMAIL_SEND_ENABLED delivery gate run INSIDE send and structurally
+    cannot be bypassed (D5). In dev/test the message lands in the
+    outbox/log — never a real mailbox — unless the allowlist says otherwise.
+
+    The RAW token exists in the message body (that is the point — it is the
+    credential being delivered) and NOWHERE else: never printed, never
+    persisted (the store holds only its digest). Returns the SendResult
+    status ("ok"-ish pass-through: "stubbed" | "sent" | "error", or the
+    blocked verdict "suppressed" | "not_allowlisted" | "cap_blocked")."""
+    from utils.email_sender import EmailMessage, GmailSender
+    msg = EmailMessage(
+        to=[email],
+        subject="Your Arkim supplier sign-in link",
+        body=(
+            "Hello,\n\n"
+            "Use the link below to sign in to your Arkim supplier account.\n"
+            "The link is single-use and expires soon.\n\n"
+            f"{magic_link_url(raw_token)}\n\n"
+            "If you did not request it, you can ignore this email.\n\n"
+            "Regards,\nArkim Procurement\nprocurement@arkim.ai"
+        ),
+        metadata={"supplier_domain": _normalize_domain(account_domain),
+                  "magic_link": True, "member_id": member_id},
+    )
+    result = GmailSender().send(msg)
+    # Log the OUTCOME only — the token must be absent from every log line.
+    print(f"[SupplierAccounts] magic-link send {result.status} -> {email}")
+    return result.status
+
+
+# ---------------------------------------------------------------------------
 # Audit (guardrail 7 — every link request, verification, login, logout, and
 # membership decision writes a row: who, what, when, from where)
 # ---------------------------------------------------------------------------

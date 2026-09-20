@@ -6520,3 +6520,148 @@ def admin_reject_quote(quote_id: str,
         raise HTTPException(status_code=409, detail="Quote is not in review")
     return {"ok": True, "quote": out}
 
+
+# ===========================================================================
+# Arc 2 — SUPPLIER ACCOUNTS (durable supplier identity; SUPPLIER_ACCOUNTS_V1)
+#
+# Magic links only, no passwords (D4). The account belongs to a COMPANY (1:1
+# registry supplier_domain); people are members (D1). Domain-matched emails
+# join ACTIVE, everything else lands PENDING for the concierge (D2). Sends go
+# through send governance at the GmailSender seam (D5). Claim/quote token
+# flows are untouched (D6). Roles are enforced through the permission matrix
+# in utils/supplier_accounts_rbac.py — never inline role comparisons (D7).
+# ===========================================================================
+
+# Rate limiting for the auth surface (guardrail 4). Two buckets per request:
+# per normalized email (an account cannot be link-spammed for one address)
+# and per client IP (a spray across many emails from one source). Read LIVE
+# from the env so tests tune caps per-case. In-process fixed-window limiter
+# — the existing house pattern (portal/quote); single-process only, noted
+# follow-up (Redis-backed in production).
+_SUPPLIER_AUTH_RATE_WINDOW_SEC: int = _env_int("SUPPLIER_AUTH_RATE_WINDOW_SEC", 600)
+_supplier_auth_rate_lock = threading.Lock()
+_supplier_auth_rate_buckets: Dict[tuple, list] = {}
+
+
+def _supplier_auth_rate_bump(request: Request, email: str) -> None:
+    """Raise 429 (with Retry-After) when either the (email) or the (ip)
+    bucket is over its cap in the window. Applied BEFORE any account/member
+    logic so throttling is uniform across known and unknown emails (no
+    existence oracle via the limiter either). Inert when a cap is <= 0."""
+    import time
+    email_key = ("email", supplier_accounts.normalize_email(email) or email)
+    ip_key = ("ip", _client_ip(request))
+    now = time.monotonic()
+
+    def _cap(var: str, default: int) -> int:
+        return _env_int(var, default)
+
+    checks = (
+        (email_key, _cap("SUPPLIER_AUTH_RATE_CAP_EMAIL", 3)),
+        (ip_key, _cap("SUPPLIER_AUTH_RATE_CAP_IP", 20)),
+    )
+    tripped = False
+    with _supplier_auth_rate_lock:
+        for key, cap in checks:
+            if cap <= 0:
+                continue
+            entry = _supplier_auth_rate_buckets.get(key)
+            if not entry or (now - entry[1]) >= _SUPPLIER_AUTH_RATE_WINDOW_SEC:
+                entry = [0, now]
+                _supplier_auth_rate_buckets[key] = entry
+            entry[0] += 1
+            if entry[0] > cap:
+                tripped = True
+    if tripped:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests.",
+            headers={"Retry-After": str(_SUPPLIER_AUTH_RATE_WINDOW_SEC)},
+        )
+
+
+class SupplierRequestLinkBody(BaseModel):
+    email: str
+
+
+@app.post("/api/supplier/auth/request-link")
+def supplier_request_link(body: SupplierRequestLinkBody, request: Request):
+    """Request a magic sign-in link for ``email`` (D4 — the only login mode).
+
+    UNIFORM RESPONSE (guardrail 3): always ``{"ok": true}`` / 200 whether the
+    email is known, unknown, pending, or on a public-mailbox provider — no
+    enumeration oracle. The differences live only in the audit trail and the
+    mailbox of the actual member:
+
+      - no account for the email's registrable domain → 200, no member, no
+        send, audited;
+      - account + unknown email, domain match → member created ACTIVE (D2),
+        link minted + emailed via send governance (D5);
+      - account + unknown email, non-match / public mailbox → member created
+        PENDING (concierge approves; a public mailbox can never auto-match),
+        no send;
+      - known ACTIVE member → link minted + emailed;
+      - known PENDING / REVOKED member → no send (PENDING cannot log in and
+        must not learn their status from this endpoint, T4).
+
+    The raw link token is never in the response, never persisted (hash at
+    rest), never logged. Rate-limited per email + per IP BEFORE any lookup.
+    Flag-off ⇒ route absent (byte-identical 404)."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    ip = _client_ip(request)
+    raw_email = body.email or ""
+    _supplier_auth_rate_bump(request, raw_email)
+    email = supplier_accounts.normalize_email(raw_email)
+    if not email:
+        supplier_accounts.audit("link_requested", email=raw_email, actor="public",
+                                ip=ip, detail={"outcome": "unparseable_email"})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    dom = supplier_accounts.email_registrable_domain(email)
+    account = supplier_accounts.get_account_by_domain(dom) if dom else None
+    if account is None:
+        # No supplier account for this domain — indistinguishable from success.
+        supplier_accounts.audit("link_requested", email=email, actor="public",
+                                ip=ip, detail={"outcome": "no_account",
+                                               "domain": dom or None})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    member, created = supplier_accounts.ensure_member_for_link(account["id"], email)
+    if member is None:
+        supplier_accounts.audit("link_requested", account_id=account["id"],
+                                email=email, actor="public", ip=ip,
+                                detail={"outcome": "store_error"})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    if created:
+        supplier_accounts.audit(
+            "member_created", account_id=account["id"], member_id=member["id"],
+            email=email, actor="link_request", ip=ip,
+            detail={"status": member["status"], "role": member["role"]})
+    if member["status"] != supplier_accounts.MEMBER_ACTIVE:
+        # PENDING (or REVOKED): no send, same 200 — the mailbox is the only
+        # place a member ever learns anything, and we send nothing.
+        supplier_accounts.audit(
+            "link_requested", account_id=account["id"], member_id=member["id"],
+            email=email, actor="public", ip=ip,
+            detail={"outcome": "member_not_active", "member_status": member["status"]})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    link = supplier_accounts.mint_magic_link(member["id"])
+    if link is None:
+        supplier_accounts.audit(
+            "link_requested", account_id=account["id"], member_id=member["id"],
+            email=email, actor="public", ip=ip, detail={"outcome": "mint_failed"})
+        return JSONResponse(content={"ok": True},
+                            headers=_portal_response_headers({}))
+    send_status = supplier_accounts.send_magic_link_email(
+        email, link["token"], account_domain=account["supplier_domain"],
+        member_id=member["id"])
+    supplier_accounts.audit(
+        "link_requested", account_id=account["id"], member_id=member["id"],
+        email=email, actor="public", ip=ip,
+        detail={"outcome": "send_attempted", "send_status": send_status})
+    return JSONResponse(content={"ok": True},
+                        headers=_portal_response_headers({}))
+
