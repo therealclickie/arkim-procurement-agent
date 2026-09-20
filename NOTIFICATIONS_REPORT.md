@@ -490,3 +490,9 @@ no answer to it. Per the GATE RULINGS' final clause and the builder's own stop r
 with a clear question is the correct outcome. T1-T12 remain unbuilt; no source, test, conftest,
 dependency-manifest or frontend file was modified. Resolve Q1 (the recommended ruling is stated
 above) and re-invoke the builder.
+
+---
+
+## Q1 RULING ACKNOWLEDGED (2026-09-20)
+
+Q1 is **RULED** by the brief's GATE RULINGS and the revised T4: `RFQ_NEW` is owned by the **`rfq_send` seam** (the point an RFQ is actually sent and the `sent_messages` row is written), **not** `tier1_notify`. The gate's STOP is resolved; the builder proceeds from this committed gate report without re-running the gate. T1–T12 build begins.
