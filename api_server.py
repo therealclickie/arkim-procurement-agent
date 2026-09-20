@@ -7598,3 +7598,62 @@ def supplier_set_notification_preferences(
         actor=session["member"]["email"], detail={"preference": stored})
     return JSONResponse(content={"ok": True, "preference": stored},
                         headers=_portal_response_headers({}))
+
+
+# ---------------------------------------------------------------------------
+# T12 — the concierge alert queue (D6/D7/D8), on the G6 unmatched-replies shape
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/notification-alerts")
+def admin_notification_alerts(authorization: Optional[str] = Header(default=None)):
+    """Every OPEN concierge alert arc 4 raises, newest first.
+
+    Its own endpoint rather than rows in ``/api/admin/review-queue``: that queue
+    is extraction-shaped (manufacturer / part_number / confidence / raw_source)
+    and the one kind already added to it needed a second endpoint to avoid
+    polluting it (G6). So these follow the ``unmatched-replies`` pattern
+    instead — own list, own resolve action, status flip and never a delete.
+
+    Three kinds land here, and they are different problems:
+      RFQ_ESCALATION        — a sent RFQ nobody at the supplier has looked at
+                              (D6's 24h rung: the mail channel has had its turn,
+                              now a human calls them);
+      NO_NOTIFIABLE_MEMBERS — an RFQ went out to a supplier with nobody to tell
+                              (no account, nobody holding view_requests, or all
+                              of them suppressed);
+      EMAIL_SUPPRESSED /
+      SOFT_BOUNCE_REPEATED  — D8: an address that can no longer be mailed, or
+                              one failing repeatedly.
+
+    Flag gate BEFORE ``require_admin`` (the arc 2 convention): with the flag off
+    the route is absent even to a valid admin token.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    require_admin(authorization)
+    from utils import notifications
+    rows = notifications.list_open_alerts()
+    return {"count": len(rows), "alerts": rows}
+
+
+@app.post("/api/admin/notification-alerts/{alert_id}/acknowledge")
+def admin_acknowledge_notification_alert(
+        alert_id: str, authorization: Optional[str] = Header(default=None)):
+    """Acknowledge one open alert → ``acknowledged`` + who + when.
+
+    A STATUS FLIP, never a delete (the ``unmatched-replies`` dismiss
+    convention): the row stays auditable, so "a human was told about this RFQ
+    and said they had it" remains answerable later. 404 unknown; 409 already
+    acknowledged — an operator who double-clicks learns that rather than
+    silently re-stamping someone else's acknowledgement.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    role = require_admin(authorization)
+    from utils import notifications, notifications_store
+    if notifications_store.get_alert(alert_id) is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    out = notifications.acknowledge_alert(alert_id, acknowledged_by=role)
+    if out is None:
+        raise HTTPException(status_code=409, detail="Alert already acknowledged")
+    return {"ok": True, "alert": out}

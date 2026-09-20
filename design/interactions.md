@@ -1127,3 +1127,98 @@ Night 11 shipped.
 - **Protected routes without a session** redirect to login and render nothing,
   including when the session expires mid-visit. The redirect is a courtesy; the
   routes 401 server-side regardless.
+
+## Notifications and delivery tracking (Arc 4 — `NOTIFICATIONS_V1` + `NEXT_PUBLIC_NOTIFICATIONS_V1`, both default OFF)
+
+Every RFQ notification becomes a tracked object with a delivery state, email
+becomes a channel whose success is measured rather than assumed, and an RFQ that
+goes unseen escalates until a human knows about it. Both flags off ⇒ nothing
+below exists: mail goes out through Gmail exactly as before, no notification row
+is written, the webhook is a 404, the schedulers no-op, and the two UI surfaces
+are absent.
+
+- **A notification exists from the moment the system decides to send it.**
+  Every notification is created `QUEUED` before a provider is called, then
+  advances `SENT → DELIVERED → OPENED → CLICKED`. The ladder is monotonic: a
+  late or out-of-order provider event stamps its own timestamp but never walks
+  the state backwards, and the refusal is recorded in the audit trail rather
+  than discarded. `BOUNCED / COMPLAINED / REJECTED / FAILED / SUPPRESSED` are
+  absorbing. A governance-blocked send is recorded as `SUPPRESSED` — the real
+  verdict, never a fake success — and a send left un-delivered because the
+  delivery gate is closed stays `QUEUED`, because claiming `SENT` would have the
+  escalation ladder judge a message that does not exist.
+- **"Seen" means viewed in the portal, or clicked. Never opened.** Pixel opens
+  are fired for every recipient by Apple Mail Privacy Protection, so an open is
+  recorded and shown but never counts as the supplier having seen the request.
+  The strong signal is a portal render: both inbox doors (`GET
+  /api/supplier/requests` and `GET /api/portal/{token}/open-requests`) record an
+  `RfqView` server-side — with the member id on the session door, without one on
+  the claim-token door, which identifies the company rather than a person. A
+  view by ANY colleague counts for the company: escalating to a human because
+  the named addressee did not personally click, while a colleague already opened
+  it, would be the ladder crying wolf.
+- **The inbox marks what is new.** A request nobody at the supplier had opened
+  before this render carries a quiet "New" badge. The badge is computed from the
+  view set as it was *before* the render, so it appears on the render that first
+  shows the request and not afterwards. With the backend flag off the rows carry
+  no read state at all and nothing is badged — an untracked request is never
+  shown as unread.
+- **The escalation ladder is wall-clock and stops at a human.** An RFQ_NEW
+  notification that is not seen within `ESCALATE_REMIND_HOURS` (default 4) gets
+  ONE reminder to the same member about the same RFQ — never a second, ever. If
+  it is still unseen at `ESCALATE_ALERT_HOURS` (default 24) a concierge alert is
+  raised and **no further email goes to the supplier**: two unanswered mails is
+  the point to hand over to a person, not the point to send a third. An
+  already-escalated request is never mailed again even if the reminder rung was
+  skipped. A bounced, complained or suppressed notification is not chased at
+  all — mail is not a working channel for it.
+- **The schedulers are cron entry points, not timers.** `run_escalations(now)`
+  and `run_daily_digest(now)` are plain functions run from
+  `scripts/notifications_scheduler.py {escalations|digest}`. Running either twice
+  with the same instant changes nothing. Nothing fires from inside the API
+  process, so the "one reminder" guarantee does not depend on how many workers
+  happen to be running.
+- **Each member chooses how they hear about requests.** On `/supplier/profile`:
+  *email me as soon as a request arrives* (default), *one summary email a day*,
+  or *no request emails*. It is the member's own setting, not the account's —
+  colleagues are unaffected, and the screen says so. The choice saves on change
+  and the outcome is stated; a failed save reverts the control rather than
+  leaving the supplier believing they turned notifications down when they did
+  not. **Opting out covers request mail only** — sign-in links and account mail
+  still arrive, and the copy says that too.
+- **A digest is one mail per member per day**, listing every request that
+  arrived, and the batched requests are marked as communicated so the
+  escalation ladder does not then chase mail that has already gone out.
+- **Nobody to tell is itself an alert.** An RFQ sent to a supplier with no
+  account, nobody holding `view_requests`, or every address suppressed raises a
+  concierge alert instead of evaporating quietly.
+- **A hard bounce or a spam complaint stops mail to that ADDRESS and tells a
+  human.** Not the domain — one member's dead mailbox never silences their
+  colleagues or the supplier's RFQ mail. A suppressed address drops out of every
+  later fan-out and digest. Soft bounces (a full mailbox, a temporary MTA
+  failure) do not suppress; three consecutive ones raise one alert per run of
+  failures, and a successful delivery resets the count.
+- **Sign-in and invite mail is tracked but never escalated,** and always goes
+  out on the tracking-OFF configuration set: click tracking rewrites links
+  through the provider's tracking domain, where a corporate link scanner
+  pre-fetches them and would burn a single-use token before the human clicks. If
+  that configuration set is not configured, auth mail is refused rather than
+  downgraded onto a tracking-enabled one. An invited colleague is now emailed at
+  all, which they were not before this arc. Auth mail also writes a ledger row
+  so governance caps apply to it — in its own cap class, so a burst of sign-in
+  links cannot starve the day's RFQ budget.
+- **The concierge queue** (`/admin` → Notification Alerts) lists escalated RFQs,
+  accounts with nobody to notify, and suppressed or repeatedly-failing
+  addresses, each with the supplier, the request and the address an operator
+  needs to pick up the phone. **Acknowledge is a status flip, never a delete** —
+  "a human was told and said they had it" stays answerable — and acknowledging
+  does not restart the mail sequence. Acknowledging an already-acknowledged
+  alert is refused rather than silently re-stamped over whoever got there first.
+- **Delivery events arrive on a public webhook that trusts nothing.**
+  `POST /api/webhooks/ses` verifies the publisher's signature against a
+  certificate fetched only from an `amazonaws.com` https URL, accepts only
+  allow-listed topics — checked *before* any URL in the envelope is fetched — and
+  is idempotent on (provider message id, event type), so a redelivered event is a
+  no-op. Every rejection is the same 403 with no detail, so a prober cannot tell
+  a bad signature from a foreign topic from a malformed body, and nothing from
+  the request body is logged or echoed.
