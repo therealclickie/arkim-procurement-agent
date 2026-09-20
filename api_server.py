@@ -7445,3 +7445,50 @@ def portal_request_account(token: str, body: PortalRequestAccountBody,
     return JSONResponse(content={"ok": True},
                         headers=_portal_response_headers({}))
 
+
+
+# ---------------------------------------------------------------------------
+# ARC 4 — NOTIFICATIONS_V1 (delivery tracking)
+#
+# Flag posture matches SUPPLIER_ACCOUNTS_V1 / QUOTE_SUBMIT_V1: read LIVE, and
+# flag-off means the route NEVER EXISTED — byte-identical 404, no store read.
+# ---------------------------------------------------------------------------
+
+def _notifications_enabled() -> bool:
+    """Live check for the arc-4 route gate (honors a monkeypatched env)."""
+    return _env_truthy(os.environ.get("NOTIFICATIONS_V1"))
+
+
+def _notifications_flag_off_404():
+    raise HTTPException(status_code=404, detail="Not Found")
+
+
+@app.post("/api/webhooks/ses")
+async def ses_events_webhook(request: Request):
+    """T6/D4: SNS → SES delivery events. PUBLIC and UNAUTHENTICATED.
+
+    Everything that makes this safe is in ``utils/ses_webhook.handle_envelope``
+    (envelope type → TopicArn allowlist → amazonaws.com certificate URL →
+    signature; a SubscribeURL is visited only after the topic is allowlisted).
+    This handler's whole job is the response posture:
+
+      - flag off                → 404, byte-identical to an unknown route;
+      - ANY rejection whatsoever → the SAME 403 {"detail": "Forbidden"}, so a
+        prober cannot distinguish a bad signature from a foreign topic from a
+        malformed body;
+      - success                  → 200, and nothing from the request body is
+        echoed back or logged.
+
+    The body is read raw and parsed here rather than declared as a Pydantic
+    model: SNS posts with ``Content-Type: text/plain``, and a 422 validation
+    error would itself be an oracle.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    from utils import ses_webhook
+    raw = await request.body()
+    outcome = ses_webhook.handle_envelope(raw)
+    if outcome is None:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return JSONResponse(content={"ok": True},
+                        headers=_portal_response_headers({}))
