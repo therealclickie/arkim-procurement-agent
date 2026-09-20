@@ -7544,3 +7544,57 @@ async def ses_events_webhook(request: Request):
         raise HTTPException(status_code=403, detail="Forbidden")
     return JSONResponse(content={"ok": True},
                         headers=_portal_response_headers({}))
+
+
+class SupplierNotificationPrefBody(BaseModel):
+    preference: str
+
+
+@app.get("/api/supplier/notification-preferences")
+def supplier_notification_preferences(
+        session: dict = Depends(_require_supplier_session)):
+    """T10/D7: the signed-in member's OWN notification preference.
+
+    Self only, and self is not a parameter — the member id comes from the
+    validated session, so there is no id to tamper with and no cross-member
+    read to defend against. Absent row ⇒ the IMMEDIATE default (D7).
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    from utils import notifications_store
+    return JSONResponse(
+        content={"preference": notifications_store.get_preference(
+                     session["member_id"]),
+                 "choices": list(notifications_store.PREFERENCES)},
+        headers=_portal_response_headers({}))
+
+
+@app.put("/api/supplier/notification-preferences")
+def supplier_set_notification_preferences(
+        body: SupplierNotificationPrefBody,
+        session: dict = Depends(_require_supplier_session)):
+    """T10/D7: set the signed-in member's OWN preference.
+
+    ``IMMEDIATE | DAILY_DIGEST | NONE``; an unknown value is a 422 rather than
+    a silent no-op, because a supplier who thinks they turned notifications
+    down and did not is exactly the complaint this surface exists to prevent.
+    NONE covers RFQ mail only — auth and invite mail still go out (D7), which
+    is why the store's vocabulary is the whole validation here.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    from utils import notifications_store
+    wanted = (body.preference or "").strip().upper()
+    stored = notifications_store.set_preference(
+        session["member_id"], wanted, account_id=session["account_id"])
+    if stored is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"preference must be one of "
+                   f"{', '.join(notifications_store.PREFERENCES)}")
+    supplier_accounts.audit(
+        "notification_preference_set", account_id=session["account_id"],
+        member_id=session["member_id"], email=session["member"]["email"],
+        actor=session["member"]["email"], detail={"preference": stored})
+    return JSONResponse(content={"ok": True, "preference": stored},
+                        headers=_portal_response_headers({}))

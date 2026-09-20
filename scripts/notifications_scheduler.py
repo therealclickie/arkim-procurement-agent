@@ -25,10 +25,13 @@ USAGE
     uv run python scripts/notifications_scheduler.py escalations
     uv run python scripts/notifications_scheduler.py escalations --now 2026-09-21T09:00:00+00:00
     uv run python scripts/notifications_scheduler.py escalations --json
+    uv run python scripts/notifications_scheduler.py digest
 
-    # Cron (UTC), hourly — the ladder's resolution is hours, so hourly is
-    # plenty and a missed hour self-heals on the next run:
+    # Cron (UTC). Hourly for the ladder — its resolution is hours, so hourly is
+    # plenty and a missed hour self-heals on the next run. Once a day for the
+    # digest, because "daily" is the promise the member opted into:
     #   0 * * * * cd /srv/arkim && uv run python scripts/notifications_scheduler.py escalations
+    #   0 7 * * * cd /srv/arkim && uv run python scripts/notifications_scheduler.py digest
 
 ``--now`` exists for replay and for a controlled operational catch-up; it is
 parsed as ISO-8601 and a naive value is read as UTC (the store's convention).
@@ -76,6 +79,16 @@ def cmd_escalations(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_digest(args: argparse.Namespace) -> int:
+    """D7's DAILY_DIGEST: every deferred RFQ_NEW for a member, batched into one
+    mail. Run it ONCE a day — running it twice a day is not incorrect (the
+    second pass finds nothing deferred) but it is two mails a day, which is not
+    what the member asked for."""
+    result = notifications.run_daily_digest(parse_now(args.now))
+    _report("digest", result, as_json=args.json)
+    return 0
+
+
 def _report(label: str, result: dict, *, as_json: bool) -> None:
     if as_json:
         print(json.dumps({"command": label, **result}))
@@ -101,6 +114,14 @@ def build_parser() -> argparse.ArgumentParser:
     esc.add_argument("--json", action="store_true",
                      help="emit the result as one JSON line")
     esc.set_defaults(func=cmd_escalations)
+
+    dig = sub.add_parser("digest",
+                         help="send the D7 daily digest for DAILY_DIGEST members")
+    dig.add_argument("--now", default=None,
+                     help="ISO-8601 instant to evaluate against (default: now, UTC)")
+    dig.add_argument("--json", action="store_true",
+                     help="emit the result as one JSON line")
+    dig.set_defaults(func=cmd_digest)
     return parser
 
 
