@@ -1374,3 +1374,128 @@
   .quote-lead-days .quote-input { max-width: none; flex: 1; }
   .portal-request-head { flex-direction: column; align-items: flex-start; }
 }
+
+/* ===========================================================================
+   SUPPLIER SESSION SURFACE (arc 3) — /supplier/*
+   ---------------------------------------------------------------------------
+   Rides on the .portal-surface palette exactly as the quote surface does: one
+   public visual system, no second theme. Only the pieces the token surfaces
+   have no equivalent for are declared here (the notice card, the account
+   chrome, the member table). Everything else reuses .quote-form / .quote-field
+   / .portal-submit so the two doors look like one product.
+   =========================================================================== */
+.supplier-notice {
+  background: var(--portal-card);
+  border: 1px solid var(--portal-line);
+  border-radius: 10px;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.supplier-notice-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--portal-graphite);
+}
+.supplier-notice-body {
+  font-size: 15px;
+  color: var(--portal-slate);
+}
+.supplier-notice-body p { margin: 0 0 8px; }
+.supplier-notice-body p:last-child { margin-bottom: 0; }
+
+/* An inline control that reads as prose, not as a button. */
+.supplier-link-btn,
+.supplier-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--portal-deep-orange);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.supplier-link-btn:hover,
+.supplier-link:hover { color: var(--portal-graphite); }
+
+/* ---- Authenticated chrome (T10) ---- */
+.supplier-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.supplier-identity-account {
+  font-size: 13px;
+  color: var(--portal-graphite);
+  font-weight: 600;
+}
+.supplier-identity-email {
+  font-size: 12.5px;
+  color: var(--portal-slate);
+}
+.supplier-nav {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-bottom: 4px;
+}
+.supplier-nav a {
+  font-size: 14px;
+  color: var(--portal-slate);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  padding-bottom: 2px;
+}
+.supplier-nav a:hover { color: var(--portal-graphite); }
+.supplier-nav a[aria-current="page"] {
+  color: var(--portal-graphite);
+  font-weight: 600;
+  border-bottom-color: var(--portal-orange);
+}
+
+/* ---- Member management (T11) ---- */
+.supplier-member-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.supplier-member-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  background: var(--portal-card);
+  border: 1px solid var(--portal-line);
+  border-radius: 8px;
+}
+.supplier-member-email {
+  flex: 1 1 200px;
+  color: var(--portal-graphite);
+  font-size: 14px;
+}
+.supplier-member-role {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--portal-slate);
+  border: 1px solid var(--portal-line-strong);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.supplier-member-status {
+  font-size: 12.5px;
+  color: var(--portal-slate);
+}
+.supplier-member-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
