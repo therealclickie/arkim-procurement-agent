@@ -170,6 +170,9 @@ export default function AdminInspectorPage() {
       setLoading(true);
       setDetail(null);
       setExpanded(null);
+      // Show-once contract: any fetch (including a same-tab Refresh) clears the
+      // raw claim link — it must never survive past the screen it was minted on.
+      setClaimLink(null);
       const def = TABS.find((x) => x.id === t)!;
       if (def.id === "labeling") {
         // Labeling tab has its own view; fetch the failures-first queue.
@@ -184,7 +187,6 @@ export default function AdminInspectorPage() {
         // revisions live in review_items kind="supplier_revision". The existing
         // /review-queue endpoint returns all review_items except unmatched_reply,
         // so it already includes supplier_revision rows; filter client-side.
-        setClaimLink(null); // never leave a show-once link visible on tab switch
         const r = await fetchAdmin("/review-queue", token);
         setResult(r);
         if (r.ok) {

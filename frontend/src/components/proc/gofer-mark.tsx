@@ -1,6 +1,8 @@
 import { type CSSProperties } from "react";
 import Image from "next/image";
 
+import { BRAND_NAME } from "@/lib/brand";
+
 /**
  * GoferMark — the Gofer brand mark shown in the top-left header next to the
  * "gofer" wordmark.
@@ -26,7 +28,7 @@ export function GoferMark({
   return (
     <Image
       src="/gofer-mark.webp"
-      alt="Gofer"
+      alt={BRAND_NAME}
       width={size}
       height={size}
       className={className}
