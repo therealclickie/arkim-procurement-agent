@@ -78,6 +78,29 @@ def _quote_submit_enabled() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# SUPPLIER_ACCOUNTS_V1 — the supplier-identity surface flag (Arc 2).
+# ---------------------------------------------------------------------------
+# Independent kill switch for the durable supplier-login layer (magic links,
+# sessions, member management, the claim-token → account bridge, session-
+# authed requests/quotes, and the admin pending-membership queue). Flag off ⇒
+# every new route is ABSENT (byte-identical 404 {"detail":"Not Found"}), no
+# new table is read, and the platform is indistinguishable from pre-Arc-2 —
+# the same posture as SUPPLIER_PORTAL_V1 / QUOTE_SUBMIT_V1. Read live so a
+# monkeypatched os.environ is honored. Token flows (claim/quote) are untouched
+# (D6 — this arc adds a second door, it does not move the first).
+def _supplier_accounts_enabled() -> bool:
+    """Live check for the supplier-accounts route gate (honors monkeypatched
+    os.environ)."""
+    return _env_truthy(os.environ.get("SUPPLIER_ACCOUNTS_V1"))
+
+
+def _supplier_accounts_flag_off_404():
+    """Raise the byte-identical-to-unknown-route 404 when SUPPLIER_ACCOUNTS_V1
+    is off (mirrors _portal_flag_off_404 — flag-off = the route never existed)."""
+    raise HTTPException(status_code=404, detail="Not Found")
+
+
+# ---------------------------------------------------------------------------
 # DEMO_MODE — public no-login demo spine (procurement-dev.arkim.ai cold outreach)
 # ---------------------------------------------------------------------------
 # Guards active ONLY when env DEMO_MODE is truthy, all completely inert otherwise
@@ -150,6 +173,7 @@ from utils.procurement_agent.state.phases import Phase
 from utils.procurement_agent import tier1_matcher, tier1_notify
 from utils import claim_tokens  # Night 6 — supplier claim-portal token store (T1)
 from utils import intake_channels  # Night 8 — channel-agnostic intake spine
+from utils import supplier_accounts  # Arc 2 — supplier identity (accounts/members/sessions)
 
 # ---------------------------------------------------------------------------
 # App setup
