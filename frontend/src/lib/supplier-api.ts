@@ -93,7 +93,13 @@ export interface VerifyResponse {
 export type SessionResult<T> =
   | { ok: true; data: T }
   | { ok: false; unauthorized: true }
-  | { ok: false; rejected: true };
+  /**
+   * `status` is present ONLY for the member-management calls, which opt in
+   * (see `withStatus` below). Everywhere else the rejection stays uniform —
+   * a data surface that branched on status codes would be re-deriving
+   * failure kinds the backend deliberately collapsed.
+   */
+  | { ok: false; rejected: true; status?: number };
 
 export const UNAUTHORIZED = { ok: false, unauthorized: true } as const;
 export const REJECTED = { ok: false, rejected: true } as const;
@@ -114,6 +120,15 @@ export const REJECTED = { ok: false, rejected: true } as const;
 async function sessionFetch<T>(
   path: string,
   init?: RequestInit,
+  /**
+   * Carry the HTTP status on a rejection. Opted into ONLY by member
+   * management, where the caller is an already-authenticated admin acting on
+   * their own account: there is no enumeration concern inside a company you
+   * already belong to, and "that person is already a member" is far more
+   * useful than "something went wrong". Every other surface keeps the
+   * uniform rejection.
+   */
+  withStatus = false,
 ): Promise<SessionResult<T>> {
   try {
     const res = await fetch(`/api/supplier${path}`, {
@@ -126,7 +141,9 @@ async function sessionFetch<T>(
       ...init,
     });
     if (res.status === 401) return UNAUTHORIZED;
-    if (!res.ok) return REJECTED;
+    if (!res.ok) {
+      return withStatus ? { ...REJECTED, status: res.status } : REJECTED;
+    }
     const data = (await res.json()) as T;
     return { ok: true, data };
   } catch {
@@ -250,7 +267,7 @@ export function proposeSessionRevision(
 export function getAccountMembers(): Promise<
   SessionResult<{ members: AccountMember[] }>
 > {
-  return sessionFetch<{ members: AccountMember[] }>("/members");
+  return sessionFetch<{ members: AccountMember[] }>("/members", undefined, true);
 }
 
 export function inviteAccountMember(
@@ -260,7 +277,7 @@ export function inviteAccountMember(
   return sessionFetch("/members/invite", {
     method: "POST",
     body: JSON.stringify({ email, role }),
-  });
+  }, true);
 }
 
 export function changeAccountMemberRole(
@@ -270,7 +287,7 @@ export function changeAccountMemberRole(
   return sessionFetch(`/members/${encodeURIComponent(memberId)}/role`, {
     method: "POST",
     body: JSON.stringify({ role }),
-  });
+  }, true);
 }
 
 export function revokeAccountMember(
@@ -278,5 +295,5 @@ export function revokeAccountMember(
 ): Promise<SessionResult<{ ok: boolean; member: AccountMember }>> {
   return sessionFetch(`/members/${encodeURIComponent(memberId)}/revoke`, {
     method: "POST",
-  });
+  }, true);
 }
