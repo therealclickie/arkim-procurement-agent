@@ -264,6 +264,29 @@ def send_rfq(
         "agent_version": "1.0.0-phase3",
     })
 
+    # ── NOTIFICATIONS_V1 (arc 4 T4, Q1 RULED): THE RFQ_NEW seam. ────────────
+    # This is the moment an RFQ is actually sent and its sent_messages row is
+    # written — the same row _supplier_open_requests renders as the portal
+    # inbox. That makes it the only place where a notification's subject is
+    # something the supplier can subsequently VIEW, which is exactly what D5's
+    # "seen" signal requires and what D6's ladder is judged against.
+    #
+    # NOT tier1_notify: that path writes no sent_messages row, so its
+    # notifications would have nothing to view and would escalate to a human
+    # 100% of the time. It gets its own non-escalating TIER1_FYI kind instead.
+    #
+    # Fail-soft and last: an RFQ that went out but whose notification failed to
+    # record is a tracking gap; an RFQ that failed to go out because tracking
+    # raised would be a product outage. Flag off ⇒ this is a no-op returning [].
+    try:
+        from utils import notifications
+        notifications.notify_rfq_sent(sent_message_id=sent_message_id,
+                                      run_id=run_id, supplier_domain=domain,
+                                      status=status)
+    except Exception as exc:
+        print(f"[RFQSend] notification fan-out failed (send itself is unaffected): "
+              f"{type(exc).__name__}: {exc}")
+
     candidate["outreach_status"] = outreach_status
     print(f"[RFQSend] {status.upper()} -> {vendor_name} ({domain}) to={to} cc={cc}")
     return _result(status=status, sent=sent, vendor_name=vendor_name, domain=domain,
