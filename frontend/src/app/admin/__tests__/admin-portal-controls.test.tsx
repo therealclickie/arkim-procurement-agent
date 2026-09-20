@@ -118,14 +118,13 @@ describe("T7.1 — show-once claim link (generate)", () => {
     expect(document.body.textContent ?? "").not.toContain(RAW_TOKEN);
   });
 
-  it.skip("a re-fetch on the SAME tab must not leave the raw token displayed (show-once)", async () => {
-    // FINDING (F4): admin/page.tsx — `load()` (the tab fetch, lines ~167-200)
-    // never clears `claimLink`; only the tab-SWITCH effect (lines ~208-210)
-    // does. Clicking "Refresh" on the suppliers tab re-fetches the table but
-    // leaves the show-once raw token on screen, breaking the show-once
-    // contract the panel itself states ("shown once and won't be visible
-    // again"). Observed failing against current source; skipped per the
-    // prime directive — the finding is the point, source stays untouched.
+  it("a re-fetch on the SAME tab must not leave the raw token displayed (show-once)", async () => {
+    // FINDING (F4, fixed): admin/page.tsx — `load()` (the tab fetch) didn't
+    // clear `claimLink`; only the tab-SWITCH effect did. Clicking "Refresh"
+    // on the suppliers tab re-fetched the table but left the show-once raw
+    // token on screen, breaking the show-once contract the panel itself
+    // states ("shown once and won't be visible again"). `load()` now clears
+    // the claim link on every fetch.
     const { user } = setupAdmin();
     await suppliersTabWithClaimLink(user);
     await user.click(screen.getByRole("button", { name: "Refresh" }));
