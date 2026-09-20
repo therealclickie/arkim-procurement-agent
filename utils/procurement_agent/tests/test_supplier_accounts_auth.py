@@ -384,6 +384,83 @@ class TestVerifyLink:
 
 
 # ---------------------------------------------------------------------------
+# T5 — session: me + logout + the 401 wall
+# ---------------------------------------------------------------------------
+
+def _login(sa_api, monkeypatch, email="sales@dxpe.com") -> tuple[str, dict]:
+    """Full login flow: request link -> capture token from the emailed URL ->
+    verify -> (bearer token, session context)."""
+    token = _capture_link_token(sa_api, monkeypatch, email=email)
+    r = sa_api.post("/api/supplier/auth/verify", json={"token": token})
+    assert r.status_code == 200, r.text
+    return r.json()["token"], r.json()
+
+
+class TestSessionSurface:
+    def test_me_shape(self, sa_api, monkeypatch):
+        _active_member(sa_api)
+        bearer, _out = _login(sa_api, monkeypatch)
+        r = sa_api.get("/api/supplier/me",
+                       headers={"Authorization": f"Bearer {bearer}"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["account"]["supplier_domain"] == "dxpe.com"
+        assert body["account"]["status"] == "active"
+        assert body["member"]["email"] == "sales@dxpe.com"
+        assert body["member"]["role"] == "OWNER"
+        assert body["member"]["status"] == "ACTIVE"
+        # Nothing beyond the two-level identity leaks.
+        assert set(body.keys()) == {"account", "member"}
+
+    def test_missing_invalid_expired_revoked_all_401_identical(self, sa_api,
+                                                               monkeypatch):
+        _active_member(sa_api)
+        # An expired session (store-level mint, expiry now).
+        acct = sa_api._sa.get_account_by_domain("dxpe.com")
+        owner = sa_api._sa.get_member_by_email(acct["id"], "sales@dxpe.com")
+        expired = sa_api._sa.create_session(owner["id"], expiry_hours=0)
+        # A live session, then revoked.
+        bearer, out = _login(sa_api, monkeypatch)
+        assert sa_api.post("/api/supplier/auth/logout",
+                           headers={"Authorization": f"Bearer {bearer}"}).status_code == 200
+        rejections = [
+            sa_api.get("/api/supplier/me"),                          # missing
+            sa_api.get("/api/supplier/me",
+                       headers={"Authorization": "Bearer garbage"}),  # invalid
+            sa_api.get("/api/supplier/me",
+                       headers={"Authorization": f"Bearer {expired['token']}"}),  # expired
+            sa_api.get("/api/supplier/me",
+                       headers={"Authorization": f"Bearer {bearer}"}),  # revoked
+            sa_api.get("/api/supplier/me",
+                       headers={"Authorization": "Basic abc"}),       # not bearer
+        ]
+        assert all(r.status_code == 401 for r in rejections)
+        assert len({r.content for r in rejections}) == 1
+        assert rejections[0].json() == {"detail": "Invalid or expired session"}
+
+    def test_logout_revokes_and_is_audited(self, sa_api, monkeypatch):
+        _active_member(sa_api)
+        bearer, out = _login(sa_api, monkeypatch)
+        headers = {"Authorization": f"Bearer {bearer}"}
+        assert sa_api.get("/api/supplier/me", headers=headers).status_code == 200
+        r = sa_api.post("/api/supplier/auth/logout", headers=headers)
+        assert r.status_code == 200 and r.json() == {"ok": True}
+        assert sa_api.get("/api/supplier/me", headers=headers).status_code == 401
+        events = [row["event"] for row in sa_api._sa.list_audit()]
+        assert "logout" in events
+
+    def test_second_session_independent(self, sa_api, monkeypatch):
+        # Logging out one session does not kill a sibling session.
+        _active_member(sa_api)
+        b1, _ = _login(sa_api, monkeypatch)
+        b2, _ = _login(sa_api, monkeypatch)
+        sa_api.post("/api/supplier/auth/logout",
+                    headers={"Authorization": f"Bearer {b1}"})
+        assert sa_api.get("/api/supplier/me",
+                          headers={"Authorization": f"Bearer {b2}"}).status_code == 200
+
+
+# ---------------------------------------------------------------------------
 # Rate limiting (guardrail 4)
 # ---------------------------------------------------------------------------
 

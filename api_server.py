@@ -6742,3 +6742,67 @@ def supplier_verify_link(body: SupplierVerifyBody, request: Request):
                                  "expires_at": sess["expires_at"]},
                         headers=_portal_response_headers({}))
 
+
+# ---------------------------------------------------------------------------
+# The session dependency (guardrail 6 — opaque bearer over a server-side
+# session record; expiry enforced; logout revokes). Every /api/supplier/*
+# authenticated route depends on this. Flag-off ⇒ absent (404), so the
+# dependency doubles as the route gate for the whole session surface.
+# ---------------------------------------------------------------------------
+
+def _supplier_session_reject_401():
+    """The UNIFORM session rejection — missing, invalid, expired, revoked:
+    one 401 body for all four (no oracle beyond valid/invalid)."""
+    raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+
+def _require_supplier_session(authorization: Optional[str] = Header(default=None)) -> dict:
+    """FastAPI dependency: validate the ``Authorization: Bearer <session>``
+    header against the session store (hash lookup; expiry + revoke + member
+    still ACTIVE enforced there). Returns the session context
+    ``{session_id, member_id, account_id, member, account}``."""
+    if not _supplier_accounts_enabled():
+        _supplier_accounts_flag_off_404()
+    if not authorization or not authorization.startswith("Bearer "):
+        _supplier_session_reject_401()
+    ctx = supplier_accounts.validate_session(authorization[len("Bearer "):].strip())
+    if ctx is None:
+        _supplier_session_reject_401()
+    return ctx
+
+
+@app.get("/api/supplier/me")
+def supplier_me(session: dict = Depends(_require_supplier_session)):
+    """Who am I: the account (the company) + the member (the person) — D1's
+    two-level identity in one summary. Nothing else (no other members, no
+    registry internals)."""
+    acct, member = session["account"], session["member"]
+    return JSONResponse(content={
+        "account": {
+            "id": acct["id"],
+            "supplier_domain": acct["supplier_domain"],
+            "status": acct["status"],
+            "created_at": acct["created_at"],
+        },
+        "member": {
+            "id": member["id"],
+            "email": member["email"],
+            "role": member["role"],
+            "status": member["status"],
+        },
+    }, headers=_portal_response_headers({}))
+
+
+@app.post("/api/supplier/auth/logout")
+def supplier_logout(session: dict = Depends(_require_supplier_session)):
+    """Revoke the presented session (guardrail 6). Idempotent-safe: a second
+    logout with the same token is the uniform 401 (the session is gone)."""
+    supplier_accounts.revoke_session(session["session_id"])
+    supplier_accounts.audit(
+        "logout", account_id=session["account_id"],
+        member_id=session["member_id"], email=session["member"]["email"],
+        actor=session["member"]["email"],
+        detail={"session_id": session["session_id"]})
+    return JSONResponse(content={"ok": True},
+                        headers=_portal_response_headers({}))
+
