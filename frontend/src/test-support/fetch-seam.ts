@@ -51,3 +51,53 @@ export function neverResolves(): Response {
 export function isPostTo(call: FetchCall, path: string): boolean {
   return (call.init?.method ?? "GET") === "POST" && call.url.includes(path);
 }
+
+/** The uniform backend rejection for a missing / expired / revoked session
+ *  (arc 2's one 401 body, extended to the cookie in arc 3 T1). */
+export const unauthorized = (): Response =>
+  jsonResponse(401, { detail: "Invalid or expired session" });
+
+/** The rate-limited response the auth endpoints return over cap. */
+export const tooManyRequests = (): Response =>
+  jsonResponse(429, { detail: "Too many requests." });
+
+/**
+ * Every value a surface could have persisted, concatenated for a substring
+ * sweep. Arc 1 declared an equivalent inside its security test file, which
+ * this arc may not modify (gate finding F3) — so the shared copy lives here
+ * and the duplication is forced, not careless.
+ */
+export function storageDump(store: Storage): string {
+  const parts: string[] = [];
+  for (let i = 0; i < store.length; i++) {
+    const key = store.key(i);
+    if (key !== null) parts.push(key, store.getItem(key) ?? "");
+  }
+  return parts.join("\n");
+}
+
+/** Silence and capture every console channel for the duration of a test. */
+export function spyConsole() {
+  return (["log", "info", "warn", "error", "debug"] as const).map((m) =>
+    vi.spyOn(console, m).mockImplementation(() => {}),
+  );
+}
+
+/** Everything written to the spied console channels, as one string. */
+export function consoleDump(spies: ReturnType<typeof spyConsole>): string {
+  return spies
+    .flatMap((s) => s.mock.calls)
+    .map((args) =>
+      args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "),
+    )
+    .join("\n");
+}
+
+/**
+ * Read a header off a recorded call THROUGH `Headers`, so an absence
+ * assertion cannot pass vacuously because the client happened to pass a
+ * `Headers` instance rather than a plain record. Case-insensitive.
+ */
+export function headerValue(call: FetchCall, name: string): string | null {
+  return new Headers(call.init?.headers).get(name);
+}

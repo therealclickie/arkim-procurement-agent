@@ -10,6 +10,13 @@ import type {
   QuoteHistoryRow,
 } from "@/lib/portal-api";
 import type { QuoteContext } from "@/lib/quote-api";
+import type {
+  AccountMember,
+  SupplierAccount,
+  SupplierMe,
+  SupplierMember,
+  SupplierRole,
+} from "@/lib/supplier-api";
 import type { ClaimLink } from "@/app/admin/portal-admin";
 
 /** Portal demand teaser — the hero of the claim page. */
@@ -94,6 +101,73 @@ export function claimLink(over: Partial<ClaimLink> = {}): ClaimLink {
     token_id: "tokid_1",
     expires_at: "2026-09-27T00:00:00Z",
     link_path: "/portal/claim_raw_tok_111222333",
+    ...over,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Arc 3 — the supplier SESSION shapes (/api/supplier/*). Append-only: no
+// factory above is altered, so the pre-existing suite cannot be affected.
+// ---------------------------------------------------------------------------
+
+/** The company account (GET /api/supplier/me → account). */
+export function supplierAccount(
+  over: Partial<SupplierAccount> = {},
+): SupplierAccount {
+  return {
+    id: "acct_1",
+    supplier_domain: "sealit.example.com",
+    status: "active",
+    created_at: "2026-09-01T00:00:00Z",
+    ...over,
+  };
+}
+
+/** Capabilities per role — mirrors utils/supplier_accounts_rbac.CAPABILITY_MATRIX.
+ *  Used ONLY to build fixtures; production code reads the server's list. */
+const ROLE_PERMISSIONS: Record<SupplierRole, SupplierMember["permissions"]> = {
+  OWNER: [
+    "change_roles", "manage_members", "propose_revisions", "submit_quotes",
+    "transfer_ownership", "view_members", "view_requests",
+  ],
+  ADMIN: [
+    "change_roles", "manage_members", "propose_revisions", "submit_quotes",
+    "view_members", "view_requests",
+  ],
+  MEMBER: ["propose_revisions", "submit_quotes", "view_members", "view_requests"],
+};
+
+/** The signed-in person (GET /api/supplier/me → member). */
+export function supplierMember(
+  over: Partial<SupplierMember> = {},
+): SupplierMember {
+  const role = over.role ?? "OWNER";
+  return {
+    id: "mem_1",
+    email: "sales@sealit.example.com",
+    role,
+    status: "ACTIVE",
+    permissions: ROLE_PERMISSIONS[role],
+    ...over,
+  };
+}
+
+/** The whole GET /api/supplier/me body. */
+export function supplierMe(over: Partial<SupplierMe> = {}): SupplierMe {
+  return { account: supplierAccount(), member: supplierMember(), ...over };
+}
+
+/** One row of GET /api/supplier/members. */
+export function accountMember(
+  over: Partial<AccountMember> = {},
+): AccountMember {
+  return {
+    id: "mem_2",
+    email: "buyer@sealit.example.com",
+    registrable_domain: "sealit.example.com",
+    role: "MEMBER",
+    status: "ACTIVE",
+    created_at: "2026-09-02T00:00:00Z",
     ...over,
   };
 }
