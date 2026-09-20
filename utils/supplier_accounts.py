@@ -589,6 +589,37 @@ def update_member_role(member_id: str, role: str) -> Optional[dict]:
     return get_member(member_id)
 
 
+def approve_pending_member(member_id: str, *,
+                           approved_by: Optional[str] = None) -> Optional[dict]:
+    """The T10 concierge approve: PENDING → ACTIVE with role MEMBER (D7 least
+    privilege — the default role lives HERE, next to the role vocabulary, so
+    no route or caller needs to name a role). The one-OWNER invariant is
+    untouched (an approved member is never OWNER). Returns the updated member
+    or None on flag-off / unknown / store failure."""
+    if _dormant():
+        return None
+    member = get_member(member_id)
+    if not member or member.get("status") != MEMBER_PENDING:
+        return None
+    out = update_member_role(member_id, ROLE_MEMBER)
+    if out is None:
+        return None
+    return update_member_status(member_id, MEMBER_ACTIVE, updated_by=approved_by)
+
+
+def reject_pending_member(member_id: str, *,
+                          rejected_by: Optional[str] = None) -> Optional[dict]:
+    """The T10 concierge reject: PENDING → REVOKED (the email cannot
+    re-request its way in; a fresh invitation is the path back). Returns the
+    updated member or None on flag-off / unknown / store failure."""
+    if _dormant():
+        return None
+    member = get_member(member_id)
+    if not member or member.get("status") != MEMBER_PENDING:
+        return None
+    return update_member_status(member_id, MEMBER_REVOKED, updated_by=rejected_by)
+
+
 # ---------------------------------------------------------------------------
 # Magic links (D4 — single-use, expiring, hashed at rest)
 # ---------------------------------------------------------------------------

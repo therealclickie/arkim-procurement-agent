@@ -174,6 +174,7 @@ from utils.procurement_agent import tier1_matcher, tier1_notify
 from utils import claim_tokens  # Night 6 — supplier claim-portal token store (T1)
 from utils import intake_channels  # Night 8 — channel-agnostic intake spine
 from utils import supplier_accounts  # Arc 2 — supplier identity (accounts/members/sessions)
+from utils import supplier_accounts_rbac  # Arc 2 T11 — the D7 permission matrix
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -6918,10 +6919,10 @@ def admin_pending_members(authorization: Optional[str] = Header(default=None)):
 @app.post("/api/admin/supplier-members/{member_id}/approve")
 def admin_approve_member(member_id: str,
                          authorization: Optional[str] = Header(default=None)):
-    """Approve a pending membership → the member becomes ACTIVE with role
-    MEMBER (D7 least privilege: a concierge-approved member never arrives as
-    OWNER/ADMIN — ownership exists only via account establishment). Audited.
-    404 unknown member; 409 when not pending."""
+    """Approve a pending membership → ACTIVE with role MEMBER (D7 least
+    privilege — the default lives in the store's approve_pending_member, so
+    this handler names no role). Audited. 404 unknown member; 409 when not
+    pending."""
     if not _supplier_accounts_enabled():
         _supplier_accounts_flag_off_404()
     role = require_admin(authorization)
@@ -6930,13 +6931,7 @@ def admin_approve_member(member_id: str,
         raise HTTPException(status_code=404, detail="Member not found")
     if member["status"] != supplier_accounts.MEMBER_PENDING:
         raise HTTPException(status_code=409, detail="Member is not pending")
-    # Least privilege FIRST (role), then the status transition.
-    out = supplier_accounts.update_member_role(
-        member_id, supplier_accounts.ROLE_MEMBER)
-    if out is None:
-        raise HTTPException(status_code=500, detail="Member could not be approved")
-    out = supplier_accounts.update_member_status(
-        member_id, supplier_accounts.MEMBER_ACTIVE, updated_by=role)
+    out = supplier_accounts.approve_pending_member(member_id, approved_by=role)
     if out is None:
         raise HTTPException(status_code=500, detail="Member could not be approved")
     supplier_accounts.audit(
@@ -6960,8 +6955,7 @@ def admin_reject_member(member_id: str,
         raise HTTPException(status_code=404, detail="Member not found")
     if member["status"] != supplier_accounts.MEMBER_PENDING:
         raise HTTPException(status_code=409, detail="Member is not pending")
-    out = supplier_accounts.update_member_status(
-        member_id, supplier_accounts.MEMBER_REVOKED, updated_by=role)
+    out = supplier_accounts.reject_pending_member(member_id, rejected_by=role)
     if out is None:
         raise HTTPException(status_code=500, detail="Member could not be rejected")
     supplier_accounts.audit(
@@ -6969,6 +6963,145 @@ def admin_reject_member(member_id: str,
         email=member["email"], actor=role,
         detail={"status": out["status"]})
     return {"ok": True, "member": _serialize_pending_member(out)}
+
+
+# ---------------------------------------------------------------------------
+# T11 — member management (D7): the capability dependency + the routes.
+#
+# Enforcement is MATRIX-DRIVEN: every route depends on
+# _supplier_require_capability(<capability>), which delegates to
+# supplier_accounts_rbac.has_permission against THE declared matrix. The
+# role-policy rules (no second OWNER, no demoting/re-voking the OWNER, …)
+# live in the rbac module too — NO route handler names or compares roles.
+# ---------------------------------------------------------------------------
+
+def _supplier_require_capability(capability: str):
+    """Dependency factory: the session dependency + the matrix check. This is
+    the ONLY enforcement seam — adding a fourth role is one row in
+    utils/supplier_accounts_rbac.CAPABILITY_MATRIX, not a route change."""
+    def dep(session: dict = Depends(_require_supplier_session)) -> dict:
+        if not supplier_accounts_rbac.has_permission(session["member"],
+                                                     capability):
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return session
+    return dep
+
+
+def _supplier_rbac_error(exc: supplier_accounts.SupplierAccountsError):
+    """Map an rbac/store policy violation to its HTTP response. Codes only —
+    no role knowledge here (that lives in the matrix module)."""
+    status = {
+        "forbidden": 403,
+        "owner_transfer_required": 403,
+        "cannot_demote_owner": 403,
+        "cannot_revoke_owner": 403,
+        "invalid_role": 422,
+        "invalid_email": 422,
+        "already_member": 409,
+        "member_not_found": 404,
+        "store_error": 500,
+    }.get(exc.code, 400)
+    raise HTTPException(status_code=status, detail=exc.message)
+
+
+def _serialize_account_member(member: dict) -> dict:
+    """The member-list shape (own account only): person identity + role +
+    status. No session/account internals, no other accounts."""
+    return {
+        "id": member["id"],
+        "email": member["email"],
+        "registrable_domain": member["registrable_domain"],
+        "role": member["role"],
+        "status": member["status"],
+        "created_at": member["created_at"],
+    }
+
+
+@app.get("/api/supplier/members")
+def supplier_members(session: dict = Depends(
+        _supplier_require_capability(supplier_accounts_rbac.VIEW_MEMBERS))):
+    """The account's member list (own account only — the account comes from
+    the session). Every role may view their colleagues; managing them is a
+    separate capability."""
+    rows = supplier_accounts.list_members(session["account_id"])
+    return JSONResponse(content={"members": [_serialize_account_member(m)
+                                              for m in rows]},
+                        headers=_portal_response_headers({}))
+
+
+class SupplierInviteBody(BaseModel):
+    email: str
+    role: str = supplier_accounts.ROLE_MEMBER  # least-privilege default
+
+
+@app.post("/api/supplier/members/invite")
+def supplier_members_invite(body: SupplierInviteBody,
+                            session: dict = Depends(
+                                _supplier_require_capability(
+                                    supplier_accounts_rbac.MANAGE_MEMBERS))):
+    """Invite a member (capability-gated; D2 establishment rules and the
+    no-invited-OWNER rule live in the rbac module). Audited."""
+    try:
+        member = supplier_accounts_rbac.invite_member(
+            session["member"], body.email or "", (body.role or "").upper())
+    except supplier_accounts.SupplierAccountsError as exc:
+        _supplier_rbac_error(exc)
+    supplier_accounts.audit(
+        "member_invited", account_id=session["account_id"],
+        member_id=member["id"], email=member["email"],
+        actor=session["member"]["email"],
+        detail={"role": member["role"], "status": member["status"]})
+    return JSONResponse(content={"ok": True,
+                                 "member": _serialize_account_member(member)},
+                        headers=_portal_response_headers({}))
+
+
+class SupplierRoleBody(BaseModel):
+    role: str
+
+
+@app.post("/api/supplier/members/{member_id}/role")
+def supplier_member_role(member_id: str, body: SupplierRoleBody,
+                         session: dict = Depends(
+                             _supplier_require_capability(
+                                 supplier_accounts_rbac.CHANGE_ROLES))):
+    """Change a member's role (capability-gated; the ownership invariants —
+    no promotion to OWNER, no demoting the OWNER — live in the rbac module).
+    Audited. Cross-account ids are a 404 (no existence reveal)."""
+    try:
+        member = supplier_accounts_rbac.change_member_role(
+            session["member"], member_id, (body.role or "").upper())
+    except supplier_accounts.SupplierAccountsError as exc:
+        _supplier_rbac_error(exc)
+    supplier_accounts.audit(
+        "role_changed", account_id=session["account_id"],
+        member_id=member["id"], email=member["email"],
+        actor=session["member"]["email"], detail={"role": member["role"]})
+    return JSONResponse(content={"ok": True,
+                                 "member": _serialize_account_member(member)},
+                        headers=_portal_response_headers({}))
+
+
+@app.post("/api/supplier/members/{member_id}/revoke")
+def supplier_member_revoke(member_id: str,
+                           session: dict = Depends(
+                               _supplier_require_capability(
+                                   supplier_accounts_rbac.MANAGE_MEMBERS))):
+    """Revoke a member (capability-gated; the OWNER-can-never-be-revoked rule
+    — including self-revoke — lives in the rbac module). Audited."""
+    try:
+        member = supplier_accounts_rbac.revoke_member(session["member"],
+                                                      member_id)
+    except supplier_accounts.SupplierAccountsError as exc:
+        _supplier_rbac_error(exc)
+    supplier_accounts.audit(
+        "member_revoked", account_id=session["account_id"],
+        member_id=member["id"], email=member["email"],
+        actor=session["member"]["email"],
+        detail={"status": member["status"]})
+    return JSONResponse(content={"ok": True,
+                                 "member": _serialize_account_member(member)},
+                        headers=_portal_response_headers({}))
 
 
 # ---------------------------------------------------------------------------
