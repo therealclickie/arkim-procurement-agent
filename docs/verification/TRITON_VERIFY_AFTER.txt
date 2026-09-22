@@ -1,0 +1,99 @@
+﻿run: 9a33026b-1d49-4fe6-b33c-6f1d432c6280 | initiated: 2026-07-22 18:45:33.115105
+
+===== tier_1 (1) =====
+DXP Enterprises                                band=C seeded=None
+    found_pn=None match=Functional Alternative pn_status=None
+    band_reason=None eq=20.0
+    price=0.0 url=Y rej=None mock=None
+
+===== tier_2 (8) =====
+Dealers Electric                               band=A seeded=None
+    found_pn=HHI150-12-447T-F2 match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=64.0
+    price=19343.64 url=Y rej=None mock=None
+Material Supply Network                        band=A seeded=True
+    found_pn=HHI150-12-447T match=Exact OEM pn_status=exact_match
+    band_reason=None eq=52.0
+    price=None url=Y rej=None mock=None
+Global Industrial                              band=B seeded=None
+    found_pn=ECP844156TR match=Functional Alternative pn_status=None
+    band_reason=None eq=57.0
+    price=36175.0 url=Y rej=None mock=None
+Electric Motors For Less                       band=B seeded=None
+    found_pn=PE447T-150-6 match=Aftermarket Compatible pn_status=None
+    band_reason=None eq=52.0
+    price=10718.0 url=Y rej=None mock=None
+MROSupply                                      band=B seeded=None
+    found_pn=PE447T-150-6-575V match=Aftermarket Compatible pn_status=None
+    band_reason=None eq=52.0
+    price=12254.99 url=Y rej=None mock=None
+Electric Motors For Less                       band=B seeded=None
+    found_pn=None match=Functional Alternative pn_status=None
+    band_reason=None eq=35.0
+    price=10718.0 url=Y rej=duplicate_vendor_domain mock=None
+MROSupply                                      band=B seeded=None
+    found_pn=None match=Functional Alternative pn_status=None
+    band_reason=None eq=35.0
+    price=13472.51 url=Y rej=duplicate_vendor_domain mock=None
+Global Industrial                              band=B seeded=None
+    found_pn=C150P3C match=Aftermarket Compatible pn_status=None
+    band_reason=None eq=30.0
+    price=16999.0 url=Y rej=suitability_below_floor mock=None
+
+===== tier_3 (13) =====
+CE Motors                                      band=A seeded=None
+    found_pn=HHI150-12-447T match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=52.0
+    price=0.0 url=Y rej=None mock=None
+North American Electric (NAE)                  band=A seeded=True
+    found_pn=HHI150-12-447T match=Aftermarket Equivalent pn_status=not_visible
+    band_reason=None eq=52.0
+    price=None url=Y rej=None mock=None
+Electric Motor Warehouse (Nidec supplier)      band=B seeded=None
+    found_pn=HD150P3F match=Aftermarket Equivalent pn_status=None
+    band_reason=None eq=53.3
+    price=11901.12 url=Y rej=None mock=None
+Galt Electric                                  band=B seeded=None
+    found_pn=GPT15006447TK match=Aftermarket Equivalent pn_status=None
+    band_reason=None eq=52.2
+    price=7941.46 url=Y rej=None mock=None
+Electric Motors                                band=B seeded=None
+    found_pn=None match=Aftermarket Equivalent pn_status=None
+    band_reason=None eq=14.0
+    price=0.0 url=Y rej=suitability_below_floor mock=None
+WEG (via FactoryMation)                        band=B seeded=None
+    found_pn=None match=Aftermarket Equivalent pn_status=None
+    band_reason=None eq=13.8
+    price=0.0 url=Y rej=None mock=None
+All Motors & Equipment Direct                  band=B seeded=None
+    found_pn=None match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=12.7
+    price=0.0 url=Y rej=suitability_below_floor mock=None
+Jamieson Equipment Company                     band=B seeded=True
+    found_pn=HHI10-18-215TC match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=12.4
+    price=None url=Y rej=suitability_below_floor mock=None
+Gainesville Industrial Electric                band=C seeded=None
+    found_pn=None match=OEM Authorized Distributor pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=True
+AMED                                           band=C seeded=None
+    found_pn=None match=OEM Authorized Distributor pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=True
+Houston Motor & Control                        band=C seeded=None
+    found_pn=None match=OEM Authorized Distributor pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=True
+BSI Mechanical                                 band=C seeded=None
+    found_pn=None match=OEM Authorized Distributor pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=True
+Dietz Electric                                 band=C seeded=None
+    found_pn=None match=OEM Authorized Distributor pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=True
+
+findings[]: ABSENT
+outreachTargets: ABSENT
+filters_applied: ['suitability_floor:30%', 'apollo_rescued:2', 'ranking_bands:v1']

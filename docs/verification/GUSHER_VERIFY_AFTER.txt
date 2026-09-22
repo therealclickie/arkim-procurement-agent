@@ -1,0 +1,135 @@
+﻿run: 2daad1b9-3f45-4df8-87bc-aa17097e1a60 | initiated: 2026-07-22 18:47:09.307290
+
+===== tier_1 (1) =====
+DXP Enterprises                                band=C seeded=None
+    found_pn=None match=Functional Alternative pn_status=None
+    band_reason=None eq=20.0
+    price=0.0 url=Y rej=None mock=None
+
+===== tier_2 (14) =====
+Seal It                                        band=A seeded=None
+    found_pn=84004-28 match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=64.0
+    price=53.25 url=Y rej=None mock=None
+Seals-Direct                                   band=A seeded=None
+    found_pn=84004-28 match=Aftermarket Compatible pn_status=None
+    band_reason=None eq=46.0
+    price=0.0 url=Y rej=duplicate_vendor_domain mock=None
+Zoro                                           band=B seeded=None
+    found_pn=84004-28SP match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=57.0
+    price=114.99 url=Y rej=None mock=None
+Seal IT 123                                    band=B seeded=None
+    found_pn=None match=Functional Alternative pn_status=None
+    band_reason=None eq=35.0
+    price=53.25 url=Y rej=duplicate_in_higher_tier mock=None
+Sealit123                                      band=B seeded=None
+    found_pn=None match=Functional Alternative pn_status=None
+    band_reason=None eq=35.0
+    price=53.25 url=Y rej=duplicate_in_higher_tier mock=None
+sealit123.com                                  band=B seeded=None
+    found_pn=None match=Functional Alternative pn_status=None
+    band_reason=None eq=35.0
+    price=53.25 url=Y rej=duplicate_in_higher_tier mock=None
+Pump Catalog                                   band=B seeded=None
+    found_pn=PS-525 match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=35.0
+    price=79.99 url=Y rej=None mock=None
+Seals-Direct                                   band=B seeded=None
+    found_pn=None match=Functional Alternative pn_status=None
+    band_reason=None eq=35.0
+    price=85.28 url=Y rej=None mock=None
+Seals Direct                                   band=B seeded=None
+    found_pn=None match=Functional Alternative pn_status=None
+    band_reason=None eq=35.0
+    price=85.28 url=Y rej=duplicate_in_higher_tier mock=None
+Springer Parts                                 band=B seeded=None
+    found_pn=84004-28SP match=Aftermarket Compatible pn_status=None
+    band_reason=None eq=35.0
+    price=0.0 url=Y rej=None mock=None
+Pump Catalog                                   band=B seeded=None
+    found_pn=PS-7937 match=Aftermarket Compatible pn_status=None
+    band_reason=None eq=31.0
+    price=221.0 url=Y rej=suitability_below_floor mock=None
+Springer Pumps                                 band=B seeded=True
+    found_pn=None match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=15.5
+    price=None url=Y rej=None mock=None
+Seal It 1-2-3                                  band=B seeded=None
+    found_pn=84004-51-C238DB match=Aftermarket Compatible pn_status=None
+    band_reason=None eq=14.0
+    price=0.0 url=Y rej=suitability_below_floor mock=None
+Gusher Pumps                                   band=B seeded=None
+    found_pn=None match=Functional Alternative pn_status=None
+    band_reason=None eq=12.3
+    price=0.0 url=Y rej=suitability_below_floor mock=None
+
+===== tier_3 (16) =====
+Platinum Performance Products                  band=A seeded=True
+    found_pn=84004-28 match=Exact OEM pn_status=exact_match
+    band_reason=None eq=46.0
+    price=None url=Y rej=None mock=None
+Springer Parts (Springer Pumps, LLC)           band=B seeded=None
+    found_pn=84004-28SP match=Aftermarket Compatible pn_status=partial_match
+    band_reason=None eq=34.1
+    price=0.0 url=Y rej=duplicate_vendor_domain mock=None
+Seal It 123                                    band=B seeded=None
+    found_pn=84004-52 match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=33.5
+    price=122.1 url=Y rej=None mock=None
+Sekas Process Equipment                        band=B seeded=None
+    found_pn=None match=Aftermarket Equivalent pn_status=None
+    band_reason=None eq=16.5
+    price=0.0 url=Y rej=None mock=None
+All Seals Inc.                                 band=B seeded=None
+    found_pn=None match=Aftermarket Equivalent pn_status=None
+    band_reason=None eq=15.5
+    price=0.0 url=Y rej=None mock=None
+Seal Distributors                              band=B seeded=None
+    found_pn=None match=Aftermarket Equivalent pn_status=None
+    band_reason=None eq=15.5
+    price=0.0 url=Y rej=None mock=None
+U.S. Seal Mfg.                                 band=B seeded=None
+    found_pn=PS-238 match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=15.4
+    price=0.0 url=Y rej=None mock=None
+Seal House USA                                 band=B seeded=True
+    found_pn=None match=Aftermarket Equivalent pn_status=not_visible
+    band_reason=None eq=15.2
+    price=None url=Y rej=None mock=None
+A.R. Thomson Group Inc.                        band=B seeded=None
+    found_pn=None match=Aftermarket Equivalent pn_status=None
+    band_reason=None eq=14.5
+    price=0.0 url=Y rej=suitability_below_floor mock=None
+Gusher Pumps, Inc.                             band=B seeded=None
+    found_pn=None match=Functional Alternative pn_status=not_visible
+    band_reason=None eq=12.3
+    price=0.0 url=Y rej=suitability_below_floor mock=None
+Global O-Ring and Seal, LLC                    band=C seeded=None
+    found_pn=None match=Aftermarket Equivalent pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=None
+Phoenix Pumps                                  band=C seeded=None
+    found_pn=None match=OEM Authorized Distributor pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=True
+Anderson Process                               band=C seeded=None
+    found_pn=None match=OEM Authorized Distributor pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=True
+OTC Industrial                                 band=C seeded=None
+    found_pn=None match=OEM Authorized Distributor pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=True
+Great Lakes Pump & Supply                      band=C seeded=None
+    found_pn=None match=OEM Authorized Distributor pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=True
+Wagner Process Equipment                       band=C seeded=None
+    found_pn=None match=OEM Authorized Distributor pn_status=None
+    band_reason=None eq=0.0
+    price=0.0 url=N rej=None mock=True
+
+findings[]: ABSENT
+outreachTargets: ABSENT
+filters_applied: ['suitability_floor:30%', 'apollo_rescued:1', 'cross_tier_dedup:4', 'ranking_bands:v1']

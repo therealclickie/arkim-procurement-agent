@@ -1,0 +1,108 @@
+{
+  "_meta": {
+    "description": "Night 7 matching-quality audit: labelled eval cases for the fix night. Three case families: (A) Gusher vendor-matching / kit retrieval; (B) Goulds 3196 no-redundant-clarification; (K) kit-vs-part retrieval. Each case is an ACCEPTANCE TEST the fix night is judged against. Cases are split: the reproduction/expected-behavior assertions the fix must satisfy. These are diagnosis artefacts (Night 7 was READ-ONLY) — NOT yet wired into pytest; the fix night should add a test module that loads this fixture and asserts the expected fields. Inputs are realistic free-text / specs shapes; expected_* state the target behavior, not current behavior.",
+    "source": "NIGHT7_MATCHING_AUDIT_BRIEF.md + audit/NIGHT7_MATCHING_INVESTIGATION.md",
+    "baseline_head": "7be667bc7a28e905415e7b79294e0fe58a46a0d7",
+    "branch": "audit/matching-quality-night7",
+    "registry_types": ["mechanical_seal", "pump", "valve", "sensor_instrument", "motor_drive", "unknown"],
+    "case_families": ["A_gusher_vendor_matching", "B_goulds_no_redundant_clarification", "K_kit_vs_part_retrieval"],
+    "note": "Current-behavior observations are recorded under observed_* so the fix night can prove a before/after delta. Expected_* is the acceptance bar. Do NOT weaken an expected_* to match current behavior — that defeats the case."
+  },
+  "cases": [
+    {
+      "id": "A-gusher-seal-kit-not-retrieved",
+      "family": "A_gusher_vendor_matching",
+      "input_text": "mechanical seal for a Gusher pump, part 84004-28, Type 21, 1-5/8 inch shaft",
+      "expected_specs": {
+        "manufacturer": "Gusher Pumps",
+        "part_number": "84004-28-C238CBC",
+        "detected_type": "mechanical seal",
+        "shaft_size": "1-5/8\"",
+        "category": "Part"
+      },
+      "expected_behavior": "At least one sourcing query issued to the marketplace MUST include the term 'kit' (or 'seal kit') so marketplace seal-KIT listings are RETRIEVED. Currently NO query (Tier 2 exact, Tier 3 national, Tier 3 aftermarket) contains 'kit' — kits are not-retrieved. Acceptance: assert the actual Tavily query strings (or their builder output) contain 'kit' for a detected_type containing 'seal'.",
+      "observed_current": "Run 97e7a58b: 9 Tier-3 survivors, none a kit. query_issued intent = 'Gusher Pumps Type 21 84004-28-C238CBC' (no 'kit'). Builder trace: _build_search_query / _build_tier3_query / _build_aftermarket_query emit no 'kit' keyword. noun classifier maps 'seal kit' -> SEAL (part_type_classes.py:80), so a retrieved kit would NOT be filtered — the miss is retrieval, not filtering.",
+      "evidence_files": ["utils/sourcing_archieved/tavily_client.py:138-165", "utils/sourcing_archieved/tavily_client.py:214-228", "utils/sourcing_archieved/enterprise_search.py:651-697", "utils/sourcing_archieved/part_type_classes.py:76-86", "audit/NIGHT7_MATCHING_INVESTIGATION.md §A2"],
+      "severity": "medium",
+      "fix_direction": "Add a kit-aware query variant for seal/bearing/gasket component classes: when detected_type is a kit-bearing class (seal, bearing, gasket, packing, diaphragm), issue an additional query that includes the term 'kit' / 'repair kit' alongside the component term + parent identity. Do NOT change the noun classifier (kits correctly classify as SEAL). Gate on detected_type class, not on the word 'kit' in the user text (the user may say 'seal' and still want a kit)."
+    },
+    {
+      "id": "A-gusher-vendor-matching-data-gap",
+      "family": "A_gusher_vendor_matching",
+      "input_text": "mechanical seal for a Gusher pump, part 84004-28, Type 21, 1-5/8 inch shaft",
+      "expected_behavior": "Tier-1 registry matching is CORRECT for the current registry: DXP Enterprises (sole onboarded SEAL-class supplier) matches by class hard-gate + core + nationwide territory, brand-neutral (no brand rows). This is NOT a code bug — the matcher works as designed. The 'relevant vendors did not match' complaint is a registry DATA GAP: ~25 seal-specialist domains exist as discovery_only rows but are not onboarded, so they cannot Tier-1 match. Acceptance: a test that onboards a seal specialist and asserts it then Tier-1 matches a Gusher seal request (proving the matcher is not the blocker).",
+      "observed_current": "match_tier1(detected_type='mechanical seal', manufacturer='Gusher Pumps') -> [DXP Enterprises] only. find_suppliers_by_class('SEAL') returns [dxpe.com]. 25+ seal domains (sealit123, vulcanseals, gallagherseals, aesseal, flexaseal, chesterton, ussealmfg, sealhouseusa, prosealsg, sspseals, mechanicalseals.net ...) are discovery_only / tier1_lifecycle NULL.",
+      "evidence_files": ["utils/procurement_agent/tier1_matcher.py:290-373", "data/supplier_registry.sqlite (suppliers + supplier_classes)", "audit/NIGHT7_MATCHING_INVESTIGATION.md §A3"],
+      "severity": "low (data, not code)",
+      "fix_direction": "Onboard seal specialists via the Night 4 concierge flow (admin-gated, TIER1_V2). Do NOT loosen the class hard-gate or fabricate brand rows. The matcher needs no code change."
+    },
+    {
+      "id": "A-gusher-image-attrs-reach-aftermarket-only",
+      "family": "A_gusher_vendor_matching",
+      "input_text": "mechanical seal for a Gusher pump, part 84004-28, Type 21, 1-5/8 inch shaft",
+      "expected_behavior": "Image-/nameplate-extracted dimensional attrs (shaft_size) should flow into ALL sourcing queries for a dimensional part, not only the aftermarket query. Acceptance: assert _build_search_query AND _build_tier3_query include shaft_size for a seal spec with shaft_size set. (Currently only _build_aftermarket_query uses shaft_size.)",
+      "observed_current": "shaft_size=1-5/8\" present in intake_result asset_specs. _build_search_query (Tier 2 exact, Part branch) uses detected_type + PN + mfg, NO shaft_size. _build_tier3_query uses niche_term + PN + mfg + auth_brands, NO shaft_size. _build_aftermarket_query appends shaft_size (line 680-682). query_issued capture stores derived mfg+model+pn only (api_server.py:1335) — does not carry shaft_size.",
+      "evidence_files": ["utils/sourcing_archieved/tavily_client.py:138-165", "utils/sourcing_archieved/tavily_client.py:214-228", "utils/sourcing_archieved/enterprise_search.py:680-682", "api_server.py:1332-1337", "audit/NIGHT7_MATCHING_INVESTIGATION.md §A4"],
+      "severity": "low-medium",
+      "fix_direction": "Thread shaft_size (and bore_diameter / seal_face_size for their classes) into _build_search_query and _build_tier3_query for dimensional part classes, as narrowing anchors. Keep PN as the primary anchor; dims are secondary narrowing. Capture the real query string in query_issued (closes the I2 gap so the flywheel can read it)."
+    },
+    {
+      "id": "B-goulds-3196-no-redundant-clarification",
+      "family": "B_goulds_no_redundant_clarification",
+      "input_text": "Goulds 3196 mechanical seal kit",
+      "expected_behavior": "Turn-1 clarification must NOT ask 'what pump make/model is it on?' when the parent is already stated in the query AND captured as _component_of. The classifier sets _component_of='Goulds 3196' at confidence 95; the q2_template ('What pump make/model is it on ...?') must NOT fire verbatim when _component_of is already populated. Acceptance: for input 'Goulds 3196 mechanical seal kit' with INTAKE_TYPE_AWARE=1, the turn-1 follow_up_question must (a) NOT contain 'pump make/model' / 'what pump is it on' phrasing that asks for the already-stated parent, and (b) lead with a genuinely-undetermined component dim (shaft_size, cartridge/component, single/double). It MAY ask for seal-face material / elastomer (legitimately underdetermined per B4).",
+      "observed_current": "Turn 1 (reproduced, real Haiku): _component_of='Goulds 3196', _classified_confidence=95, manufacturer=null (correct per COMPONENT-OF prompt rule), mfg_conf=0, part_conf=55 -> assess_proceed_state returns blocked_need_either -> _next_clarification fires q2_template VERBATIM: 'What pump make/model is it on, and any old-part code? If visible: shaft size, and is it a cartridge or component seal, single or double?'. Root cause: _has_identity (intake_agent.py:151) checks only manufacturer/model/part_number; for an ANCHORED part the parent is in _component_of, so _has_identity=False even though the parent is known, and the q2 (which asks for the parent) fires.",
+      "evidence_files": ["utils/procurement_agent/agents/intake_agent.py:151-153", "utils/procurement_agent/agents/intake_agent.py:1161-1172", "utils/procurement_agent/agents/intake_agent.py:402-438", "utils/procurement_agent/part_type_registry.py:152-159", "audit/NIGHT7_MATCHING_INVESTIGATION.md §B1"],
+      "severity": "high (founder-reported, user-trust)",
+      "fix_direction": "In _next_clarification, before returning the q2_template for an ANCHORED component (_classified_regime=='ANCHORED' OR _component_of set), check whether the parent identity is already captured (_component_of non-empty). If so, do NOT ask the parent-identity half of the q2; lead with the component-dim half (shaft_size / cartridge-vs-component / single-vs-double). Optionally split the mechanical_seal q2_template into a parent-identity clause (skip when _component_of set) + a component-dims clause (always ask). Do NOT lower the blocked_need_either bar; the fix is to ask the RIGHT question, not to skip clarification."
+    },
+    {
+      "id": "B-goulds-3196-legit-clarifications-still-asked",
+      "family": "B_goulds_no_redundant_clarification",
+      "input_text": "Goulds 3196 mechanical seal kit",
+      "expected_behavior": "After the redundant parent ask is removed, the intake MUST still ask for the genuinely-undetermined component dims: shaft_size (the 3196 comes in multiple sizes), cartridge vs component, single vs double, and seal-face/elastomer material. These are NOT stated by 'Goulds 3196 mechanical seal kit' and ARE required to source the correct kit. Acceptance: across the clarification sequence for this input, the union of asked fields includes shaft_size AND (cartridge_vs_component OR single_vs_double) AND material_class, and does NOT include a parent-identity ask once _component_of is set.",
+      "observed_current": "Turn 2 (user supplies shaft + single + OEM) -> asks material_spec (legit). So the legit asks DO eventually fire — just after a redundant turn-1 parent ask. The fix removes the redundant turn; the legit asks remain.",
+      "evidence_files": ["utils/procurement_agent/part_type_registry.py:160-170", "audit/NIGHT7_MATCHING_INVESTIGATION.md §B4"],
+      "severity": "medium",
+      "fix_direction": "Ensure the component-dim questions (registry blocking_attrs for mechanical_seal: shaft_size, cartridge_vs_component, single_vs_double, face_material_class, elastomer) are the FIRST clarification for an ANCHORED seal when the parent is already known. Reuse the registry blocking_attrs list as the question queue."
+    },
+    {
+      "id": "K-seal-kit-retrieval-not-filtered",
+      "family": "K_kit_vs_part_retrieval",
+      "input_text": "seal kit for an Alfa Laval LKH-10 pump",
+      "expected_behavior": "A marketplace 'seal kit' / 'repair kit' listing for the named parent MUST be retrievable by the sourcing queries. Acceptance: at least one issued query contains 'kit'; and a simulated Tavily result whose title/snippet is 'seal kit for Alfa Laval LKH-10' is NOT rejected by the class gate (classify_noun_class('seal kit') == 'SEAL', so the type-gate treats it as same-class, not different).",
+      "observed_current": "Run b1ef3adf (Alfa Laval seal kit): 7 survivors, query intent 'Alfa Laval LKH-10 ...' no 'kit'. _build_aftermarket_query emits 'aftermarket equivalent supplier price buy' — no 'kit'. noun classifier: 'seal kit' -> SEAL (part_type_classes.py:80), so a retrieved kit would pass the type-gate. The miss is retrieval (no 'kit' keyword), not filtering.",
+      "evidence_files": ["utils/sourcing_archieved/part_type_classes.py:76-86", "utils/sourcing_archieved/enterprise_search.py:651-697", "audit/NIGHT7_MATCHING_INVESTIGATION.md §A2/C2"],
+      "severity": "medium",
+      "fix_direction": "Same as A-gusher-seal-kit-not-retrieved: kit-aware query variant for kit-bearing classes. This is the class-level acceptance test (A is the specific instance)."
+    },
+    {
+      "id": "K-kit-vs-seal-equivalence-layer-absent",
+      "family": "K_kit_vs_part_retrieval",
+      "input_text": "mechanical seal for Goulds 3196 (resolve to kit expansion)",
+      "expected_behavior": "DESIGN signal: there is currently NO kit↔seal equivalence/assembly relationship in the data model (AssetSpecs has component_of but no kit/assembly/contains field; part_type_registry has no assembly relation). A resolved SEAL identity is never expanded to 'seal kit'. The fix night should decide: (a) add a kit expansion at the query layer only (cheap, no schema — the A/K retrieval cases), OR (b) model kit/assembly relationships in the entity-resolution layer (the BOM-placement-brief canonical-identity work, Arc 2, cross-repo). Acceptance for the cheap path: a seal-class detected_type triggers a kit query variant. Acceptance for the full path: out of scope for one night — flag for the entity-resolution arc.",
+      "observed_current": "AssetSpecs (utils/models.py:53-122) has component_of but no kit/assembly/contains. part_type_registry.py: no assembly relation. component_query.build_component_aware_query: 'X for Y' only, no kit mapping.",
+      "evidence_files": ["utils/models.py:116-122", "utils/procurement_agent/part_type_registry.py", "utils/procurement_agent/component_query.py", "audit/NIGHT7_MATCHING_INVESTIGATION.md §A2"],
+      "severity": "low (design gap, not a defect)",
+      "fix_direction": "Cheap path (recommended for the fix night): kit-aware query variant gated on detected_type class, no schema change. Full path: defer to the entity-resolution / BOM-placement arc (CLAUDE.md §9) — model assembly/kit relationships where canonical identity lives."
+    }
+  ],
+  "confidence_distribution_C3": {
+    "_meta": "Precondition metric for any future auto-order confidence gating. Source: data/run_capture.sqlite, all candidate_scored events (6,034 with a confidence value).",
+    "scored_candidates_total": 6137,
+    "with_confidence_value": 6034,
+    "stats": {"min": 0.0, "p25": 0.0, "median": 0.0, "p75": 75.0, "max": 90.0, "mean": 32.4},
+    "buckets": {"0-9": 3253, "10-29": 241, "30-49": 148, "50-69": 79, "70+": 2313},
+    "confidence_exactly_zero": 3237,
+    "confidence_below_50": 3642,
+    "confidence_70_plus": 2313,
+    "rejection_reasons_observed": {"suitability_below_floor": 522, "duplicate_in_higher_tier": 72, "pn_mismatch": 11, "confidence_below_floor": 0},
+    "findings": [
+      "confidence_score is NOT a gating signal on the shipping path. _apply_confidence_floor (filtering.py:53) is called only from sourcing_archived.orchestrator.find_vendors, which api_server._run_sourcing_background does NOT use (it calls SourcingAgent.run directly). Zero confidence_below_floor rejections in 9166 captured runs.",
+      "60% of surfaced candidates (3642/6034) carry confidence <50 and surface identically to 90-confidence ones. 53% (3237) carry exactly 0.0.",
+      "The only live read of confidence_score is priceUnverified (api_server.py:871), which explicitly treats 0 as 'no signal, not low confidence' — so the 53% conf=0 population is never flagged.",
+      "Precondition for auto-order gating: confidence must first be made a real, calibrated, consistently-populated signal (3237 conf=0 with match_type='Exact OEM' + real prices is internally inconsistent), then wired to a gate. Today it is decorative."
+    ],
+    "evidence_files": ["utils/sourcing_archived/scoring.py:698-727", "utils/sourcing_archieved/filtering.py:53-71", "utils/sourcing_archieved/orchestrator.py:86", "api_server.py:857-871", "api_server.py:1123-1192"]
+  }
+}
