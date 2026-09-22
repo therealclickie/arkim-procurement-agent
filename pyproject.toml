@@ -25,6 +25,11 @@ dependencies = [
     # endpoint hardcoded https://api.smith.langchain.com. Pinned >=0.4.32 per the
     # overnight build brief (messaging's investigated pattern).
     "langsmith>=0.4.32",
+    # Arc 4 (NOTIFICATIONS_V1): Amazon SES as the first MailProvider.
+    # Imported LAZILY in utils/mail_provider.py, so the dependency is
+    # never required to import the module, run the suite, or run the app
+    # with the flag off. Authorised in the arc-4 brief's GATE RULINGS.
+    "boto3>=1.35.0",
 ]
 
 [dependency-groups]

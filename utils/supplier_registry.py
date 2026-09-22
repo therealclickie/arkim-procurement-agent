@@ -491,6 +491,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if col not in sm_existing:
             conn.execute(f"ALTER TABLE sent_messages ADD COLUMN {col} TEXT")
             added.append(f"sent_messages.{col}")
+    # Cap CLASS (NOTIFICATIONS_V1 arc 4 T3 / D9, gate FINDING F2): D9 requires
+    # auth mail to write ledger rows so governance caps apply to it. Counted in
+    # the SAME class as RFQ mail, ten sign-in links would exhaust the whole
+    # day's send budget (default cap 10) and every RFQ after them would be
+    # cap_blocked — the exact failure arc 2 avoided by not ledgering at all.
+    # So the row is written (D9's ledger/digest/audit goal is met) with a class
+    # discriminator, and each class carries its own daily cap. NULL means "the
+    # RFQ class": every pre-arc-4 row keeps counting exactly as it did, so the
+    # flag-off behaviour of the cap query is unchanged.
+    if "message_class" not in sm_existing:
+        conn.execute("ALTER TABLE sent_messages ADD COLUMN message_class TEXT")
+        added.append("sent_messages.message_class")
 
     # supplier_notifications provenance column (demand-teaser honesty: a test/
     # fixture/seed row must be excludable from the live buyer-request count).
@@ -990,6 +1002,7 @@ def record_sent_message(
     released_at: Optional[str] = None,
     template_version: Optional[str] = None,
     with_history: bool = False,
+    message_class: Optional[str] = None,
 ) -> Optional[str]:
     """Persist one outbound-send record (the key inbound matching will later join on).
 
@@ -1023,11 +1036,11 @@ def record_sent_message(
                     recipients_cc_json, subject, body, message_id, thread_id, status,
                     approved_by, sent_at, created_at, part_key, released_by,
                     released_at, template_version, status_history_json,
-                    status_updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    status_updated_at, message_class)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 row + (part_key, released_by, released_at, template_version,
                        json.dumps([{"status": status, "at": now}]) if with_history else None,
-                       now if with_history else None),
+                       now if with_history else None, message_class),
             )
             conn.commit()
         print(f"[SupplierRegistry] Sent-message recorded: {vendor_name} ({domain}) status={status}")
@@ -1074,6 +1087,14 @@ def get_sent_messages(
 # what the SEND_GOVERNANCE_V1 daily cap counts. Governance-blocked outcomes
 # (suppressed / not_allowlisted / cap_blocked) never count against caps.
 SEND_ATTEMPT_STATUSES: tuple = ("sent", "stubbed", "error")
+
+# Cap CLASSES (arc 4 T3 / D9). "rfq" is the historical, un-discriminated class:
+# every row written before arc 4 has message_class NULL and reads as "rfq", so
+# the daily-cap query behaves exactly as it always has. "auth" is magic-link /
+# invite mail, which D9 puts in the ledger and which gets its own budget so a
+# burst of sign-in links cannot starve the RFQ cap (gate FINDING F2).
+MESSAGE_CLASS_RFQ = "rfq"
+MESSAGE_CLASS_AUTH = "auth"
 # Statuses of an OPEN RFQ for the per-supplier-per-part cap: attempted and not yet
 # terminally resolved (T6's transitions — replied/bounced — free the slot).
 OPEN_RFQ_STATUSES: tuple = ("sent", "stubbed")
@@ -1166,20 +1187,30 @@ def sent_messages_digest(day: Optional[str] = None) -> dict:
     return digest
 
 
-def count_send_attempts_utc_day(day: Optional[str] = None) -> int:
-    """Count send ATTEMPTS recorded on one UTC day (default: today, UTC).
+def count_send_attempts_utc_day(day: Optional[str] = None,
+                                message_class: str = MESSAGE_CLASS_RFQ) -> int:
+    """Count send ATTEMPTS in one cap class on one UTC day (default: today).
 
     SEND_GOVERNANCE_V1 cap input. Deliberately RAISES on store failure — the
     governance caller converts an exception into a BLOCKED verdict (fail-closed);
     a fail-soft 0 here would silently waive the cap. `day` is 'YYYY-MM-DD'.
+
+    The default class is "rfq", and a NULL `message_class` column counts as
+    "rfq" — so every row written before arc 4 is counted exactly as it was
+    before the column existed, and the default call is unchanged.
     """
     day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     marks = ",".join("?" for _ in SEND_ATTEMPT_STATUSES)
+    if message_class == MESSAGE_CLASS_RFQ:
+        class_sql = "(message_class IS NULL OR message_class = ?)"
+    else:
+        class_sql = "message_class = ?"
     with closing(_get_conn()) as conn:
         row = conn.execute(
             f"SELECT COUNT(*) FROM sent_messages "
-            f"WHERE substr(created_at, 1, 10) = ? AND status IN ({marks})",
-            (day, *SEND_ATTEMPT_STATUSES),
+            f"WHERE substr(created_at, 1, 10) = ? AND status IN ({marks}) "
+            f"AND {class_sql}",
+            (day, *SEND_ATTEMPT_STATUSES, message_class),
         ).fetchone()
         return int(row[0])
 

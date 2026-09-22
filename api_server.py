@@ -6373,18 +6373,63 @@ def _supplier_open_requests(dom: str) -> list:
     return requests_out
 
 
+def _requests_with_read_state(requests: list, *, dom: str,
+                              member_id: Optional[str] = None) -> list:
+    """Arc 4 T7 / D5: annotate each open request with ``seen``, then record the
+    view — in that order, and in the ROUTE layer, not in the shared read
+    service.
+
+    Why here: ``_supplier_open_requests`` deliberately knows nothing about the
+    caller's identity (one assembly, two doors), while ``RfqView`` is a fact
+    about a *credential* — the session door knows the member, the claim-token
+    door has none (D5's "member_id null + supplier_domain" case).
+
+    Why annotate BEFORE recording: the indicator must say "new" on the render
+    that shows it for the first time. Reading the view set after writing this
+    render's view would mark everything seen the instant it was displayed, and
+    the supplier would never see a single "new" badge.
+
+    Why this is the strong signal: a view here means a human opened the portal
+    and the request was on the screen. That is what D6's ladder is judged
+    against — never an email open, which Apple Mail Privacy Protection fires
+    for everyone whether or not anyone looked.
+
+    Flag OFF ⇒ the list is returned UNTOUCHED (no ``seen`` key, no store
+    write), so both doors' responses are byte-identical to before this arc.
+    """
+    if not _notifications_enabled():
+        return requests
+    from utils import notifications
+    already_seen = notifications.seen_run_ids(dom)
+    annotated = []
+    for row in requests:
+        run_id = row.get("run_id")
+        annotated.append({**row, "seen": run_id in already_seen})
+        if run_id:
+            notifications.record_view(run_id=run_id, supplier_domain=dom,
+                                      member_id=member_id)
+    return annotated
+
+
 @app.get("/api/portal/{token}/open-requests")
 def portal_open_requests(token: str, request: Request):
     """T5: the claimed supplier's OPEN requests — the token door over the
     shared read service ``_supplier_open_requests`` (see its docstring; the
     session door is Arc 2's /api/supplier/requests). Token-validated; the
-    quote surface must be on (QUOTE_SUBMIT_V1 — off ⇒ this route is absent)."""
+    quote surface must be on (QUOTE_SUBMIT_V1 — off ⇒ this route is absent).
+
+    Arc 4 T7: this render is a portal VIEW (D5) and is recorded as one — with
+    no ``member_id``, because a claim token identifies the company, not a
+    person. It still counts as the company having seen the request, which is
+    what the escalation ladder asks."""
     if not _quote_submit_enabled():
         _quote_flag_off_404()
     prow = _validate_portal_token(request, token)
     dom = prow["supplier_domain"]
-    return JSONResponse(content={"requests": _supplier_open_requests(dom)},
-                        headers=_portal_response_headers({}))
+    return JSONResponse(
+        content={"requests": _requests_with_read_state(
+            _supplier_open_requests(dom), dom=dom, member_id=None)},
+        headers=_portal_response_headers({}))
 
 
 def _supplier_quote_history(dom: str) -> list:
@@ -7009,10 +7054,17 @@ def supplier_requests(session: dict = Depends(_require_supplier_session)):
     the claim-token route uses (``_supplier_open_requests`` — no second
     matching logic), scoped to the SESSION's account domain. Cross-account
     access is impossible by construction: the domain comes from the validated
-    session, never from a query parameter."""
+    session, never from a query parameter.
+
+    Arc 4 T7: the session door knows WHO is looking, so the ``RfqView`` it
+    records carries the ``member_id`` — which is what lets D6's ladder stop
+    chasing the member who actually read the request."""
     dom = session["account"]["supplier_domain"]
-    return JSONResponse(content={"requests": _supplier_open_requests(dom)},
-                        headers=_portal_response_headers({}))
+    return JSONResponse(
+        content={"requests": _requests_with_read_state(
+            _supplier_open_requests(dom), dom=dom,
+            member_id=session.get("member_id"))},
+        headers=_portal_response_headers({}))
 
 
 @app.post("/api/supplier/quotes")
@@ -7231,6 +7283,18 @@ def supplier_members_invite(body: SupplierInviteBody,
         member_id=member["id"], email=member["email"],
         actor=session["member"]["email"],
         detail={"role": member["role"], "status": member["status"]})
+    # Arc 4 T5/D2: tell the invited person. Flag-gated inside the helper —
+    # NOTIFICATIONS_V1 off ⇒ it returns None and sends nothing, which is
+    # exactly today's behaviour (before arc 4 an invite sent no mail at all,
+    # gate FINDING F5). Fail-soft: a mail failure must not fail the invite,
+    # which has already created the membership.
+    try:
+        supplier_accounts.send_member_invite_email(
+            member["email"], account_domain=session["account"]["supplier_domain"],
+            invited_by_email=session["member"]["email"], member_id=member["id"])
+    except Exception as exc:  # pragma: no cover - the helper is itself fail-soft
+        import logging
+        logging.getLogger(__name__).warning("invite mail failed: %s", exc)
     return JSONResponse(content={"ok": True,
                                  "member": _serialize_account_member(member)},
                         headers=_portal_response_headers({}))
@@ -7433,3 +7497,163 @@ def portal_request_account(token: str, body: PortalRequestAccountBody,
     return JSONResponse(content={"ok": True},
                         headers=_portal_response_headers({}))
 
+
+
+# ---------------------------------------------------------------------------
+# ARC 4 — NOTIFICATIONS_V1 (delivery tracking)
+#
+# Flag posture matches SUPPLIER_ACCOUNTS_V1 / QUOTE_SUBMIT_V1: read LIVE, and
+# flag-off means the route NEVER EXISTED — byte-identical 404, no store read.
+# ---------------------------------------------------------------------------
+
+def _notifications_enabled() -> bool:
+    """Live check for the arc-4 route gate (honors a monkeypatched env)."""
+    return _env_truthy(os.environ.get("NOTIFICATIONS_V1"))
+
+
+def _notifications_flag_off_404():
+    raise HTTPException(status_code=404, detail="Not Found")
+
+
+@app.post("/api/webhooks/ses")
+async def ses_events_webhook(request: Request):
+    """T6/D4: SNS → SES delivery events. PUBLIC and UNAUTHENTICATED.
+
+    Everything that makes this safe is in ``utils/ses_webhook.handle_envelope``
+    (envelope type → TopicArn allowlist → amazonaws.com certificate URL →
+    signature; a SubscribeURL is visited only after the topic is allowlisted).
+    This handler's whole job is the response posture:
+
+      - flag off                → 404, byte-identical to an unknown route;
+      - ANY rejection whatsoever → the SAME 403 {"detail": "Forbidden"}, so a
+        prober cannot distinguish a bad signature from a foreign topic from a
+        malformed body;
+      - success                  → 200, and nothing from the request body is
+        echoed back or logged.
+
+    The body is read raw and parsed here rather than declared as a Pydantic
+    model: SNS posts with ``Content-Type: text/plain``, and a 422 validation
+    error would itself be an oracle.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    from utils import ses_webhook
+    raw = await request.body()
+    outcome = ses_webhook.handle_envelope(raw)
+    if outcome is None:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return JSONResponse(content={"ok": True},
+                        headers=_portal_response_headers({}))
+
+
+class SupplierNotificationPrefBody(BaseModel):
+    preference: str
+
+
+@app.get("/api/supplier/notification-preferences")
+def supplier_notification_preferences(
+        session: dict = Depends(_require_supplier_session)):
+    """T10/D7: the signed-in member's OWN notification preference.
+
+    Self only, and self is not a parameter — the member id comes from the
+    validated session, so there is no id to tamper with and no cross-member
+    read to defend against. Absent row ⇒ the IMMEDIATE default (D7).
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    from utils import notifications_store
+    return JSONResponse(
+        content={"preference": notifications_store.get_preference(
+                     session["member_id"]),
+                 "choices": list(notifications_store.PREFERENCES)},
+        headers=_portal_response_headers({}))
+
+
+@app.put("/api/supplier/notification-preferences")
+def supplier_set_notification_preferences(
+        body: SupplierNotificationPrefBody,
+        session: dict = Depends(_require_supplier_session)):
+    """T10/D7: set the signed-in member's OWN preference.
+
+    ``IMMEDIATE | DAILY_DIGEST | NONE``; an unknown value is a 422 rather than
+    a silent no-op, because a supplier who thinks they turned notifications
+    down and did not is exactly the complaint this surface exists to prevent.
+    NONE covers RFQ mail only — auth and invite mail still go out (D7), which
+    is why the store's vocabulary is the whole validation here.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    from utils import notifications_store
+    wanted = (body.preference or "").strip().upper()
+    stored = notifications_store.set_preference(
+        session["member_id"], wanted, account_id=session["account_id"])
+    if stored is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"preference must be one of "
+                   f"{', '.join(notifications_store.PREFERENCES)}")
+    supplier_accounts.audit(
+        "notification_preference_set", account_id=session["account_id"],
+        member_id=session["member_id"], email=session["member"]["email"],
+        actor=session["member"]["email"], detail={"preference": stored})
+    return JSONResponse(content={"ok": True, "preference": stored},
+                        headers=_portal_response_headers({}))
+
+
+# ---------------------------------------------------------------------------
+# T12 — the concierge alert queue (D6/D7/D8), on the G6 unmatched-replies shape
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/notification-alerts")
+def admin_notification_alerts(authorization: Optional[str] = Header(default=None)):
+    """Every OPEN concierge alert arc 4 raises, newest first.
+
+    Its own endpoint rather than rows in ``/api/admin/review-queue``: that queue
+    is extraction-shaped (manufacturer / part_number / confidence / raw_source)
+    and the one kind already added to it needed a second endpoint to avoid
+    polluting it (G6). So these follow the ``unmatched-replies`` pattern
+    instead — own list, own resolve action, status flip and never a delete.
+
+    Three kinds land here, and they are different problems:
+      RFQ_ESCALATION        — a sent RFQ nobody at the supplier has looked at
+                              (D6's 24h rung: the mail channel has had its turn,
+                              now a human calls them);
+      NO_NOTIFIABLE_MEMBERS — an RFQ went out to a supplier with nobody to tell
+                              (no account, nobody holding view_requests, or all
+                              of them suppressed);
+      EMAIL_SUPPRESSED /
+      SOFT_BOUNCE_REPEATED  — D8: an address that can no longer be mailed, or
+                              one failing repeatedly.
+
+    Flag gate BEFORE ``require_admin`` (the arc 2 convention): with the flag off
+    the route is absent even to a valid admin token.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    require_admin(authorization)
+    from utils import notifications
+    rows = notifications.list_open_alerts()
+    return {"count": len(rows), "alerts": rows}
+
+
+@app.post("/api/admin/notification-alerts/{alert_id}/acknowledge")
+def admin_acknowledge_notification_alert(
+        alert_id: str, authorization: Optional[str] = Header(default=None)):
+    """Acknowledge one open alert → ``acknowledged`` + who + when.
+
+    A STATUS FLIP, never a delete (the ``unmatched-replies`` dismiss
+    convention): the row stays auditable, so "a human was told about this RFQ
+    and said they had it" remains answerable later. 404 unknown; 409 already
+    acknowledged — an operator who double-clicks learns that rather than
+    silently re-stamping someone else's acknowledgement.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    role = require_admin(authorization)
+    from utils import notifications, notifications_store
+    if notifications_store.get_alert(alert_id) is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    out = notifications.acknowledge_alert(alert_id, acknowledged_by=role)
+    if out is None:
+        raise HTTPException(status_code=409, detail="Alert already acknowledged")
+    return {"ok": True, "alert": out}

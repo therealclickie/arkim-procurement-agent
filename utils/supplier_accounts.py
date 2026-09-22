@@ -972,6 +972,24 @@ def send_magic_link_email(email: str, raw_token: str, *,
     status ("ok"-ish pass-through: "stubbed" | "sent" | "error", or the
     blocked verdict "suppressed" | "not_allowlisted" | "cap_blocked")."""
     from utils.email_sender import EmailMessage, GmailSender
+    dom = _normalize_domain(account_domain)
+    metadata = {"supplier_domain": dom, "magic_link": True,
+                "member_id": member_id}
+    # NOTIFICATIONS_V1 (arc 4 T3 / D2 + D9). Two additive facts, both flag-gated
+    # so the flag-off message is byte-identical to before:
+    #   auth_mail    — the MailProvider routes this onto the TRACKING-OFF
+    #                  configuration set, or refuses to send it (D2). Click
+    #                  tracking would rewrite the link through SES's tracking
+    #                  domain, where a corporate link scanner pre-fetches it and
+    #                  burns the single-use token before the human ever clicks.
+    #   message_class— this send now writes a sent_messages row (D9 closes arc 2
+    #                  review finding 2), in the "auth" cap class so it cannot
+    #                  starve the RFQ daily cap (gate FINDING F2).
+    from utils import notifications
+    ledgered = notifications.notifications_active()
+    if ledgered:
+        metadata["auth_mail"] = True
+        metadata["message_class"] = "auth"
     msg = EmailMessage(
         to=[email],
         subject="Your Arkim supplier sign-in link",
@@ -983,12 +1001,89 @@ def send_magic_link_email(email: str, raw_token: str, *,
             "If you did not request it, you can ignore this email.\n\n"
             "Regards,\nArkim Procurement\nprocurement@arkim.ai"
         ),
-        metadata={"supplier_domain": _normalize_domain(account_domain),
-                  "magic_link": True, "member_id": member_id},
+        metadata=metadata,
     )
+    # Record BEFORE the attempt (rfq_send's discipline): a crash mid-send leaves
+    # an auditable "released" row, never a delivered-but-unrecorded message. The
+    # body is deliberately NOT ledgered — it contains the raw token, which lives
+    # in the delivered message and nowhere else.
+    row_id = notifications.record_auth_send(
+        supplier_domain=dom, recipient=email, subject=msg.subject) if ledgered else None
     result = GmailSender().send(msg)
+    if row_id:
+        from utils import supplier_registry
+        supplier_registry.update_sent_message_status(
+            row_id, result.status, message_id=result.message_id,
+            thread_id=result.thread_id)
+    # T5/D3: track the auth send as a Notification too, so a hard bounce on a
+    # sign-in link suppresses the address and reaches a human (D8) instead of
+    # the member quietly never being able to log in. Tracking only — neither
+    # auth kind is in ESCALATABLE_KINDS, because an unseen sign-in link is the
+    # member's own business, not an RFQ going unanswered.
+    notifications.track_auth_notification(
+        kind="AUTH_MAGIC_LINK", recipient=email, supplier_domain=dom,
+        member_id=member_id, status=result.status,
+        provider_message_id=result.message_id)
     # Log the OUTCOME only — the token must be absent from every log line.
     print(f"[SupplierAccounts] magic-link send {result.status} -> {email}")
+    return result.status
+
+
+def send_member_invite_email(email: str, *, account_domain: str,
+                             invited_by_email: Optional[str] = None,
+                             member_id: Optional[str] = None) -> Optional[str]:
+    """Tell an invited person they have been added to a supplier account.
+
+    NEW MAIL, NOT A MIGRATION — and worth saying plainly (gate FINDING F5):
+    before arc 4 the invite path created a member row and an audit row and
+    sent NOTHING, so an invited colleague was never told. T5 adds the channel.
+
+    It is AUTH-class mail (D2/D9): it carries no single-use token itself, but
+    its whole purpose is to get someone to request one, and it belongs in the
+    same tracking-off configuration set and the same cap class as the sign-in
+    link. Like every other outbound it goes through ``GmailSender().send`` —
+    the seam where governance runs — and it is entirely flag-gated: with
+    ``NOTIFICATIONS_V1`` off this function returns ``None`` and sends nothing,
+    which is exactly today's behaviour.
+
+    Returns the ``SendResult`` status, or ``None`` when the flag is off.
+    """
+    from utils import notifications
+    if not notifications.notifications_active():
+        return None
+    from utils.email_sender import EmailMessage, GmailSender
+    from utils import supplier_registry
+    dom = _normalize_domain(account_domain)
+    inviter = f" by {invited_by_email}" if invited_by_email else ""
+    msg = EmailMessage(
+        to=[email],
+        subject="You have been added to your Arkim supplier account",
+        body=(
+            "Hello,\n\n"
+            f"You have been added{inviter} to the Arkim supplier account for "
+            f"{dom or 'your company'}.\n\n"
+            "To sign in, request a link here — we will email you a single-use "
+            "sign-in link:\n"
+            f"{magic_link_url('').split('?token=')[0]}\n\n"
+            "If you were not expecting this, you can ignore this email.\n\n"
+            "Regards,\nArkim Procurement\nprocurement@arkim.ai"
+        ),
+        metadata={"supplier_domain": dom, "member_invite": True,
+                  "member_id": member_id, "auth_mail": True,
+                  "message_class": supplier_registry.MESSAGE_CLASS_AUTH},
+    )
+    row_id = notifications.record_auth_send(
+        supplier_domain=dom, recipient=email, subject=msg.subject)
+    result = GmailSender().send(msg)
+    if row_id:
+        supplier_registry.update_sent_message_status(
+            row_id, result.status, message_id=result.message_id,
+            thread_id=result.thread_id)
+    notifications.track_auth_notification(
+        kind="MEMBER_INVITE", recipient=email, supplier_domain=dom,
+        member_id=member_id, status=result.status,
+        provider_message_id=result.message_id)
+    print(f"[SupplierAccounts] invite send {result.status} -> {email}")
     return result.status
 
 

@@ -273,6 +273,16 @@ _OPEN_RFQ_CAP_ENV = "SEND_GOVERNANCE_OPEN_RFQ_CAP"
 DEFAULT_DAILY_CAP = 10
 DEFAULT_OPEN_RFQ_CAP = 1
 
+# Auth-mail daily cap (arc 4 T3 / D9, gate FINDING F2). Magic-link and invite
+# mail now writes ledger rows so caps apply to it — but in its OWN class, with
+# its own budget. Sharing the RFQ cap would mean ten sign-in links exhaust the
+# day and every RFQ after them is cap_blocked; a cap that makes the product
+# fail closed on its own login flow is a bug, not governance. The limit is
+# deliberately higher because the unit is different: one human signing in
+# several times is normal, one supplier receiving several RFQs a day is not.
+_AUTH_DAILY_CAP_ENV = "SEND_GOVERNANCE_AUTH_DAILY_CAP"
+DEFAULT_AUTH_DAILY_CAP = 50
+
 
 def _cap_from_env(var: str, default: int) -> int:
     """Read a cap limit. Unset ⇒ default; a set-but-unparseable value RAISES so
@@ -331,12 +341,20 @@ def _check_caps(message) -> Optional[GovernanceVerdict]:
     Store/parse failures ⇒ blocked "cap_blocked" (fail-closed)."""
     from utils import supplier_registry
     try:
-        daily_cap = _cap_from_env(_DAILY_CAP_ENV, DEFAULT_DAILY_CAP)
-        used = supplier_registry.count_send_attempts_utc_day()
-        if used >= daily_cap:
-            return GovernanceVerdict(False, "cap_blocked",
-                                     f"daily send cap reached ({used}/{daily_cap})")
         meta = getattr(message, "metadata", None) or {}
+        # Cap CLASS (arc 4 T3/D9). Absent ⇒ the historical "rfq" class, so a
+        # message built anywhere else in the repo is capped exactly as before.
+        message_class = meta.get("message_class") or supplier_registry.MESSAGE_CLASS_RFQ
+        if message_class == supplier_registry.MESSAGE_CLASS_AUTH:
+            daily_cap = _cap_from_env(_AUTH_DAILY_CAP_ENV, DEFAULT_AUTH_DAILY_CAP)
+        else:
+            daily_cap = _cap_from_env(_DAILY_CAP_ENV, DEFAULT_DAILY_CAP)
+        used = supplier_registry.count_send_attempts_utc_day(
+            message_class=message_class)
+        if used >= daily_cap:
+            return GovernanceVerdict(
+                False, "cap_blocked",
+                f"daily send cap reached for {message_class} ({used}/{daily_cap})")
         part_key = meta.get("part_key")
         dom = _normalize_domain(meta.get("supplier_domain") or "")
         if part_key and dom:

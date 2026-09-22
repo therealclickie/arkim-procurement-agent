@@ -34,6 +34,8 @@ import {
 } from "@/app/portal/[token]/claim-page";
 import { PortalTeaser } from "@/app/portal/[token]/portal-states";
 import { GoferLoader } from "@/components/ui/gofer-loader";
+import { notificationsEnabled } from "@/lib/flags";
+import { NotificationPreferences } from "./notification-preferences";
 import { SupplierShell } from "../supplier-shell";
 
 type Phase = "loading" | "ready" | "submitted" | "soft-error" | "unavailable";
@@ -132,6 +134,9 @@ export function ProfileScreen({ session }: { session: SupplierSession }) {
   return shell(
     <>
       <PortalTeaser teaser={profile.teaser} />
+      {/* Arc 4 T11: the member's own delivery preference. Flag off ⇒ nothing
+          renders here at all, and the profile page is as it was. */}
+      {notificationsEnabled() && <NotificationPreferences />}
       {phase === "soft-error" && (
         <div className="portal-soft-error" role="alert" aria-live="polite">
           We couldn&apos;t submit your changes right now. Your edits are kept —

@@ -33,7 +33,7 @@ const TOKEN_KEY = "arkim_admin_token";
 type Tab =
   | "runs" | "suppliers" | "sent-messages" | "review-queue" | "orders" | "prices"
   | "unmatched-replies" | "fulfilment" | "labeling" | "onboarding"
-  | "portal-revisions";
+  | "portal-revisions" | "notification-alerts";
 
 // `labeling` (Night 2), `onboarding` (Night 4), and `portal-revisions` (Night 6)
 // have no `path`/`listKey` (they render their own dedicated views, not the
@@ -51,6 +51,12 @@ const TABS: { id: Tab; label: string; path: string; listKey: string }[] = [
   { id: "labeling", label: "Labeling", path: "", listKey: "" },
   { id: "onboarding", label: "Onboarding", path: "", listKey: "" },
   { id: "portal-revisions", label: "Portal Revisions", path: "", listKey: "" },
+  // Arc 4 T12: the concierge alert queue (escalated RFQs, accounts with nobody
+  // to notify, suppressed addresses). With the backend's NOTIFICATIONS_V1 off
+  // the endpoint 404s and the tab shows the same error panel any other absent
+  // surface would — no separate frontend flag, because this is an internal
+  // debug surface, not customer-facing.
+  { id: "notification-alerts", label: "Notification Alerts", path: "/notification-alerts", listKey: "alerts" },
 ];
 
 type FetchResult = { ok: boolean; status: number; body: unknown };
@@ -380,6 +386,12 @@ export default function AdminInspectorPage() {
     else setResult(r);          // surface a gate/guard error in the existing error panel
   }
 
+  async function acknowledgeAlert(id: string) {
+    const r = await postAdmin(`/notification-alerts/${id}/acknowledge`, token);
+    if (r.ok) load(tab);        // acknowledged rows drop out of the open list
+    else setResult(r);          // 404/409 surface in the existing error panel
+  }
+
   async function markPurchased(id: string) {
     const reference = (refInputs[id] ?? "").trim();
     const r = await postAdmin(`/orders/${id}/mark-purchased`, token, { reference });
@@ -644,7 +656,7 @@ export default function AdminInspectorPage() {
                         {c}
                       </th>
                     ))}
-                    {(tab === "unmatched-replies" || tab === "fulfilment" || tab === "suppliers") && (
+                    {(tab === "unmatched-replies" || tab === "fulfilment" || tab === "suppliers" || tab === "notification-alerts") && (
                       <th className="py-1 pr-3 font-normal">action</th>
                     )}
                   </tr>
@@ -687,6 +699,19 @@ export default function AdminInspectorPage() {
                             </button>
                           </td>
                         )}
+                        {tab === "notification-alerts" && (
+                          <td className="py-1 pr-3">
+                            <button
+                              className="rounded border border-hr-2 px-2 py-0.5 text-fg-2 hover:bg-bg-4"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                acknowledgeAlert(String(row.id));
+                              }}
+                            >
+                              Acknowledge
+                            </button>
+                          </td>
+                        )}
                         {tab === "fulfilment" && (
                           <td className="py-1 pr-3" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center gap-2">
@@ -722,7 +747,7 @@ export default function AdminInspectorPage() {
                       </tr>
                       {expanded === i && (
                         <tr key={`${i}-raw`} className="bg-bg-3">
-                          <td colSpan={cols.length + 1 + (tab === "unmatched-replies" || tab === "fulfilment" || tab === "suppliers" ? 1 : 0)} className="p-3">
+                          <td colSpan={cols.length + 1 + (tab === "unmatched-replies" || tab === "fulfilment" || tab === "suppliers" || tab === "notification-alerts" ? 1 : 0)} className="p-3">
                             <pre className="whitespace-pre-wrap text-[10.5px] text-fg-2">
                               {JSON.stringify(row, null, 2)}
                             </pre>

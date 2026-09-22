@@ -149,6 +149,14 @@ export interface OpenRequest {
   part_number: string | null;
   quantity: number | null;
   sent_at: string | null;
+  /**
+   * Arc 4 T7/D5 — has anyone at this supplier opened this request in the
+   * portal before this render? OPTIONAL by design: the backend adds the field
+   * only when NOTIFICATIONS_V1 is on, so `undefined` means "not tracked" and
+   * must render like a seen row, never like a new one. A required boolean here
+   * would make a flags-off backend look as though every request were unread.
+   */
+  seen?: boolean;
   quoted: {
     status: "active" | "review";
     unit_price: number;

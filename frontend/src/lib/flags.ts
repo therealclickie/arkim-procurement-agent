@@ -38,3 +38,18 @@ function isOn(value: string | undefined): boolean {
 export function supplierSessionEnabled(): boolean {
   return isOn(process.env.NEXT_PUBLIC_SUPPLIER_SESSION_V1);
 }
+
+/**
+ * NEXT_PUBLIC_NOTIFICATIONS_V1 — arc 4's notification surface: the member's
+ * delivery preference control on /supplier/profile, and the "new" indicator on
+ * the inbox rows.
+ *
+ * Paired with, and independent of, the backend's NOTIFICATIONS_V1. With the
+ * backend flag off the preference endpoints 404 and the open-requests rows
+ * carry no `seen` field at all, so the UI would degrade on its own; this flag
+ * makes the surface absent rather than merely inert, which is what keeps a
+ * flags-off build byte-identical to before arc 4.
+ */
+export function notificationsEnabled(): boolean {
+  return isOn(process.env.NEXT_PUBLIC_NOTIFICATIONS_V1);
+}
