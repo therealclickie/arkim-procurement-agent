@@ -62,6 +62,15 @@ _SIGNED_FIELDS: dict[str, tuple[str, ...]] = {
 
 # Certificates are immutable at their URL and rotate rarely; caching keeps a
 # burst of events from becoming a burst of certificate fetches.
+#
+# The cache is BOUNDED because an unauthenticated caller reaches the fetch:
+# it happens inside verify_signature, after the topic allowlist but before
+# the signature is known good, so a sender who guesses an allowlisted
+# TopicArn (ARNs are not secrets) could otherwise fill this dict with an
+# unlimited number of distinct amazonaws.com cert URLs. Oldest entry out
+# first; a real deployment has one or two certificates in flight, so the
+# bound never evicts anything legitimate.
+_CERT_CACHE_MAX = 16
 _CERT_CACHE: dict[str, bytes] = {}
 
 _HTTP_TIMEOUT = 5
@@ -147,6 +156,8 @@ def fetch_certificate_pem(url: str) -> Optional[bytes]:
     except Exception as exc:
         print(f"[SesWebhook] certificate fetch failed: {type(exc).__name__}")
         return None
+    while len(_CERT_CACHE) >= _CERT_CACHE_MAX:
+        _CERT_CACHE.pop(next(iter(_CERT_CACHE)), None)
     _CERT_CACHE[url] = pem
     return pem
 

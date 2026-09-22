@@ -699,3 +699,97 @@ Nothing in the brief's OUT OF SCOPE list was built (no SMS/voice, no business-ho
 escalation, no SES receipt rules, no dedicated IPs, no React 19, no supplier analytics, no
 live SES/SNS provisioning). No scope question arose that the brief's GATE RULINGS did not
 already answer, so the builder did not stop. **Not pushed.**
+
+---
+
+# FIX LOG — review round 1 (2026-09-22)
+
+Reviewer verdict **CHANGES_REQUESTED** (`NOTIFICATIONS_REVIEW.md`), three numbered findings.
+Only those three were touched; no other change, no refactor. `loop/SCOPE_NOTES.txt` does not
+exist, so there was no out-of-set file list to justify or revert. The working tree at commit
+time holds exactly three modified files, all arc-4-owned:
+`utils/ses_webhook.py`, `utils/procurement_agent/tests/test_ses_webhook.py`,
+`utils/procurement_agent/tests/test_notifications_escalation.py`. **No pre-existing test file
+was modified** — PRIME DIRECTIVE 1 still holds.
+
+## Finding 1 — MAJOR, date-dependent arc-4 test. FIXED.
+
+`utils/procurement_agent/tests/test_notifications_escalation.py:218-227`
+(`test_running_twice_with_the_same_now_changes_nothing`).
+
+**Reproduced before fixing.** Stashed the fix and ran the test alone on 2026-09-22:
+`1 failed`. The reviewer's diagnosis is exactly right — `aged_notification()` back-dates
+`sent_at` from the real wall clock (`:151`) while this one test ran the ladder at the frozen
+module constant `NOW = 2026-09-21 12:00Z` (`:34`). A day later the "30h-old" row is ~7h old
+*relative to* `NOW`, so it takes the remind rung and the alert count comes back 0. A time
+bomb, not a flake: deterministically red every day after the build.
+
+**Fix:** read `now` from the real clock once and pass that same instant to both runs — the
+form `test_a_reminder_then_an_alert_walks_the_whole_ladder` (`:206-215`) already uses. The
+invariant under test is *same `now` twice changes nothing*, which is about passing one instant
+twice, not about which calendar date that instant is; so the assertion is unweakened and the
+row ages are now measured against the same clock that produced them. Added a docstring line
+saying why the module-level `NOW` is deliberately not used here, so the bomb is not re-armed
+by a later edit. `NOW` is still used by `notification_row()` (`:50`), which builds dicts by
+hand for the pure decision function with no store and no clock — that use is date-safe and was
+left alone.
+
+**Verified:** the named test passes; the file's 37 tests pass; the suite is green (below).
+
+## Finding 2 — MINOR, unbounded attacker-fillable certificate cache. FIXED.
+
+`utils/ses_webhook.py:65` (`_CERT_CACHE`).
+
+Fixed here rather than deferred to the F10 follow-up: the reviewer offered either, and the
+bound is a two-line, self-contained change with a pinning test, whereas F10's rate limit still
+needs the key decision that made it a report finding in the first place. The two are
+independent — bounding the cache does not pre-empt or constrain the rate-limit ruling.
+
+**Fix:** `_CERT_CACHE_MAX = 16`, oldest-entry-out before each insert. Kept as a plain `dict`
+(insertion-ordered) rather than an `OrderedDict`/`lru_cache` so the existing test seam that
+swaps in a bare `{}` (`test_ses_webhook.py:54`) keeps working untouched. A comment at the
+declaration records *why* it is bounded — the fetch sits after the topic allowlist but before
+the signature is known good, and TopicArns are not secrets, so an unauthenticated sender
+chooses which `*.amazonaws.com` cert URLs get cached. A real deployment has one or two
+certificates in flight, so the bound never evicts anything legitimate.
+
+**Tests added** (both in the arc-4-owned `test_ses_webhook.py`, plus a `_FakeResponse`
+`urlopen` double so neither opens a socket — D10 holds):
+- `test_the_certificate_cache_is_bounded` — fetches `3 × _CERT_CACHE_MAX` distinct URLs,
+  asserts the cache stays at or under the bound, the newest entry survived, the oldest was
+  evicted, and every fetch still returned the right bytes.
+- `test_a_cached_certificate_is_not_refetched` — the property the cache exists for (a burst of
+  events on one certificate is one fetch) still holds with the bound in place, so the fix did
+  not trade the DoS surface for a fetch storm.
+
+**Not changed:** F10 itself (no rate limit on the route) stands as reported and still needs a
+human ruling on the throttle key — SNS posts from many AWS source IPs, so per-IP would be
+wrong.
+
+## Finding 3 — MINOR, concurs with report F8. NO CODE CHANGE, by agreement.
+
+`utils/notifications.py:238-281` / `utils/send_governance.py:341-360`. The reviewer concurs
+with F8 and classifies it as needing a human ruling before flags go on, not as a build defect.
+Unchanged deliberately: picking a cap policy for notification mail (its own `message_class`
+and daily budget? exempt from the RFQ cap? ledger rows for notification sends?) is the same
+class of decision as gate F2, which the brief resolved for auth mail only. Inventing one here
+would be guessing at policy under a "fix the findings" instruction.
+
+**Carried forward to the human flag-on checklist, alongside F7:** with `NOTIFICATIONS_V1` on,
+reminder/digest/RFQ_NEW mail is judged against the `rfq` daily cap while writing no
+`sent_messages` row — so once the day's RFQ budget is spent, notifications go `SUPPRESSED`
+silently and their volume is invisible to the ledger and the digest. The failure mode is
+already proven against the real gate by the arc's governance tests. Both flags remain
+default-OFF, so nothing is live.
+
+## Suites after the fixes
+
+Both run with flags OFF, the way the reviewer runs them.
+
+- **Backend** — `NOTIFICATIONS_V1=0 uv run pytest -q`: **2808 passed, 73 skipped, 0 failed**
+  (4:04). Was `1 failed, 2805 passed, 73 skipped`; +1 from the finding-1 repair, +2 from the
+  finding-2 tests.
+- **Frontend** — `NEXT_PUBLIC_NOTIFICATIONS_V1=0 npm test`: **197 passed, 24 files**,
+  unchanged (no frontend file was touched this round).
+
+Committed on `arc4/notifications`. **Not pushed.**

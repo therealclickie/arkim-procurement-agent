@@ -44,6 +44,23 @@ REJECTION_LABELS = (
 )
 
 
+class _FakeResponse:
+    """The minimum of ``urlopen``'s contract that
+    :func:`fetch_certificate_pem` uses: a context manager with ``read()``."""
+
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self) -> "_FakeResponse":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        return self._body
+
+
 @pytest.fixture
 def signing_key(monkeypatch):
     """A real key/cert pair, installed as the certificate this process will
@@ -326,6 +343,45 @@ def test_confirm_subscription_refuses_a_non_amazonaws_subscribe_url(monkeypatch)
 ])
 def test_certificate_url_ok(url, ok):
     assert ses_webhook.certificate_url_ok(url) is ok
+
+
+def test_the_certificate_cache_is_bounded(monkeypatch):
+    """The fetch sits after the topic allowlist but before the signature is
+    known good, so an unauthenticated caller who guesses an allowlisted
+    TopicArn decides which cert URLs get cached. The cache must not grow
+    without limit, and the newest entry must survive the eviction."""
+    import urllib.request
+    monkeypatch.setattr(ses_webhook, "_CERT_CACHE", {})
+    monkeypatch.setattr(
+        urllib.request, "urlopen",
+        lambda url, timeout=None: _FakeResponse(url.encode()))
+
+    urls = [f"https://sns.amazonaws.com/{i}.pem"
+            for i in range(ses_webhook._CERT_CACHE_MAX * 3)]
+    for url in urls:
+        assert ses_webhook.fetch_certificate_pem(url) == url.encode()
+
+    assert len(ses_webhook._CERT_CACHE) <= ses_webhook._CERT_CACHE_MAX
+    assert urls[-1] in ses_webhook._CERT_CACHE
+    assert urls[0] not in ses_webhook._CERT_CACHE
+
+
+def test_a_cached_certificate_is_not_refetched(monkeypatch):
+    """The reason the cache exists in the first place — a burst of events on one
+    certificate is one fetch — still holds with the bound in place."""
+    import urllib.request
+    fetches: list[str] = []
+    monkeypatch.setattr(ses_webhook, "_CERT_CACHE", {})
+
+    def _record(url, timeout=None):
+        fetches.append(url)
+        return _FakeResponse(b"pem-bytes")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _record)
+    url = "https://sns.amazonaws.com/one.pem"
+    for _ in range(5):
+        assert ses_webhook.fetch_certificate_pem(url) == b"pem-bytes"
+    assert fetches == [url]
 
 
 def test_canonical_string_omits_an_absent_subject_and_keeps_field_order():

@@ -216,11 +216,18 @@ def test_a_reminder_then_an_alert_walks_the_whole_ladder(ladder):
 
 
 def test_running_twice_with_the_same_now_changes_nothing(ladder):
-    """Idempotency, stated the way the brief states it."""
+    """Idempotency, stated the way the brief states it.
+
+    ``now`` is read from the real clock, not the module-level ``NOW``:
+    :func:`aged_notification` back-dates ``sent_at`` relative to the wall
+    clock, so pinning the run instant to a fixed calendar date would make
+    the rung a row lands on depend on the day the suite runs.
+    """
     aged_notification(hours=5, run_id="run-remind")
     aged_notification(hours=30, run_id="run-alert")
-    first = notifications.run_escalations(NOW)
-    second = notifications.run_escalations(NOW)
+    now = datetime.now(timezone.utc)
+    first = notifications.run_escalations(now)
+    second = notifications.run_escalations(now)
     assert (first["reminded"], first["alerted"]) == (1, 1)
     assert (second["reminded"], second["alerted"]) == (0, 0)
     assert len(ns.list_notifications(kind=ns.KIND_RFQ_REMINDER)) == 1
