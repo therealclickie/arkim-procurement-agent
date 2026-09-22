@@ -56,3 +56,14 @@ loop.log
 VERDICT.txt
 loop/VERDICT.txt
 loop/BRANCH_POINT.txt
+
+# run dumps and scratch output
+run_dump*.txt
+run_full.json
+triton_bands.txt
+*_live_eval_result.json
+scripts/harness_results_*.json
+*.bak
+*.pre-t4
+desktop.ini
+loop/SCOPE_NOTES.txt
