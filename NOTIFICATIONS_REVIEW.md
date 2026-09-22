@@ -161,3 +161,83 @@ the D1 governance routing all pass as built.
 **CHANGES_REQUESTED** — solely on finding 1. The suite must be green as run by the reviewer,
 and today it is not (`1 failed, 2805 passed`). The fix is confined to
 `test_notifications_escalation.py`, an arc-4 file; findings 2–3 need no code change this round.
+
+---
+---
+
+# ROUND 2 (Claude Fable 5, 2026-09-22) — re-review of fix commit `7aee801`
+
+**Verdict: APPROVED.**
+
+The fix round touched exactly four files (`git show --stat 7aee801`): `NOTIFICATIONS_REPORT.md`
+(fix log), `utils/ses_webhook.py`, and the two arc-4-owned test files
+`test_notifications_escalation.py` / `test_ses_webhook.py`. No pre-existing test file, no other
+source file, no scope creep. Both round-1 findings that called for code are genuinely fixed;
+finding 3 is carried on the human flag-on checklist as agreed.
+
+## Finding-by-finding verification
+
+**Finding 1 (MAJOR, date-dependent test) — FIXED and verified.**
+`utils/procurement_agent/tests/test_notifications_escalation.py:218-234`: the test now reads one
+real instant (`now = datetime.now(timezone.utc)`, `:228`) and passes that same instant to both
+`run_escalations` calls (`:229-230`) — the same form the adjacent ladder test uses (`:209`). The
+row ages built by `aged_notification()` (`:151`, wall-clock-relative) are now measured against the
+clock that produced them, so the 5h/30h rows deterministically land on remind/alert on any
+calendar date. The idempotency assertion is unweakened (`first == (1, 1)`, `second == (0, 0)`, one
+reminder row — `:231-234`), and the docstring (`:219-225`) records why the module-level `NOW` is
+deliberately not used here, disarming the re-armament risk. The module `NOW` remains only in
+`notification_row()` (`:150` area), which feeds the pure decision function with no store and no
+clock — date-safe, correctly left alone.
+
+**Finding 2 (MINOR, unbounded cert cache) — FIXED and verified.**
+`utils/ses_webhook.py:64-74`: `_CERT_CACHE_MAX = 16` (`:73`) with a why-comment naming the exact
+exposure (unauthenticated caller reaches the fetch after the topic allowlist, before the signature
+is known good); eviction is oldest-out before each insert (`:159-161`), cache-hit path untouched
+(`:150`). Two pinning tests added, both socket-free: `test_ses_webhook.py:348-366`
+(`test_the_certificate_cache_is_bounded` — 48 distinct URLs, cache stays ≤ 16, newest survives,
+oldest evicted, every fetch returns the right bytes) and `:369-384`
+(`test_a_cached_certificate_is_not_refetched` — five calls, one fetch, so the bound did not trade
+the cache-fill surface for a fetch storm). The monkeypatch of `urllib.request.urlopen` is
+effective because `fetch_certificate_pem` imports it lazily at call time
+(`utils/ses_webhook.py:153`) — D10 holds; no test opens a socket.
+
+**Finding 3 (MINOR, F8 cap-class policy) — carried forward unchanged, as agreed.**
+No code change, correctly: choosing a cap policy for notification mail is the same class of
+human ruling as gate F2. Recorded in the report's fix log and the flag-on checklist alongside F7.
+Both flags remain default-OFF, so nothing is live.
+
+## Checklist re-run (only what the fix could have moved; the rest stands from round 1)
+
+- **R1 — PASS.** `git diff --name-status d20ca68..HEAD`: every `M` is a source file
+  (`api_server.py`, `utils/*.py`, frontend screens/libs, `pyproject.toml`, `uv.lock`,
+  `design/interactions.md`); all 15 test-side files are `A`; `conftest.py` untouched.
+  `loop/VERDICT.txt` is not committed (`loop/` is untracked).
+- **R2 — now PASS on both suites, run by the reviewer with flags OFF:**
+  - Backend: `NOTIFICATIONS_V1=0 uv run pytest -q` → **2808 passed, 73 skipped, 0 failed**
+    (209s) = 2479 + 329. The round-1 red test now passes.
+  - Frontend: `NEXT_PUBLIC_NOTIFICATIONS_V1=0 npm test` → **197 passed (24 files)** = 172 + 25.
+  - Webhook 404 flag-off (`test_ses_webhook.py:124`, gate at `api_server.py:7538-7539`) and
+    no-Notification-rows flag-off (`test_notifications_rfq_new.py:267`,
+    `test_notifications_auth_mail.py:206`) all in the green run.
+- **R3 — PASS (re-grepped).** Still exactly two `boto3.client(` sites in tests
+  (`test_mail_provider.py:48`, `test_notifications_auth_mail.py:75`), both inline fake
+  credentials + immediate `Stubber`; no `boto3.Session(`.
+- **R4 — PASS (re-read; `ses_webhook.py` changed this round).** `handle_envelope` ordering is
+  unchanged: envelope type → topic allowlist (`utils/ses_webhook.py:316`, before any URL in the
+  envelope is fetched) → `verify_signature` (`:319`; cert host check inside
+  `certificate_url_ok`, https-only at `:136`, dot-anchored `.amazonaws.com` at `:139`) → only
+  then `confirm_subscription`. Idempotency store (`notifications_store.py`) untouched this round.
+- **R5–R9 — unchanged by the fix commit; round-1 PASS stands** (governance tests drive the real
+  gate; auth set asserted from Stubber-captured kwargs; OPENED-only table rows still escalate at
+  `test_notifications_escalation.py:87-88`; sole new runtime dep is pre-authorised `boto3`; the
+  AST no-scheduler test still passes in the green run; gate STOP/Q1-ruling history is honest).
+
+## Verdict
+
+**APPROVED.** Both suites green as run by this reviewer with flags OFF; no pre-existing test
+modified; the round-1 MAJOR is fixed at the root (clock consistency, not assertion weakening)
+and the MINOR is fixed with pinning tests. Outstanding items for the human flag-on checklist,
+none of which block merge of a default-OFF arc: F7 (flag on + SES unconfigured ⇒ all mail
+errors, no Gmail fallback), F8/finding 3 (notification cap class), F10 (webhook rate limit —
+throttle key needs a ruling), F1 (verify page auto-POST, arc 4b), F5 (MEMBER_INVITE is new
+outward mail), and the recommended post-approval conftest pin commit (gate F4 precedent).
