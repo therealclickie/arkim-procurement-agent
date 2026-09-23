@@ -7764,6 +7764,25 @@ def admin_notification_alerts(authorization: Optional[str] = Header(default=None
     return {"count": len(rows), "alerts": rows}
 
 
+@app.get("/api/admin/notification-digest")
+def admin_notification_digest(authorization: Optional[str] = Header(default=None)):
+    """Arc 4b S6: today's DIGEST-tier concierge alerts, in one place.
+
+    The tier that does NOT interrupt — soft-bounce streaks, notification-cap
+    blocks, a hard bounce on a contact who was not the account's last one.
+    Read once a day. It reports; it does not acknowledge, because "somebody
+    was told" and "somebody dealt with it" are different facts and collapsing
+    them loses the second one.
+
+    Flag gate BEFORE ``require_admin``, the arc 2 convention.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    require_admin(authorization)
+    from utils import notifications
+    return notifications.run_concierge_digest()
+
+
 @app.post("/api/admin/notification-alerts/{alert_id}/acknowledge")
 def admin_acknowledge_notification_alert(
         alert_id: str, authorization: Optional[str] = Header(default=None)):

@@ -67,6 +67,13 @@ DEFAULT_ALERT_HOURS = 8.0
 ENV_COALESCE_MINUTES = "NOTIFY_COALESCE_MINUTES"
 DEFAULT_COALESCE_MINUTES = 15.0
 
+# S5: the hard ceiling on notification emails to ONE mailbox in one business
+# day. Beyond it, items roll into that member's next digest — they are
+# DEFERRED, never discarded. A dropped notification would be the one failure
+# this whole surface exists to prevent.
+ENV_MEMBER_DAILY_CEILING = "MEMBER_DAILY_NOTIFICATION_CEILING"
+DEFAULT_MEMBER_DAILY_CEILING = 5
+
 # D8: soft bounces do not suppress; this many CONSECUTIVE ones raise an alert.
 SOFT_BOUNCE_ALERT_THRESHOLD = 3
 
@@ -100,6 +107,36 @@ def coalesce_minutes() -> float:
     is the escape hatch for a deployment that wants arc-4 timing back without
     a code change."""
     return _env_float(ENV_COALESCE_MINUTES, DEFAULT_COALESCE_MINUTES)
+
+
+def member_daily_ceiling() -> int:
+    """S5's per-mailbox daily ceiling (default 5). ``<= 0`` switches it off,
+    the house convention for an inert limiter. Unparseable ⇒ the default: a
+    typo must not mean "no ceiling"."""
+    raw = (os.environ.get(ENV_MEMBER_DAILY_CEILING) or "").strip()
+    if not raw:
+        return DEFAULT_MEMBER_DAILY_CEILING
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"[Notifications] {ENV_MEMBER_DAILY_CEILING}={raw!r} is not a "
+              f"number — using {DEFAULT_MEMBER_DAILY_CEILING}")
+        return DEFAULT_MEMBER_DAILY_CEILING
+
+
+def ceiling_reached(recipient: str, day: str) -> bool:
+    """Has this mailbox had its allowance of notification emails for ``day``?
+
+    ``day`` is the account's LOCAL business day and is a PARAMETER — the
+    ceiling is a function of the scheduler's supplied instant, never of the
+    wall clock. Auth mail and invites never reach this code path, which is
+    exactly S5's exemption: they are requested by the recipient or their
+    colleague, not pushed by us.
+    """
+    ceiling = member_daily_ceiling()
+    if ceiling <= 0 or not recipient or not day:
+        return False
+    return store.count_mailed_on_day(recipient, day) >= ceiling
 
 
 def remind_hours() -> float:
@@ -273,7 +310,8 @@ def _rfq_subject_and_body(rfq: dict) -> tuple[str, str]:
 
 
 def _send_notification_mail(notification: dict, *, subject: str, body: str,
-                            recipient: str) -> dict:
+                            recipient: str, mailed_day: Optional[str] = None,
+                            at: Optional[datetime] = None) -> dict:
     """Hand one notification's mail to THE send seam and record the outcome.
 
     ``GmailSender().send`` is used because it is the seam — governance runs
@@ -317,6 +355,17 @@ def _send_notification_mail(notification: dict, *, subject: str, body: str,
     # credential, but it carries nothing worth storing twice either.
     row_id = _record_notification_send(notification, subject=subject,
                                        recipient=recipient)
+    if mailed_day:
+        # S5: stamped BEFORE the attempt, so a crash mid-send costs the member
+        # one slot rather than letting a retry storm past the ceiling.
+        store.mark_mailed(notification["id"], mailed_day)
+    # ``at`` is the scheduler's supplied instant. It is what stamps ``sent_at``,
+    # and ``sent_at`` is what the escalation ladder measures age from — so a
+    # run driven by an explicit ``now`` produces a ladder that agrees with it.
+    # Without this the send stamped the wall clock while the ladder judged
+    # against ``now``, and the two disagreed by however far apart they were:
+    # the same date-dependence class as arc 4's review finding.
+    stamp = at.isoformat() if at is not None else None
     result = GmailSender().send(msg)
     if row_id:
         supplier_registry.update_sent_message_status(
@@ -328,14 +377,14 @@ def _send_notification_mail(notification: dict, *, subject: str, body: str,
         if result.message_id:
             store.set_provider_message_id(notification["id"], result.message_id)
         return store.transition(notification["id"], store.STATE_SENT,
-                                event_type="Send") or notification
+                                event_type="Send", at=stamp) or notification
     if result.status in ("suppressed", "not_allowlisted", "cap_blocked"):
         return store.transition(notification["id"], store.STATE_SUPPRESSED,
-                                event_type=result.status,
+                                event_type=result.status, at=stamp,
                                 detail={"reason": result.error}) or notification
     if result.status == "error":
         return store.transition(notification["id"], store.STATE_FAILED,
-                                event_type="Error",
+                                event_type="Error", at=stamp,
                                 detail={"reason": result.error}) or notification
     # "stubbed": the delivery gate is off. Stay QUEUED — truthfully.
     return notification
@@ -479,13 +528,33 @@ def _notify_rfq_new(rfq: dict, account: Optional[dict],
         if notification is None:
             continue
         if not deferred and not joins_batch:
-            # The anchor: mailed now, and its coalesce_until is what marks the
-            # mailbox's window open for the joiners behind it. The flush only
-            # ever picks up QUEUED rows, so an anchor is never sent twice.
-            notification = _send_notification_mail(
-                notification, subject=subject, body=body, recipient=recipient)
+            day = business_day_for(account_id, moment)
+            if ceiling_reached(recipient, day):
+                # S5: over the day's allowance. DEFERRED into the digest, not
+                # dropped — the row stays QUEUED and unseen, so the supplier
+                # still learns about this request, just in one daily mail
+                # instead of a sixth interruption.
+                store.set_deferred(notification["id"])
+                notification = store.get_notification(notification["id"]) \
+                    or notification
+            else:
+                # The anchor: mailed now, and its coalesce_until is what marks
+                # the mailbox's window open for the joiners behind it. The
+                # flush only picks up QUEUED rows, so it is never sent twice.
+                notification = _send_notification_mail(
+                    notification, subject=subject, body=body,
+                    recipient=recipient, mailed_day=day, at=moment)
         created.append(notification)
     return created
+
+
+def business_day_for(account_id: Optional[str], now: datetime) -> str:
+    """The account's LOCAL business day for ``now`` — the unit both the daily
+    ceiling and the per-account escalation aggregation count in. Pure over
+    ``now``; the timezone lookup is the only I/O."""
+    from utils import business_hours
+    return business_hours.business_date(
+        now, business_hours.account_timezone(account_id))
 
 
 def _open_window_until(recipient: str, now: datetime):
@@ -577,16 +646,25 @@ def run_coalesced_sends(now: Optional[datetime] = None) -> dict:
         for recipient, items in by_recipient.items():
             if not recipient or store.is_email_suppressed(recipient):
                 continue
+            day = business_day_for(items[0].get("account_id"), moment)
+            if ceiling_reached(recipient, day):
+                # S5 again, at the batch boundary: defer the whole batch into
+                # the digest rather than dropping any of it.
+                for item in items:
+                    store.set_deferred(item["id"])
+                continue
             if not _claim_batch(items):
                 continue
             subject, body = _batch_subject_and_body(items)
             carrier = items[0]
             _send_notification_mail(carrier, subject=subject, body=body,
-                                    recipient=recipient)
+                                    recipient=recipient, mailed_day=day,
+                                    at=moment)
             carried = store.get_notification(carrier["id"]) or carrier
             reached = carried.get("state") or store.STATE_SENT
             for item in items[1:]:
                 store.transition(item["id"], reached, event_type="Coalesced",
+                                 at=moment.isoformat(),
                                  detail={"coalesced_into": carrier["id"]})
             out["batches"] += 1
             out["notifications"] += len(items)
@@ -738,6 +816,29 @@ def _apply_delivery_event(event: dict) -> bool:
     return True
 
 
+def _was_sole_contact(account_id: Optional[str], address: str) -> bool:
+    """Was ``address`` the account's ONLY notifiable RFQ contact (S6)?
+
+    This is the whole difference between "somebody must fix this today" and
+    "mention it in tomorrow's digest": losing one of three contacts is
+    housekeeping, losing the last one means the next RFQ to that supplier
+    reaches nobody at all.
+
+    Judged against the contact set as it stands BEFORE the suppression is
+    written. Fail-soft ``False`` — a lookup failure must not manufacture an
+    ACTION_NOW interruption.
+    """
+    if not account_id or not address:
+        return False
+    try:
+        contacts = {(m.get("email") or "").strip().lower()
+                    for m in rfq_contacts(account_id)}
+    except Exception as exc:
+        print(f"[Notifications] sole-contact check failed: {exc}")
+        return False
+    return contacts == {(address or "").strip().lower()}
+
+
 def _apply_suppression_side_effects(event: dict, event_type: str,
                                     notification: Optional[dict]) -> None:
     """D8: what a bounce or complaint does BEYOND the state change.
@@ -761,28 +862,37 @@ def _apply_suppression_side_effects(event: dict, event_type: str,
 
     if event_type == "Complaint":
         for addr in recipients:
+            sole = _was_sole_contact(account_id, addr)
             store.suppress_email(addr, reason="complaint", member_id=member_id,
                                  account_id=account_id, detail=event.get("raw"))
             store.raise_alert(kind=store.ALERT_EMAIL_SUPPRESSED,
                               dedupe_key=f"suppressed:complaint:{addr}",
+                              tier=(store.TIER_ACTION_NOW if sole
+                                    else store.TIER_DIGEST),
                               account_id=account_id, member_id=member_id,
                               notification_id=notification_id, email=addr,
-                              detail={"reason": "complaint"})
+                              detail={"reason": "complaint", "sole_contact": sole})
         return
 
     if event_type == "Bounce":
         hard = (event.get("bounce_type") or "").lower() == "permanent"
         for addr in recipients:
             if hard:
+                # S6: the tier depends on what this address WAS to the account.
+                # Judged BEFORE the suppression lands, because afterwards the
+                # address is excluded from the contact set and every bounce
+                # would look like the last one.
+                sole = _was_sole_contact(account_id, addr)
                 store.suppress_email(addr, reason="hard_bounce",
                                      member_id=member_id, account_id=account_id,
                                      detail=event.get("raw"))
                 store.raise_alert(
                     kind=store.ALERT_EMAIL_SUPPRESSED,
                     dedupe_key=f"suppressed:hard_bounce:{addr}",
+                    tier=(store.TIER_ACTION_NOW if sole else store.TIER_DIGEST),
                     account_id=account_id, member_id=member_id,
                     notification_id=notification_id, email=addr,
-                    detail={"reason": "hard_bounce",
+                    detail={"reason": "hard_bounce", "sole_contact": sole,
                             "subtype": event.get("bounce_subtype")})
             else:
                 # A soft bounce is a full mailbox or a temporary MTA failure:
@@ -1022,7 +1132,9 @@ def run_escalations(now: Optional[datetime] = None) -> dict:
                 # per RFQ; only the MAIL is consolidated.
                 due.setdefault(notification.get("recipient") or "", []) \
                    .append(notification)
-            elif action == "alert" and _raise_escalation(notification):
+            elif action == "alert" and _raise_escalation(
+                    notification, day=business_day_for(
+                        notification.get("account_id"), moment)):
                 out["alerted"] += 1
         for recipient, parents in due.items():
             if _send_consolidated_reminder(recipient, parents, now=moment,
@@ -1136,6 +1248,11 @@ def _send_consolidated_reminder(recipient: str, parents: list[dict], *,
     day = reminder_day(now, tz_name)
     if _reminded_on(recipient, day):
         return False
+    if ceiling_reached(recipient, day):
+        # S5: the mailbox has had its allowance today. The batch is HELD — no
+        # parent is claimed, so every one of these requests is carried into the
+        # next day's reminder. Nothing is discarded.
+        return False
     claimed = [p for p in parents if store.mark_reminded(p["id"])]
     if not claimed:
         return False
@@ -1157,23 +1274,39 @@ def _send_consolidated_reminder(recipient: str, parents: list[dict], *,
         return False
     subject, body = _reminder_subject_and_body(claimed)
     _send_notification_mail(reminder, subject=subject, body=body,
-                            recipient=recipient)
+                            recipient=recipient, mailed_day=day, at=now)
     return True
 
 
-def _raise_escalation(parent: dict) -> bool:
-    """The 24h end of the ladder: a concierge alert, and NO further email to
-    the supplier (D6). Two unanswered mails is the point at which a human
-    should take over, not the point at which to send a third."""
+def _raise_escalation(parent: dict, *, day: Optional[str] = None) -> bool:
+    """The end of the ladder: a concierge alert, and NO further email to the
+    supplier (D6). Two unanswered mails is the point at which a human should
+    take over, not the point at which to send a third.
+
+    S6: the alert is deduplicated PER SUPPLIER ACCOUNT PER BUSINESS DAY, not
+    per notification. Three unresponsive requests from one supplier on one day
+    are ONE phone call, and three queue rows would be two pieces of work a
+    human has to open before discovering they are the same conversation.
+
+    ``mark_escalated`` stays per notification — that is what stops an
+    individual request re-laddering — so the per-request guarantee is
+    unchanged and only the human-visible count comes down. A coarser dedupe
+    key can only reduce alerts, never produce a second one.
+    """
     if not store.mark_escalated(parent["id"]):
         return False
+    scope = parent.get("account_id") or parent.get("supplier_domain") \
+        or parent["id"]
     store.raise_alert(
-        kind=store.ALERT_RFQ_ESCALATION, dedupe_key=f"escalation:{parent['id']}",
+        kind=store.ALERT_RFQ_ESCALATION,
+        dedupe_key=f"escalation:{scope}:{day}" if day
+                   else f"escalation:{parent['id']}",
         account_id=parent.get("account_id"), member_id=parent.get("member_id"),
         notification_id=parent["id"], run_id=parent.get("run_id"),
         supplier_domain=parent.get("supplier_domain"),
         email=parent.get("recipient"),
-        detail={"state": parent.get("state"), "reminded_at": parent.get("reminded_at")})
+        detail={"state": parent.get("state"), "reminded_at": parent.get("reminded_at"),
+                "business_day": day})
     store.create_notification(
         kind=store.KIND_RFQ_ESCALATION, account_id=parent.get("account_id"),
         member_id=parent.get("member_id"), run_id=parent.get("run_id"),
@@ -1197,6 +1330,7 @@ def run_daily_digest(now: Optional[datetime] = None) -> dict:
     if not notifications_active():
         return out
     try:
+        moment = now or _now()
         pending = [n for n in store.list_notifications(kind=store.KIND_RFQ_NEW,
                                                        deferred=True)
                    if n.get("state") == store.STATE_QUEUED]
@@ -1219,14 +1353,19 @@ def run_daily_digest(now: Optional[datetime] = None) -> dict:
             _send_notification_mail(
                 digest, recipient=recipient,
                 subject=f"{len(items)} quote request(s) waiting for you",
-                body=_digest_body(items))
+                body=_digest_body(items), at=moment,
+                # The digest IS S5's overflow destination, so it does not
+                # consume a ceiling slot of its own: charging the member for
+                # the mail that exists to carry their deferred items would
+                # defer the deferral.
+                mailed_day=None)
             # The batched items leave the deferred pool and are marked SENT:
             # they HAVE now been communicated, by the digest. Leaving them
             # QUEUED would make the escalation ladder chase mail that went out.
             for item in items:
                 store.clear_deferred(item["id"])
                 store.transition(item["id"], store.STATE_SENT,
-                                 event_type="Digest",
+                                 event_type="Digest", at=moment.isoformat(),
                                  detail={"digest_id": digest["id"]})
             out["members"] += 1
             out["notifications"] += len(items)
@@ -1255,10 +1394,42 @@ def _digest_body(items: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 def list_open_alerts() -> list[dict]:
-    """Open concierge alerts, newest first (``[]`` when the flag is off)."""
+    """The admin QUEUE: open ACTION_NOW and QUEUE alerts, newest first (S6).
+
+    DIGEST-tier alerts are deliberately absent. They are informational — a
+    soft-bounce streak, a notification-cap block, a hard bounce on a contact
+    who was not the account's last one — and interleaving them with work
+    somebody has to do now is how a queue stops being read. They arrive once a
+    day via :func:`run_concierge_digest`. ``[]`` when the flag is off.
+    """
     if not notifications_active():
         return []
-    return store.list_alerts(status=store.ALERT_OPEN)
+    return store.list_alerts(status=store.ALERT_OPEN, tiers=store.QUEUE_TIERS)
+
+
+def run_concierge_digest(now: Optional[datetime] = None) -> dict:
+    """The once-a-day read of the DIGEST tier (S6).
+
+    A plain function over the store's state taking ``now`` as an argument, the
+    same shape as every other scheduler entry point here. It REPORTS; it does
+    not acknowledge, because "somebody was told" and "somebody dealt with it"
+    are different facts and collapsing them loses the second one.
+
+    Returns ``{"count": n, "alerts": [...]}``.
+    """
+    out: dict = {"count": 0, "alerts": []}
+    if not notifications_active():
+        return out
+    try:
+        moment = now or _now()
+        alerts = store.list_alerts(status=store.ALERT_OPEN,
+                                   tiers=(store.TIER_DIGEST,),
+                                   day=moment.strftime("%Y-%m-%d"))
+        out["alerts"] = alerts
+        out["count"] = len(alerts)
+    except Exception as exc:
+        print(f"[Notifications] run_concierge_digest failed: {exc}")
+    return out
 
 
 def acknowledge_alert(alert_id: str, *, acknowledged_by: str) -> Optional[dict]:

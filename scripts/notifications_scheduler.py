@@ -119,6 +119,14 @@ def cmd_digest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_concierge_digest(args: argparse.Namespace) -> int:
+    """Arc 4b S6: the once-a-day read of the DIGEST tier — the alerts that are
+    worth knowing about and are not worth interrupting anybody for."""
+    result = notifications.run_concierge_digest(parse_now(args.now))
+    _report("concierge-digest", {"count": result["count"]}, as_json=args.json)
+    return 0
+
+
 def _report(label: str, result: dict, *, as_json: bool) -> None:
     if as_json:
         print(json.dumps({"command": label, **result}))
@@ -168,6 +176,13 @@ def build_parser() -> argparse.ArgumentParser:
     dig.add_argument("--json", action="store_true",
                      help="emit the result as one JSON line")
     dig.set_defaults(func=cmd_digest)
+    con = sub.add_parser("concierge-digest",
+                         help="report today's DIGEST-tier concierge alerts")
+    con.add_argument("--now", default=None,
+                     help="ISO-8601 instant to evaluate against (default: now, UTC)")
+    con.add_argument("--json", action="store_true",
+                     help="emit the result as one JSON line")
+    con.set_defaults(func=cmd_concierge_digest)
     return parser
 
 
