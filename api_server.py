@@ -7253,6 +7253,10 @@ def _serialize_account_member(member: dict) -> dict:
         "role": member["role"],
         "status": member["status"],
         "created_at": member["created_at"],
+        # Arc 4b S1: the EFFECTIVE designation, not the raw column — the
+        # screen renders a checkbox, and "null means the role default" is a
+        # storage detail the client should not have to re-implement.
+        "receives_rfq": supplier_accounts.member_receives_rfq(member),
     }
 
 
@@ -7302,6 +7306,40 @@ def supplier_members_invite(body: SupplierInviteBody,
     except Exception as exc:  # pragma: no cover - the helper is itself fail-soft
         import logging
         logging.getLogger(__name__).warning("invite mail failed: %s", exc)
+    return JSONResponse(content={"ok": True,
+                                 "member": _serialize_account_member(member)},
+                        headers=_portal_response_headers({}))
+
+
+class SupplierRfqContactBody(BaseModel):
+    """``receives`` absent/null clears the explicit flag and restores the
+    role default — it is not the same as ``false``."""
+    receives: Optional[bool] = None
+
+
+@app.post("/api/supplier/members/{member_id}/rfq-contact")
+def supplier_member_rfq_contact(member_id: str, body: SupplierRfqContactBody,
+                                session: dict = Depends(
+                                    _supplier_require_capability(
+                                        supplier_accounts_rbac.MANAGE_MEMBERS))):
+    """Arc 4b S1: designate (or un-designate) a member as an RFQ contact.
+
+    Capability-gated at MANAGE_MEMBERS — OWNER and ADMIN — because deciding
+    who is mailed about the company's incoming work is member management, not
+    a personal setting. A MEMBER calling this directly gets 403 from the
+    server, not merely a hidden control. Audited; cross-account ids are 404.
+    """
+    try:
+        member = supplier_accounts_rbac.set_rfq_contact(
+            session["member"], member_id, body.receives)
+    except supplier_accounts.SupplierAccountsError as exc:
+        _supplier_rbac_error(exc)
+    supplier_accounts.audit(
+        "rfq_contact_changed", account_id=session["account_id"],
+        member_id=member["id"], email=member["email"],
+        actor=session["member"]["email"],
+        detail={"receives_rfq": supplier_accounts.member_receives_rfq(member),
+                "explicit": body.receives})
     return JSONResponse(content={"ok": True,
                                  "member": _serialize_account_member(member)},
                         headers=_portal_response_headers({}))

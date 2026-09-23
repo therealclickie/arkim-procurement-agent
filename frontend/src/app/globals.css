@@ -1499,6 +1499,16 @@
   gap: 8px;
   align-items: center;
 }
+/* Arc 4b S1: the RFQ-contact designation. Deliberately quieter than the role
+   pill - it is a routing choice, not a permission. */
+.supplier-member-rfq {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--portal-slate);
+  cursor: pointer;
+}
 
 /* The claim → account bridge (arc 3 D4): a quiet offer inside the pending
    confirmation card, never competing with it for attention. */

@@ -210,6 +210,12 @@ CREATE TABLE IF NOT EXISTS supplier_members (
     registrable_domain  TEXT NOT NULL,
     role                TEXT NOT NULL DEFAULT 'MEMBER',
     status              TEXT NOT NULL DEFAULT 'PENDING',
+    -- Arc 4b S1. NULL means "use the role default" (see receives_rfq); an
+    -- explicit 0/1 is this member's own opt-out/opt-in and wins over the role.
+    -- Nullable on purpose: it keeps "nobody has chosen" distinguishable from
+    -- "somebody chose the same thing the role would have", so changing the
+    -- product default later does not silently overwrite real decisions.
+    receives_rfq        INTEGER,
     invited_by          TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT,
@@ -282,6 +288,24 @@ _INDEX_MEMBERS_ACCOUNT = (
 )
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """PRAGMA-driven idempotent column adds (convention B, the house pattern
+    from notifications_store._migrate / supplier_registry).
+
+    Only for tables whose shape changed after they first shipped — a fresh
+    database gets the column from the DDL above and this is a no-op. An
+    existing row gets NULL, which reads as "use the role default", so no
+    backfill is needed and no member's notification behaviour changes by
+    accident at deploy time.
+    """
+    have = {r[1] for r in conn.execute("PRAGMA table_info(supplier_members)")}
+    if have and "receives_rfq" not in have:
+        conn.execute("ALTER TABLE supplier_members ADD COLUMN receives_rfq INTEGER")
+    have_accounts = {r[1] for r in conn.execute("PRAGMA table_info(supplier_accounts)")}
+    if have_accounts and "timezone" not in have_accounts:
+        conn.execute("ALTER TABLE supplier_accounts ADD COLUMN timezone TEXT")
+
+
 def _get_conn() -> sqlite3.Connection:
     os.makedirs(_DATA_DIR, exist_ok=True)
     conn = sqlite3.connect(_DB_PATH)
@@ -293,6 +317,7 @@ def _get_conn() -> sqlite3.Connection:
     conn.execute(_DDL_SESSIONS)
     conn.execute(_INDEX_SESSION_HASH)
     conn.execute(_DDL_AUDIT)
+    _migrate(conn)
     conn.commit()
     return conn
 
@@ -527,6 +552,69 @@ def list_pending_members() -> list[dict]:
     except Exception as exc:
         print(f"[SupplierAccounts] list_pending_members failed: {exc}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# Arc 4b S1 — designated RFQ contacts
+#
+# WHY A DESIGNATION AND NOT "everyone who can see requests". Arc 4 fanned
+# RFQ_NEW out to every ACTIVE member holding VIEW_REQUESTS. Five reps on an
+# account therefore received five emails for one RFQ, and — worse than the
+# volume — ownership diffused: each of the five could reasonably assume one of
+# the other four had it. One request, one owner.
+#
+# VIEW_REQUESTS still governs who may SEE a request in the portal. This flag
+# governs only who is MAILED about it, which is a different question: a member
+# who can see requests but is not the person who answers them is exactly the
+# case the default is built for.
+# ---------------------------------------------------------------------------
+
+# The product default, by role. Reversible later without a schema change,
+# because a member who has chosen carries an explicit value that wins.
+RFQ_CONTACT_DEFAULT_ROLES: frozenset[str] = frozenset({ROLE_OWNER, ROLE_ADMIN})
+
+
+def member_receives_rfq(member: Optional[dict]) -> bool:
+    """Is this member a designated RFQ contact (S1)?
+
+    An explicit stored value wins; ``NULL`` falls back to the role default
+    (OWNER and ADMIN yes, MEMBER no). A missing member is not a contact.
+
+    Pure over its argument — no store read — so the fan-out can decide from
+    the rows it already has, and the rule is table-testable.
+    """
+    if not member:
+        return False
+    raw = member.get("receives_rfq")
+    if raw is not None:
+        return bool(raw)
+    return (member.get("role") or "") in RFQ_CONTACT_DEFAULT_ROLES
+
+
+def set_member_receives_rfq(member_id: str, receives: Optional[bool]
+                            ) -> Optional[dict]:
+    """Set (or clear, with ``None``) a member's explicit RFQ-contact flag.
+
+    ``None`` restores "follow the role default" rather than writing the
+    default's current value — so a later change to the product default reaches
+    members who never chose, and only them. Fail-soft ``None``.
+    """
+    if _dormant() or not member_id:
+        return None
+    value = None if receives is None else (1 if receives else 0)
+    try:
+        with closing(_get_conn()) as conn:
+            cur = conn.execute(
+                "UPDATE supplier_members SET receives_rfq = ?, updated_at = ? "
+                "WHERE id = ?", (value, _now(), member_id))
+            conn.commit()
+            if cur.rowcount == 0:
+                return None
+    except Exception as exc:
+        print(f"[SupplierAccounts] set_member_receives_rfq failed for "
+              f"{member_id!r}: {exc}")
+        return None
+    return get_member(member_id)
 
 
 def update_member_status(member_id: str, status: str, *,

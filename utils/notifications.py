@@ -214,6 +214,23 @@ def notifiable_members(account_id: str) -> list[dict]:
     return out
 
 
+def rfq_contacts(account_id: str) -> list[dict]:
+    """The members an RFQ is actually MAILED to (arc 4b S1).
+
+    ``notifiable_members`` answers "who may be notified at all" — ACTIVE,
+    holds VIEW_REQUESTS, not address-suppressed. This narrows it to the
+    account's DESIGNATED RFQ contacts: OWNER and ADMIN by default, any member
+    who opts in, and nobody who opts out.
+
+    The reason is ownership, not volume. Arc 4 mailed every member who could
+    see requests, so a five-person account got five emails for one RFQ and
+    each of the five could reasonably assume one of the other four had it.
+    One request, one owner.
+    """
+    from utils.supplier_accounts import member_receives_rfq
+    return [m for m in notifiable_members(account_id) if member_receives_rfq(m)]
+
+
 def _rfq_subject_and_body(rfq: dict) -> tuple[str, str]:
     """The RFQ_NEW mail. Deliberately content-free about price and buyer: it
     says a request is waiting and points at the portal, because the portal is
@@ -385,14 +402,15 @@ def _notify_rfq_new(rfq: dict, account: Optional[dict]) -> list[dict]:
     domain = rfq.get("supplier_domain") or ""
     run_id = rfq.get("run_id")
     account_id = (account or {}).get("id")
-    members = notifiable_members(account_id) if account_id else []
+    members = rfq_contacts(account_id) if account_id else []
     if not members:
         store.raise_alert(
             kind=store.ALERT_NO_NOTIFIABLE_MEMBERS,
             dedupe_key=f"no-members:{run_id}:{domain}",
             account_id=account_id, run_id=run_id, supplier_domain=domain,
             detail={"reason": "no account" if not account_id
-                    else "no ACTIVE member holds view_requests, or all are suppressed"})
+                    else "no designated RFQ contact is active, permitted and "
+                         "un-suppressed"})
         print(f"[Notifications] RFQ_NEW for {domain}: no notifiable members -> alert")
         return []
 

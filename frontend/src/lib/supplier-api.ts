@@ -79,6 +79,11 @@ export interface AccountMember {
   role: SupplierRole;
   status: string;
   created_at: string;
+  /** Arc 4b S1: the EFFECTIVE designation — whether this member is mailed
+   *  about new RFQs. The server resolves the role default, so the client
+   *  never re-implements it. Optional so the type also describes a response
+   *  from a backend that predates S1; absent reads as not-designated. */
+  receives_rfq?: boolean;
 }
 
 export interface VerifyResponse {
@@ -295,6 +300,22 @@ export function revokeAccountMember(
 ): Promise<SessionResult<{ ok: boolean; member: AccountMember }>> {
   return sessionFetch(`/members/${encodeURIComponent(memberId)}/revoke`, {
     method: "POST",
+  }, true);
+}
+
+/**
+ * Arc 4b S1 — designate a member as an RFQ contact (who is MAILED about new
+ * requests, as distinct from who may SEE them). `receives: null` clears the
+ * explicit choice and restores the role default. MANAGE_MEMBERS only; the
+ * server returns 403 to anyone else, whether or not the control was rendered.
+ */
+export function setAccountMemberRfqContact(
+  memberId: string,
+  receives: boolean | null,
+): Promise<SessionResult<{ ok: boolean; member: AccountMember }>> {
+  return sessionFetch(`/members/${encodeURIComponent(memberId)}/rfq-contact`, {
+    method: "POST",
+    body: JSON.stringify({ receives }),
   }, true);
 }
 
