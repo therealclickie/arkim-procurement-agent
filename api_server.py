@@ -2773,6 +2773,18 @@ def create_order_now(run_id: str, body: OrderNowRequest):
         # not here). Channel is re-derived server-side — never trust client price/channel.
         price_hidden = cand.get("price_tbd") or cand.get("requires_rfq")
         raw_price = None if price_hidden else cand.get("base_price")
+        source_url = cand.get("source_url")
+        # R1 (F-07, gate finding F-C): this is the SECOND order-creating path, and it
+        # must obey the same rule as /execute — an accepted structured quote is the
+        # price, and a stale one refuses rather than letting the listing price stand in.
+        from utils import order_quote
+        _resolution = order_quote.resolve_for_order(
+            run_id, source_url, vendor_name=cand.get("vendor_name"))
+        if _resolution.refused:
+            raise HTTPException(status_code=409, detail=_resolution.refusal)
+        _quote = _resolution.quote
+        if _quote is not None and _quote.get("unit_price") is not None:
+            raw_price = _quote["unit_price"]      # the quote, never the listing price
         if raw_price is None:
             raise HTTPException(status_code=422,
                                 detail="Candidate has no buyable price — request a quote instead")
@@ -2780,7 +2792,6 @@ def create_order_now(run_id: str, body: OrderNowRequest):
             unit_price = float(raw_price)
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="Candidate price is not a number")
-        source_url = cand.get("source_url")
         channel = "marketplace" if (source_url and is_marketplace(source_url)) else "buy"
 
         qty = body.quantity or 1
@@ -2845,6 +2856,11 @@ def create_order_now(run_id: str, body: OrderNowRequest):
         "source":        channel,
         "quantity":      qty,
     }
+    if _quote is not None:
+        # R1: the quote's currency / lead time / quote id ride with its price. Quantity
+        # stays the buyer's requested qty here — order-now is an explicit qty purchase.
+        order_quote.apply_to_selection(selection, _quote)
+        selection["quantity"] = qty
     order = orders.create_order(selection, quantity=qty, company_id=company_id,
                                 initial_status=orders.STATUS_PENDING_FULFILMENT)
     if not order:

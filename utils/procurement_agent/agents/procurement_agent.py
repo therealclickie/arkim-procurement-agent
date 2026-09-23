@@ -83,6 +83,15 @@ class ProcurementAgent:
             return {"success": False, "action": "execute", "order": None, "placed": False,
                     "message": "No selected candidate to order.", "next_phase": None}
 
+        # R1 (F-07): an accepted structured quote IS the order's price. A quote that
+        # exists but is expired/withdrawn/superseded REFUSES here — nothing is captured
+        # and nothing is placed — rather than silently falling back to the listing
+        # price. `_selection_for_order` has already applied an active quote's terms.
+        refusal = selection.pop("_quote_refusal", None)
+        if refusal:
+            return {"success": False, "action": "execute", "order": None, "placed": False,
+                    "message": refusal, "next_phase": None}
+
         placed_by = self._latest_approver(run)
         # Manual-fulfilment selection (the "order-now" button, marketplace OR reference):
         # the order is captured POST-approval in pending_manual_fulfilment and is NOT
@@ -112,7 +121,7 @@ class ProcurementAgent:
         placed = orders.place_order(order["id"], placed_by=placed_by)
         if placed is None:
             return {"success": True, "action": "execute", "order": order, "placed": False,
-                    "message": "Order captured as draft; not placed (no resolvable price).",
+                    "message": "Order captured as draft — unpriced; needs a quote before it can be placed.",
                     "next_phase": None}
         return {"success": True, "action": "execute", "order": placed, "placed": True,
                 "message": f"Order {placed['id']} placed.", "next_phase": None}
@@ -201,14 +210,27 @@ class ProcurementAgent:
         # channel when present; otherwise derive it as before.
         sc_wrap = getattr(run, "selected_candidate_json", None) or {}
         wrap_source = sc_wrap.get("source") if isinstance(sc_wrap, dict) else None
-        return {
+        source_url = candidate.get("source_url") or candidate.get("sourceUrl")
+        selection = {
             "run_id": getattr(run, "id", None),
             "manufacturer": specs.get("manufacturer"),
             "part_number": specs.get("part_number"),
             "vendor_name": vendor,
-            "source_url": candidate.get("source_url") or candidate.get("sourceUrl"),
+            "source_url": source_url,
             "unit_price": price,
             "lead_time": str(lt) if lt is not None else None,
             "source": wrap_source or ("rfq" if is_rfq else "buy"),
             "quantity": 1,
         }
+        # R1 (F-07): the run's accepted structured quote, resolved on the same
+        # (run_id, source-URL domain) key the buyer card used, OVERRIDES the listing
+        # terms. A stale quote returns a refusal the caller must honour; no quote at
+        # all leaves the selection exactly as built above.
+        from utils import order_quote
+        resolution = order_quote.resolve_for_order(
+            selection["run_id"], source_url, vendor_name=vendor)
+        if resolution.refused:
+            selection["_quote_refusal"] = resolution.refusal
+        elif resolution.priced:
+            order_quote.apply_to_selection(selection, resolution.quote)
+        return selection
