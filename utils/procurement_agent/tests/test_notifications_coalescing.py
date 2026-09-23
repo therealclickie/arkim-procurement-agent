@@ -27,14 +27,17 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from utils import notifications, notifications_store as ns, supplier_accounts
+from utils import (business_hours, notifications, notifications_store as ns,
+                   supplier_accounts)
 from utils.procurement_agent.tests._arc4_notifications_fixtures import (  # noqa: F401
     allowlist, install_fake_provider, isolate_notification_stores,
 )
 
-# A Tuesday, mid-morning UTC. Fixed, so every assertion here is a function of
-# the instants the test supplies and nothing else.
+# Tuesday 08:00 America/Los_Angeles — the start of the supplier's working day,
+# so reminders may actually go out at this instant (S3). Fixed, so every
+# assertion here is a function of the instants the test supplies.
 NOW = datetime(2026, 9, 22, 15, 0, tzinfo=timezone.utc)
+NEXT_DAY = NOW + timedelta(days=1)          # Wednesday, same local time
 
 
 @pytest.fixture
@@ -204,8 +207,9 @@ def test_the_window_decision_reads_no_clock(batch):
 
 def aged(run_id: str, *, hours: float, recipient: str = "owner@dxpe.com",
          at: datetime = NOW) -> dict:
-    """One stored RFQ_NEW, sent ``hours`` before ``at``. Back-dated
-    explicitly — no sleeping, no clock patching, no calendar dependence."""
+    """One stored RFQ_NEW, sent ``hours`` BUSINESS hours before ``at``.
+    Back-dated explicitly — no sleeping, no clock patching, and no dependence
+    on the calendar date the suite runs (S3)."""
     n = ns.create_notification(kind=ns.KIND_RFQ_NEW, account_id="acct-1",
                                member_id="m-1", run_id=run_id,
                                supplier_domain="dxpe.com", recipient=recipient,
@@ -214,7 +218,7 @@ def aged(run_id: str, *, hours: float, recipient: str = "owner@dxpe.com",
                                        "part_number": run_id})
     assert n is not None
     ns.transition(n["id"], ns.STATE_SENT, event_type="Send",
-                  at=(at - timedelta(hours=hours)).isoformat())
+                  at=business_hours.business_hours_before(at, hours).isoformat())
     return ns.get_notification(n["id"])
 
 
@@ -237,12 +241,11 @@ def test_three_unseen_rfqs_produce_one_reminder_not_three(batch):
 def test_an_rfq_never_appears_in_two_reminders(batch):
     """Arc 4's one-reminder-per-RFQ guarantee, in its consolidated form. The
     guard is the ``reminded_at IS NULL`` write, not a check-then-act."""
-    next_day = NOW + timedelta(hours=12)      # 15:00Z -> 03:00Z, a new day
     aged("run-a", hours=6)
     assert notifications.run_escalations(NOW)["reminded"] == 1
-    aged("run-b", hours=6, at=next_day)
-    # A later day, so the per-day gate is open again.
-    assert notifications.run_escalations(next_day)["reminded"] == 1
+    aged("run-b", hours=6, at=NEXT_DAY)
+    # A later business day, so the per-day gate is open again.
+    assert notifications.run_escalations(NEXT_DAY)["reminded"] == 1
 
     batched: list[str] = []
     for r in ns.list_notifications(kind=ns.KIND_RFQ_REMINDER):
@@ -251,17 +254,23 @@ def test_an_rfq_never_appears_in_two_reminders(batch):
     assert len(batched) == 2
 
 
-def test_a_second_batch_the_same_day_is_deferred_never_dropped(batch):
-    """The ceiling defers; it does not discard. The RFQ that missed today's
-    reminder keeps reminded_at NULL and is carried into tomorrow's."""
-    next_day = NOW + timedelta(hours=12)      # 15:00Z -> 03:00Z, a new day
+def test_a_second_batch_the_same_day_is_deferred_never_dropped(batch, monkeypatch):
+    """The gate defers; it does not discard. The RFQ that missed today's
+    reminder keeps reminded_at NULL and is carried into tomorrow's.
+
+    The alert rung is pushed out of the way for this case: the question here
+    is what the PER-DAY gate does with a second batch, and an RFQ that crosses
+    the one-business-day escalation threshold in the meantime would answer a
+    different question.
+    """
+    monkeypatch.setenv("ESCALATE_ALERT_HOURS", "40")
     aged("run-a", hours=6)
     assert notifications.run_escalations(NOW)["reminded"] == 1
-    late = aged("run-b", hours=6, at=next_day)
+    late = aged("run-b", hours=5, at=NOW)
     assert notifications.run_escalations(NOW + timedelta(minutes=30))["reminded"] == 0
     assert ns.get_notification(late["id"])["reminded_at"] is None
 
-    assert notifications.run_escalations(next_day)["reminded"] == 1
+    assert notifications.run_escalations(NEXT_DAY)["reminded"] == 1
     assert ns.get_notification(late["id"])["reminded_at"] is not None
 
 

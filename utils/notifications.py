@@ -53,8 +53,13 @@ from utils.mail_provider import notifications_active  # re-exported: ONE flag re
 
 ENV_REMIND_HOURS = "ESCALATE_REMIND_HOURS"
 ENV_ALERT_HOURS = "ESCALATE_ALERT_HOURS"
+# S3: the unit of BOTH thresholds is now BUSINESS hours in the account's own
+# timezone, not wall-clock hours. The env names are unchanged so an existing
+# deployment keeps its knobs; the alert default moves 24 -> 8 because one
+# business day IS eight business hours, and 24 business hours would be three
+# working days before anyone looked at it.
 DEFAULT_REMIND_HOURS = 4.0
-DEFAULT_ALERT_HOURS = 24.0
+DEFAULT_ALERT_HOURS = 8.0
 
 # Arc 4b S2: how long an RFQ_NEW waits so that requests arriving together
 # become ONE email. Three RFQs released in the same batch are one event to the
@@ -98,12 +103,13 @@ def coalesce_minutes() -> float:
 
 
 def remind_hours() -> float:
-    """D6's reminder threshold (default 4, wall-clock)."""
+    """The reminder threshold, in BUSINESS hours (default 4 — S3)."""
     return _env_float(ENV_REMIND_HOURS, DEFAULT_REMIND_HOURS)
 
 
 def alert_hours() -> float:
-    """D6's concierge-alert threshold (default 24, wall-clock)."""
+    """The concierge-alert threshold, in BUSINESS hours (default 8, i.e. one
+    business day — S3)."""
     return _env_float(ENV_ALERT_HOURS, DEFAULT_ALERT_HOURS)
 
 
@@ -823,7 +829,8 @@ def is_seen(notification: dict) -> bool:
 
 
 def decide_escalation(notification: dict, *, now: datetime,
-                      remind_after: float, alert_after: float) -> Optional[str]:
+                      remind_after: float, alert_after: float,
+                      tz_name: Optional[str] = None) -> Optional[str]:
     """Pure decision function: ``"remind"``, ``"alert"``, or ``None``.
 
     Separated from the doing so the ladder is table-testable with no store and
@@ -832,9 +839,16 @@ def decide_escalation(notification: dict, *, now: datetime,
     has never reached anyone, so its age is measured from when the system
     committed to telling them.
 
+    S3: the age is counted in BUSINESS hours in ``tz_name`` (the account's
+    timezone; the configured default when absent). A Friday-afternoon request
+    therefore does not escalate over the weekend, which under wall-clock hours
+    was not an occasional false alarm but a guaranteed weekly one. ``now`` and
+    the timezone are both PARAMETERS — nothing in this path reads the clock,
+    so the rung a row lands on cannot depend on the day the suite runs.
+
     Order matters: the alert threshold is checked FIRST. A notification the
-    scheduler has not looked at for 30 hours should go straight to a human,
-    not collect a reminder now and an alert on the next run.
+    scheduler has not looked at for a whole business day should go straight to
+    a human, not collect a reminder now and an alert on the next run.
     """
     if notification.get("kind") not in store.ESCALATABLE_KINDS:
         return None
@@ -856,7 +870,8 @@ def decide_escalation(notification: dict, *, now: datetime,
     reference = _parse(notification.get("sent_at")) or _parse(notification.get("created_at"))
     if reference is None:
         return None
-    age_hours = (now - reference).total_seconds() / 3600.0
+    from utils import business_hours
+    age_hours = business_hours.business_hours_between(reference, now, tz_name)
     if age_hours >= alert_after:
         return "alert"
     if age_hours >= remind_after and not notification.get("reminded_at"):
@@ -882,11 +897,13 @@ def run_escalations(now: Optional[datetime] = None) -> dict:
         moment = now or _now()
         remind_after, alert_after = remind_hours(), alert_hours()
         due: dict[str, list[dict]] = {}
+        zones: dict[str, str] = {}
         for notification in store.list_notifications(kind=store.KIND_RFQ_NEW):
             out["considered"] += 1
             action = decide_escalation(notification, now=moment,
                                        remind_after=remind_after,
-                                       alert_after=alert_after)
+                                       alert_after=alert_after,
+                                       tz_name=_zone_for(notification, zones))
             if action == "remind":
                 # S2: collected, not sent one at a time. The decision is still
                 # per RFQ; only the MAIL is consolidated.
@@ -895,21 +912,35 @@ def run_escalations(now: Optional[datetime] = None) -> dict:
             elif action == "alert" and _raise_escalation(notification):
                 out["alerted"] += 1
         for recipient, parents in due.items():
-            if _send_consolidated_reminder(recipient, parents, now=moment):
+            if _send_consolidated_reminder(recipient, parents, now=moment,
+                                           zones=zones):
                 out["reminded"] += 1
     except Exception as exc:
         print(f"[Notifications] run_escalations failed: {exc}")
     return out
 
 
-def reminder_day(now: datetime, account_id: Optional[str] = None) -> str:
+def _zone_for(notification: dict, cache: dict[str, str]) -> str:
+    """The timezone name for a notification's account, memoised per run so a
+    hundred notifications for one account cost one store read."""
+    from utils import business_hours
+    key = notification.get("account_id") or ""
+    if key not in cache:
+        cache[key] = business_hours.account_timezone(key or None)
+    return cache[key]
+
+
+def reminder_day(now: datetime, tz_name: Optional[str] = None) -> str:
     """The day a reminder is counted against, as ``'YYYY-MM-DD'``.
 
-    Its own function because S3 changes what "day" means — the account's local
-    business day rather than the UTC one — and every caller must move together
-    when it does. Pure over ``now``; no clock read.
+    S3: the account's LOCAL business day, not the UTC one. A supplier in Los
+    Angeles reminded at 08:05 and again at 16:00 has had two reminders in one
+    working day even though those instants straddle a UTC date boundary — and
+    "one reminder a day" is a promise about their day, not ours. Pure over
+    ``now``; no clock read.
     """
-    return now.strftime("%Y-%m-%d")
+    from utils import business_hours
+    return business_hours.business_date(now, tz_name)
 
 
 def _reminded_on(recipient: str, day: str) -> bool:
@@ -958,7 +989,8 @@ def _reminder_subject_and_body(parents: list[dict]) -> tuple[str, str]:
 
 
 def _send_consolidated_reminder(recipient: str, parents: list[dict], *,
-                                now: datetime) -> bool:
+                                now: datetime,
+                                zones: Optional[dict] = None) -> bool:
     """One reminder per mailbox per day, listing every unseen RFQ (S2).
 
     TWO GUARANTEES, BOTH WRITE-ENFORCED:
@@ -980,7 +1012,15 @@ def _send_consolidated_reminder(recipient: str, parents: list[dict], *,
     if not recipient or store.is_email_suppressed(recipient):
         return False
     carrier = parents[0]
-    day = reminder_day(now, carrier.get("account_id"))
+    tz_name = _zone_for(carrier, zones if zones is not None else {})
+    from utils import business_hours
+    if not business_hours.is_business_time(now, tz_name):
+        # S3: reminders go out inside the supplier's working hours. Outside
+        # them the batch is HELD, not dropped — reminded_at stays NULL, so the
+        # next in-hours run picks exactly these requests up. A 4-hour reminder
+        # that lands at 02:00 is not a reminder, it is a reason to filter us.
+        return False
+    day = reminder_day(now, tz_name)
     if _reminded_on(recipient, day):
         return False
     claimed = [p for p in parents if store.mark_reminded(p["id"])]

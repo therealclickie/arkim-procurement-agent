@@ -522,6 +522,34 @@ def get_member_by_email(account_id: str, email: str) -> Optional[dict]:
         return None
 
 
+def set_account_timezone(account_id: str, timezone_name: Optional[str]
+                         ) -> Optional[dict]:
+    """Set (or clear, with ``None``) an account's IANA timezone — arc 4b S3.
+
+    ``None`` restores the configured default rather than writing the default's
+    current value, the same reasoning as ``set_member_receives_rfq``. The name
+    is NOT validated here: ``business_hours.zone`` is fail-soft and falls back
+    to the default, so a bad value degrades that account's scheduling instead
+    of raising inside a store write. Fail-soft ``None``.
+    """
+    if _dormant() or not account_id:
+        return None
+    value = (timezone_name or "").strip() or None
+    try:
+        with closing(_get_conn()) as conn:
+            cur = conn.execute(
+                "UPDATE supplier_accounts SET timezone = ?, updated_at = ? "
+                "WHERE id = ?", (value, _now(), account_id))
+            conn.commit()
+            if cur.rowcount == 0:
+                return None
+    except Exception as exc:
+        print(f"[SupplierAccounts] set_account_timezone failed for "
+              f"{account_id!r}: {exc}")
+        return None
+    return get_account(account_id)
+
+
 def list_members(account_id: str) -> list[dict]:
     """All members of an account (any status — the admin/owner views show
     pending + revoked honestly), newest last. [] on fail-soft."""
