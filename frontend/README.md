@@ -35,22 +35,27 @@ This creates `.venv` and installs the backend dependencies (`fastapi`,
 
 ```powershell
 # From the repository root (venv active)
-uvicorn api_server:app --reload --port 8000
+uvicorn api_server:app --reload --port 8001
 ```
 
-The API is available at `http://localhost:8000`.  
-Interactive docs: `http://localhost:8000/docs`
+The API is available at `http://localhost:8001`.  
+Interactive docs: `http://localhost:8001/docs`
 
 ### 3 · Configure environment
 
-A `.env.local` file is already committed at `frontend/.env.local`:
+`NEXT_PUBLIC_API_URL` tells the frontend where the FastAPI backend lives. It
+**defaults to `http://localhost:8001`** — the port `uvicorn api_server:app`
+serves on — so a fresh clone works with no configuration at all.
+
+Set it only when the backend runs somewhere else, in `frontend/.env.local`
+(git-ignored):
 
 ```
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_URL=http://localhost:8001
 ```
 
-This tells the frontend where the FastAPI backend lives. Update the value
-if your backend runs on a different host or port.
+The convention: the default in `next.config.ts` and the backend's serving port
+are the same number, and a test asserts it.
 
 ### 4 · Install frontend dependencies
 
@@ -78,7 +83,7 @@ needed in the frontend code.
 
 ```powershell
 # Tab 1 — backend (venv active)
-uvicorn api_server:app --reload --port 8000
+uvicorn api_server:app --reload --port 8001
 
 # Tab 2 — frontend
 cd frontend; npm run dev
@@ -99,7 +104,7 @@ Or use VS Code's compound launch configuration (add `.vscode/launch.json`):
       "type": "python",
       "request": "launch",
       "module": "uvicorn",
-      "args": ["api_server:app", "--reload", "--port", "8000"],
+      "args": ["api_server:app", "--reload", "--port", "8001"],
       "cwd": "${workspaceFolder}"
     },
     {
@@ -118,7 +123,7 @@ Or use VS Code's compound launch configuration (add `.vscode/launch.json`):
 
 ## Verify Phase 1 is working
 
-1. Backend health: `GET http://localhost:8000/api/health` → `{ "status": "ok" }`
+1. Backend health: `GET http://localhost:8001/api/health` → `{ "status": "ok" }`
 2. Frontend: `http://localhost:3000` → redirects to `/runs` (placeholder screen)
 3. Frontend → backend proxy: click **API HEALTH CHECK** link on the runs page
 

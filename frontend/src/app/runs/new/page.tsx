@@ -152,7 +152,7 @@ export default function NewRunPage() {
 
         {createRun.isError && (
           <p className="text-sm text-red-fg">
-            Failed to create run — is the backend running on port 8000?
+            Failed to create run — is the backend running on port 8001?
           </p>
         )}
       </div>
