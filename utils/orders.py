@@ -35,8 +35,9 @@ import uuid
 from contextlib import closing
 from datetime import datetime, timezone
 from typing import Optional
+from utils import data_dir
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+_DATA_DIR = data_dir.data_dir()  # R10: $GOFER_DATA_DIR, else <repo>/data (identical when unset)
 _DB_PATH = os.path.join(_DATA_DIR, "orders.sqlite")
 
 # Order status vocabulary.
@@ -83,7 +84,8 @@ CREATE TABLE IF NOT EXISTS orders (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     placed_by       TEXT,
-    notes           TEXT
+    notes           TEXT,
+    quote_id        TEXT            -- R1: the accepted structured quote this price came from
 );
 """
 
@@ -93,6 +95,9 @@ CREATE TABLE IF NOT EXISTS orders (
 # per CLEANUP §3.2 — a fresh DB gets these from _DDL; an existing one via _migrate.
 _ADDED_COLUMNS: dict[str, str] = {
     "company_id": "TEXT",   # D2 prereq #1 — tenant key (company PIN); NULL until identity lands
+    # Arc 5 / R1 (F-07): the accepted structured quote whose price this order carries.
+    # NULL for every listing-priced / price_db-priced order, i.e. every order today.
+    "quote_id": "TEXT",
 }
 
 
@@ -154,6 +159,12 @@ def _resolve_price(selection: dict, manufacturer: Optional[str],
         price = selection.get("base_price")
     currency = selection.get("currency") or "USD"
     source = selection.get("source")
+
+    # R1: a selection carrying an accepted quote is already priced by that quote; the
+    # price_db fallback must never stand in for it (it is keyed only on mfg/PN/vendor
+    # and knows nothing about the quote).
+    if price is None and selection.get("quote_id"):
+        return None, currency, (source or "quote")
 
     if price is None and manufacturer and part_number and vendor:
         try:
@@ -223,6 +234,8 @@ def create_order(selection: dict, quantity: int = 1,
         "updated_at": now,
         "placed_by": None,           # set on place_order, not on capture
         "notes": selection.get("notes"),
+        # R1: provenance — the accepted quote this price came from, when there was one.
+        "quote_id": selection.get("quote_id"),
     }
     try:
         with closing(_get_conn()) as conn:
@@ -230,10 +243,10 @@ def create_order(selection: dict, quantity: int = 1,
                 """INSERT INTO orders
                    (id, run_id, company_id, manufacturer, part_number, vendor_name, supplier_domain,
                     unit_price, currency, quantity, lead_time, source, status,
-                    created_at, updated_at, placed_by, notes)
+                    created_at, updated_at, placed_by, notes, quote_id)
                    VALUES (:id,:run_id,:company_id,:manufacturer,:part_number,:vendor_name,:supplier_domain,
                            :unit_price,:currency,:quantity,:lead_time,:source,:status,
-                           :created_at,:updated_at,:placed_by,:notes)""",
+                           :created_at,:updated_at,:placed_by,:notes,:quote_id)""",
                 order,
             )
             conn.commit()

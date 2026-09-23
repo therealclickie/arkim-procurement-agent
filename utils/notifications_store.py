@@ -52,6 +52,7 @@ import uuid
 from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
+from utils import data_dir
 
 # ---------------------------------------------------------------------------
 # Vocabulary (D3) — kinds and states as module constants; nothing downstream
@@ -144,6 +145,9 @@ ALERT_SOFT_BOUNCE_REPEATED = "SOFT_BOUNCE_REPEATED"
 # UTC day by the caller's dedupe key, so a bad day raises one alert, not one
 # per suppressed notification.
 ALERT_NOTIFICATION_CAP_BLOCKED = "NOTIFICATION_CAP_BLOCKED"
+# R7 (arc 5, F-03) — an auth-mail send refused for want of the tracking-off
+# configuration set. Mirrors utils.mail_provider.ALERT_AUTH_MAIL_REFUSED.
+ALERT_AUTH_MAIL_REFUSED = "AUTH_MAIL_REFUSED"
 
 # Arc 4b S6 — alert TIERS. Only the top tier interrupts. A queue where every
 # row is equally urgent is a queue with no urgency in it, and the first thing
@@ -175,6 +179,9 @@ ALERT_TIERS: dict = {
     ALERT_EMAIL_SUPPRESSED: TIER_ACTION_NOW,
     ALERT_SOFT_BOUNCE_REPEATED: TIER_DIGEST,
     ALERT_NOTIFICATION_CAP_BLOCKED: TIER_DIGEST,
+    # R7 (arc 5, F-03): a refused auth-mail send is a misconfiguration that
+    # silently stops suppliers signing in — somebody has to fix it now.
+    ALERT_AUTH_MAIL_REFUSED: TIER_ACTION_NOW,
 }
 
 
@@ -214,7 +221,7 @@ def can_transition(current: Optional[str], nxt: str) -> bool:
 # Store plumbing (convention B)
 # ---------------------------------------------------------------------------
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+_DATA_DIR = data_dir.data_dir()  # R10: $GOFER_DATA_DIR, else <repo>/data (identical when unset)
 _DB_PATH = os.path.join(_DATA_DIR, "notifications.sqlite")
 
 

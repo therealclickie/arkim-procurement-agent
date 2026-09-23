@@ -1,0 +1,46 @@
+{
+  "_source": [
+    "eval/e2e-flags-on:eval/e2e/evidence/s1_outbox_final.json",
+    "eval/e2e-flags-on:eval/e2e/evidence/s1_step9_buyer_view.json"
+  ],
+  "_finding": "F-09 - the RFQ_NEW mails (5 and 6) named nothing: subject \"New quote request\", body \"Arkim has sent you a request for quote.\" plus a portal link, on a run whose specs say Chesterton 155 qty 1. F-10 - the Tier-1 FYI (mail 3) carried the run UUID in its subject and three lines of internal classification vocabulary in its body.",
+  "observed_rfq_new_mail": {
+    "to": [
+      "owner@dxpe.com"
+    ],
+    "subject": "New quote request",
+    "body": "Hello,\n\nArkim has sent you a request for quote.\n\nYou can review it and submit a quote in your supplier portal:\nhttp://localhost:3000/supplier/requests\n\nRegards,\nArkim Procurement\nprocurement@arkim.ai"
+  },
+  "observed_tier1_fyi_mail": {
+    "to": [
+      "sales@dxpe.com"
+    ],
+    "subject": "Arkim matched request — SEAL (run e0489093-4d8c-4563-ab8f-cb6c789ed6db)",
+    "body": "Arkim matched an active procurement request to your onboarded profile.\n\nSupplier: DXP Enterprises (dxpe.com)\nMatched class: SEAL\nRelationship: class-matched (no brand row)\nCore class: yes\n\nThis is an automated FYI from the Arkim procurement platform. No action is required unless Arkim follows up with a formal RFQ.\n"
+  },
+  "s1_asset_specs": {
+    "category": "Part",
+    "description": "Chesterton 155 single cartridge mechanical seal, 1.875 inch shaft, like-for-like replacement",
+    "detected_type": "mechanical seal",
+    "use_case": "for Goulds 3196 MTX centrifugal pump, Line 2",
+    "manufacturer_confidence": 95.0,
+    "part_id_confidence": 82.0,
+    "confidence_reasoning": "User explicitly named the existing seal as a Chesterton 155 cartridge in 1.875 inch shaft size, requesting a like-for-like replacement. Manufacturer and model are confirmed at high confidence. Part_id confidence is strong — Chesterton 155 is a well-known cartridge seal line and shaft size is specified — but no face/material code or full part number is given, which would be needed to pin the exact configuration (elastomer, face material, gland style). Sourcing can proceed with manufacturer and model; confirming materials/fluid contact conditions before ordering is advisable.",
+    "quantity": 1,
+    "manufacturer": "Chesterton",
+    "model": "155",
+    "shaft_size": "1.875 inch",
+    "spec_based_sourcing": true,
+    "family_open_commit": true
+  },
+  "full_outbox_subjects": [
+    "Re: your parts request — a few more details",
+    "Re: your parts request — a few more details",
+    "Re: your parts request — a few more details",
+    "Arkim matched request — SEAL (run e0489093-4d8c-4563-ab8f-cb6c789ed6db)",
+    "Quote Request — Chesterton 155",
+    "New quote request",
+    "New quote request",
+    "Your Arkim supplier sign-in link"
+  ]
+}

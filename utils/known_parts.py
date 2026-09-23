@@ -36,8 +36,11 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from utils import data_dir
 
-_DB_PATH = os.path.join(os.path.dirname(__file__), "known_parts.json")
+# R10 (arc 5, F-04): $GOFER_DATA_DIR collects this with the other
+# stores; unset, it stays in utils/ exactly where it has always been.
+_DB_PATH = data_dir.utils_store_path("known_parts.json")
 
 # Volatile-price freshness: a cached price older than this is "stale" and must be
 # re-verified before it's shown as current (until then it carries the priceUnverified

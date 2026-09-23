@@ -220,13 +220,17 @@ def _send_notify(match: tm.Tier1Match, run_id: Optional[str], sender) -> tuple[s
             # No usable contact — record the event as stubbed (the FYI is queued, not
             # sent) rather than silently dropping it. The human-flag is in the trail.
             return ("stubbed", None)
-        subject = f"Arkim matched request — {match.noun_class} (run {run_id or 'n/a'})"
+        # R8 (arc 5, F-10): this mail used to carry the run UUID in its SUBJECT and
+        # three lines of internal classification vocabulary in its body
+        # ("Matched class: SEAL", "class-matched (no brand row)", "Core class: yes")
+        # — observed verbatim in s1_outbox_final.json, mail 3. None of it means
+        # anything to a supplier, and the UUID is an internal identifier. The mail
+        # now says only what the supplier needs: that a request in their line of
+        # work came in, and that Arkim may follow up.
+        subject = "Arkim matched a request to your profile"
         body = (
             f"Arkim matched an active procurement request to your onboarded profile.\n\n"
-            f"Supplier: {match.vendor_name} ({match.domain})\n"
-            f"Matched class: {match.noun_class}\n"
-            f"Relationship: {match.brand_relationship or 'class-matched (no brand row)'}\n"
-            f"Core class: {'yes' if match.is_core else 'no'}\n\n"
+            f"Supplier: {match.vendor_name} ({match.domain})\n\n"
             f"This is an automated FYI from the Arkim procurement platform. "
             f"No action is required unless Arkim follows up with a formal RFQ.\n"
         )

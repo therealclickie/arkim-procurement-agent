@@ -1289,3 +1289,87 @@ over-alerted in five identifiable ways; this is what it does now.
   send at most ten a day. Mail from an unfamiliar domain that names nobody is
   indistinguishable from phishing, and the safe response to phishing is to
   ignore it.
+
+---
+
+## Demo hardening (arc 5) — what the buyer and the supplier now see
+
+Ten behaviour changes, each closing a confirmed finding from the flags-on
+end-to-end evaluation. **None is behind a new flag** — the rulings apply
+unconditionally, with R1's quote read riding the pre-existing `QUOTE_SUBMIT_V1`.
+
+### Ordering — the accepted quote is the price (R1)
+
+| Situation | What the buyer sees |
+|---|---|
+| Candidate carries an active structured quote | The order is placed at the **quote's** price, currency, quantity and lead time, and records its `quote_id`. A listing price on the same candidate is never substituted. |
+| The quote has expired, been withdrawn, superseded, or is still under review | Execution **refuses** with a named reason ("the supplier withdrew their quote…"). No order row is created — nothing is captured and nothing is placed. |
+| No quote and no price | The existing draft path, now labelled honestly: *"Order captured as draft — unpriced; needs a quote before it can be placed."* The order card's "We need a confirmed quote before this order can be placed" is unchanged. |
+| No quote but a real listing price | Unchanged — placed on the listing price. |
+
+`/order-now` obeys the same rules: the quote's price wins, a quote-only
+candidate is now orderable rather than 422, and a stale quote returns 409.
+
+### Match badges — the model may lower one, never raise one (R2, R3)
+
+Every badge passes a deterministic gate before it is shown, and carries the
+classifier's reason (`pnMatchReason`):
+
+- The extractor's `pn_match_status` / "Exact OEM" claim can only **downgrade**.
+- A row whose URL is a bare domain — no listing page to open — can never be
+  exact-grade, however well the strings match.
+- Two new levels: **Mismatch** (red) for a named, fit-affecting difference, and
+  **Needs verification** (amber) for a same-family seal-designation difference.
+
+Notation is normalised, so `C3`, `/C3`, `-C3` and ` C3` compare equal. A
+clearance requested-and-absent reads *"C3 requested; listing is CN/unspecified"*
+rather than a bare "No match"; `2RSH` or `2RS1` against a generic `2RS` reads
+*"2RS requested; listing is 2RSH — same 2RS seal family, different
+designation"*. Cross-maker seal equivalence is **not** decided here.
+
+### Intake — confirm is gated on sufficiency (R4, R5, R6)
+
+- **Identity floor.** Confirm refuses a request with no manufacturer + model and
+  no manufacturer part number, returning it to clarification (`422`, reason
+  `identity_insufficient`) and naming the override.
+- **The override is explicit and visible.** `confirm-intake?source_anyway=true`
+  starts sourcing, records an acknowledgement on the run, marks it
+  `spec_incomplete`, puts a banner above the results — *"These results have NOT
+  been checked against your requirement…"* — and denies every candidate in that
+  run an exact badge.
+- **Hygienic questions.** When the context says CIP, SIP, sanitary, washdown,
+  food, dairy, beverage, pharma, 3-A, EHEDG or tri-clamp, an **instrument or
+  fitting** must answer process connection type and size, wetted material, and
+  hygienic certification (3-A / EHEDG / none) before confirm. The same gauge
+  with no hygienic context is unaffected. Question-set only — no hygienic
+  equivalence logic.
+- **The variant guard stops re-asking.** An attribute the user supplied in their
+  own words is not asked again, and the hard guard no longer reports a present
+  field as missing: it returns `missing_attrs: []` with reason
+  `family_variant_pending_confirmation` and `unconfirmed_attrs` instead. An
+  attribute the *extractor* invented still blocks — the anti-hallucination rule
+  is intact. A mechanical seal is never reclassified a bearing on a bore
+  diameter.
+
+### Supplier-facing mail (R7, R8)
+
+- RFQ_NEW names the part, manufacturer, quantity, the needed-by date where
+  known and the portal link — and still no prices. A coalesced batch's subject
+  gives the count ("3 new quote requests") and its body lists each item.
+- The Tier-1 FYI no longer carries a run UUID in its subject or internal
+  classification vocabulary ("Matched class", "class-matched (no brand row)",
+  "Core class") in its body.
+- A refused auth-mail send raises one deduped **ACTION_NOW** concierge alert.
+  The supplier-facing `request-link` response is unchanged and byte-identical
+  whether the send succeeded, was refused, or the address is unknown.
+
+### Operator configuration
+
+- Under `MAIL_PROVIDER=ses` with `SUPPLIER_ACCOUNTS_V1` on, the server **refuses
+  to boot** when `SES_CONFIGURATION_SET_AUTH` is unset, naming the variable.
+  Under `FakeProvider` (dev, demo, evaluation) the set is not required and auth
+  mail is captured normally.
+- `NEXT_PUBLIC_API_URL` defaults to `http://localhost:8001` — the port the
+  backend serves on. A fresh clone needs no `.env.local`.
+- `GOFER_DATA_DIR` relocates every store. Unset, every path is byte-identical
+  to today.

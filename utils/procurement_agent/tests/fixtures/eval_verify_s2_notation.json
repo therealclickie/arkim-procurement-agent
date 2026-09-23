@@ -1,0 +1,136 @@
+{
+  "_source": "eval/e2e-flags-on:eval/e2e/evidence/verify/s2_step4_candidate_analysis.json",
+  "_finding": "F-12 - for the '6205-2RS C3' request the verify pass observed listings that DO carry C3 (JSB '6205-2RS-C3', Motion '6205-2RS-C3', 123Bearing '6205-2RSH-C3-SKF') scored pnMatchLevel 'none', indistinguishable from listings carrying NO clearance at all (EIS '6205-2RS', PGN '6205-2RS').",
+  "requested_part_number": "6205-2RS C3",
+  "requested_manufacturer": "SKF",
+  "observed_rows": [
+    {
+      "vendor": "DXP Enterprises",
+      "tier": 1,
+      "foundPartNumber": "",
+      "url": "https://dxpe.com",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "JSB Great Bearings",
+      "tier": 2,
+      "foundPartNumber": "6205-2RS-C3",
+      "url": "https://jsbgreatbearings.com/product/6205-2rs-c3-skf-brand-rubber-seal-ball-bearing-25x52x15-6205-2rs-6205rs",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "Radwell",
+      "tier": 2,
+      "foundPartNumber": "6205-2RS-C3",
+      "url": "https://www.radwell.com/Buy/TIMKEN/TIMKEN/6205-2RS",
+      "observed_pnMatchLevel": "normalized",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "EIS Inc.",
+      "tier": 2,
+      "foundPartNumber": "6205-2RS",
+      "url": "https://www.eis-inc.com/product/deep-groove-radial-ball-bearing-6205-2rs04",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "Motion Industries",
+      "tier": 2,
+      "foundPartNumber": "6205-2RS-C3",
+      "url": "https://www.motion.com/products/sku/06869320",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "PGN Bearings",
+      "tier": 2,
+      "foundPartNumber": "6205-2RS",
+      "url": "https://pgnbearings.com/products/6205-2rs-ball-bearing",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "123Bearing",
+      "tier": 2,
+      "foundPartNumber": "6205-2RSH-C3-SKF",
+      "url": "https://www.123bearing.com/bearing-housing/deep-groove-bearing/single-row/6205-2rs-c3-skf",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "Quality Bearings Online",
+      "tier": 2,
+      "foundPartNumber": "6205-2rsh/c3-skf",
+      "url": "https://www.qualitybearingsonline.com/6205-2rs-c3-skf-deep-groove-bearing-25-x-52-x-15mm",
+      "observed_pnMatchLevel": "normalized",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "VXB Bearings",
+      "tier": 2,
+      "foundPartNumber": "6205-2RSJEM",
+      "url": "https://vxb.com/products/6205-2rsjem-skf-deep-groove-ball-bearing-single-ro",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "Intech Bearing Inc.",
+      "tier": 3,
+      "foundPartNumber": "6205-2RS C3",
+      "url": "https://intechbearing.com",
+      "observed_pnMatchLevel": "exact",
+      "observed_isExactMatch": true
+    },
+    {
+      "vendor": "Rodavictoria USA",
+      "tier": 3,
+      "foundPartNumber": "6205-2RS C3",
+      "url": "https://rodavictoriausa.com",
+      "observed_pnMatchLevel": "exact",
+      "observed_isExactMatch": true
+    },
+    {
+      "vendor": "Bearing & Drive Systems (BDS)",
+      "tier": 3,
+      "foundPartNumber": "6205 2RS C3 HT51",
+      "url": "https://store.bdsbearing.com",
+      "observed_pnMatchLevel": "exact",
+      "observed_isExactMatch": true
+    },
+    {
+      "vendor": "Bearings R Us",
+      "tier": 3,
+      "foundPartNumber": "",
+      "url": "https://www.bearingsrus.com/bearings/deep-groove-ball-bearings/metric-deep-groove-ball-bearings",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "SKF Authorized Distributor",
+      "tier": 3,
+      "foundPartNumber": "",
+      "url": "",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "SKF Service Center",
+      "tier": 3,
+      "foundPartNumber": "",
+      "url": "",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    },
+    {
+      "vendor": "Applied Industrial Technologies",
+      "tier": 3,
+      "foundPartNumber": "",
+      "url": "",
+      "observed_pnMatchLevel": "none",
+      "observed_isExactMatch": false
+    }
+  ]
+}

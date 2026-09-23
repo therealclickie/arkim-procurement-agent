@@ -1,0 +1,51 @@
+{
+  "_source": [
+    "eval/e2e-flags-on:eval/e2e/evidence/s3_step2_confirm_attempt.json",
+    "eval/e2e-flags-on:eval/e2e/evidence/s3_step2_sourced_anyway.json",
+    "eval/e2e-flags-on:eval/e2e/evidence/s3_step1_chat.json",
+    "eval/e2e-flags-on:eval/e2e/evidence/s1_step9_buyer_view.json (the S1 contrast)"
+  ],
+  "_finding": "F-15 - the S3 request ('The pressure gauge on the CIP skid is reading wrong. Need a new one.') was confirmed with a 200 and sourced, returning 1 Tier-2 and 3 Tier-3 priced results, on specs carrying no manufacturer, model or part number. family_disambig_block returned None.",
+  "s3_user_message": "The pressure gauge on the CIP skid is reading wrong. Need a new one.",
+  "s3_confirm_status_observed": 200,
+  "s3_specs_at_sourcing": {
+    "category": "Part",
+    "description": "Replacement pressure gauge for CIP skid",
+    "detected_type": "pressure gauge",
+    "use_case": "CIP skid pressure measurement replacement",
+    "manufacturer_confidence": 0.0,
+    "part_id_confidence": 35.0,
+    "confidence_reasoning": "Part type identified as a pressure gauge on a CIP skid, but no manufacturer, model, part number, pressure range, dial size, connection size, or material specs provided. CIP applications typically require sanitary-grade gauges, but this cannot be confirmed without more detail. Critical specs needed to source: pressure range (PSI), dial size, connection size and type (e.g. 1/4\" NPT), and whether sanitary/hygienic construction is required.",
+    "quantity": 1
+  },
+  "s3_result_counts_observed": {
+    "tier1": 0,
+    "tier2": 1,
+    "tier3": 3
+  },
+  "s3_run_detail_after_sourcing_specs": {
+    "category": "Part",
+    "description": "Replacement pressure gauge for CIP skid",
+    "detected_type": "pressure gauge",
+    "use_case": "CIP skid pressure measurement replacement",
+    "manufacturer_confidence": 0.0,
+    "part_id_confidence": 35.0,
+    "confidence_reasoning": "Part type identified as a pressure gauge on a CIP skid, but no manufacturer, model, part number, pressure range, dial size, connection size, or material specs provided. CIP applications typically require sanitary-grade gauges, but this cannot be confirmed without more detail. Critical specs needed to source: pressure range (PSI), dial size, connection size and type (e.g. 1/4\" NPT), and whether sanitary/hygienic construction is required.",
+    "quantity": 1
+  },
+  "s1_specs_that_must_still_confirm": {
+    "category": "Part",
+    "description": "Chesterton 155 single cartridge mechanical seal, 1.875 inch shaft, like-for-like replacement",
+    "detected_type": "mechanical seal",
+    "use_case": "for Goulds 3196 MTX centrifugal pump, Line 2",
+    "manufacturer_confidence": 95.0,
+    "part_id_confidence": 82.0,
+    "confidence_reasoning": "User explicitly named the existing seal as a Chesterton 155 cartridge in 1.875 inch shaft size, requesting a like-for-like replacement. Manufacturer and model are confirmed at high confidence. Part_id confidence is strong \u2014 Chesterton 155 is a well-known cartridge seal line and shaft size is specified \u2014 but no face/material code or full part number is given, which would be needed to pin the exact configuration (elastomer, face material, gland style). Sourcing can proceed with manufacturer and model; confirming materials/fluid contact conditions before ordering is advisable.",
+    "quantity": 1,
+    "manufacturer": "Chesterton",
+    "model": "155",
+    "shaft_size": "1.875 inch",
+    "spec_based_sourcing": true,
+    "family_open_commit": true
+  }
+}

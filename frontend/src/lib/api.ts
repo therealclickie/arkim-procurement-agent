@@ -8,7 +8,7 @@
 import { ApiError } from "./query-client";
 import type { ShipTo } from "./proc-config";
 
-// When NEXT_PUBLIC_API_URL is set (e.g. http://localhost:8000) requests go
+// When NEXT_PUBLIC_API_URL is set (e.g. http://localhost:8001) requests go
 // directly to the FastAPI backend. When unset, the Next.js rewrite proxy at
 // /api/* handles routing — useful for SSR contexts that can't reach localhost.
 const API_BASE =

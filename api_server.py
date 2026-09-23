@@ -140,10 +140,40 @@ if DEMO_MODE:
             "Remove it from the demo environment before launching."
         )
 
+# R7 (arc 5, F-03) — boot-refusal guard, same shape and position as the DEMO_MODE
+# guards above: fail at uvicorn boot, before a single request is served, rather
+# than discovering at runtime that every supplier sign-in link is being refused.
+#
+# Only under the SES provider. Under FakeProvider (dev, demo, evaluation) the
+# tracking-off configuration set is not required — there is no tracking domain
+# for a corporate link scanner to pre-fetch the single-use token through.
+def _assert_auth_mail_configured() -> None:
+    from utils import mail_provider, supplier_accounts
+
+    if not supplier_accounts.supplier_accounts_active():
+        return
+    if mail_provider.active_provider_name() != mail_provider.PROVIDER_SES:
+        return
+    if mail_provider.auth_configuration_set():
+        return
+    raise RuntimeError(
+        f"Refusing to start: supplier accounts are enabled "
+        f"(SUPPLIER_ACCOUNTS_V1) on the SES mail provider, but "
+        f"{mail_provider.ENV_CONFIG_SET_AUTH} is unset. Auth mail would be "
+        f"refused on every send and no supplier could sign in. Set "
+        f"{mail_provider.ENV_CONFIG_SET_AUTH} to the tracking-OFF SES "
+        f"configuration set, or run with MAIL_PROVIDER=fake."
+    )
+
+
+_assert_auth_mail_configured()
+
 from utils.procurement_agent.agents.intake_agent import IntakeAgent
 from utils.models import SourcingRun
 from utils.marketplace_registry import is_marketplace
 from utils import run_capture as _run_capture  # Night 1 — RUN_CAPTURE flag-gated, inert when off
+from utils import data_dir as _data_dir  # Arc 5 / R10 — $GOFER_DATA_DIR (F-04)
+from utils import badge_integrity  # Arc 5 / R2 — the match-badge gate (F-11)
 
 import secrets
 
@@ -350,7 +380,8 @@ def _migrate_schema() -> None:
 _migrate_schema()
 
 
-_HANDOFFS_PATH = os.path.join(os.path.dirname(__file__), "data", "mock_maintenance_handoffs.json")
+# R10 (arc 5, F-04): resolved through the one helper, like every store.
+_HANDOFFS_PATH = _data_dir.data_path("mock_maintenance_handoffs.json")
 
 def _seed_demo_maintenance_run() -> None:
     """Seed pending_intake runs from data/mock_maintenance_handoffs.json (idempotent per submission_id)."""
@@ -877,9 +908,27 @@ def _camel_artifact(art: Optional[dict]) -> Optional[dict]:
     }
 
 
-def _transform_option(opt: dict, tier: int, idx: int, quote: Optional[dict] = None) -> dict:
+def _transform_option(opt: dict, tier: int, idx: int, quote: Optional[dict] = None,
+                     specs: Optional[dict] = None) -> dict:
     price_hidden = opt.get("price_tbd", False) or opt.get("requires_rfq", False)
     price = None if price_hidden else opt.get("base_price")
+    # R2 (F-11): the badge is gated on the DETERMINISTIC classifier. The extractor's
+    # pn_match_status / "Exact OEM" claim is advisory — it may lower this verdict but
+    # can never raise it — and a row pointing only at a bare domain can never be exact.
+    # Gating here, at the single read boundary where the badge fields are produced,
+    # also covers the cache-replay paths that re-derive pn_match_status from
+    # match_type (gate finding F-B).
+    _specs = specs or {}
+    _badge = badge_integrity.resolve(
+        opt,
+        advisory_level=_pn_match_level(opt, tier),
+        searched_pn=_specs.get("part_number"),
+        manufacturer=_specs.get("manufacturer"),
+        claims_exact=(opt.get("match_type") == "Exact OEM"),
+        # R4 (F-15): no candidate in a spec-incomplete run may be badged exact —
+        # the request it would claim to match was never specified.
+        spec_incomplete=bool(_specs.get("spec_incomplete")),
+    )
     out = {
         "id":                    f"{opt.get('vendor_name','')}-t{tier}-{idx}",
         "vendorName":            opt.get("vendor_name") or "Unknown",
@@ -912,9 +961,11 @@ def _transform_option(opt: dict, tier: int, idx: int, quote: Optional[dict] = No
         "foundPartNumber":       opt.get("found_part_number"),
         "suitability":           float(opt.get("suitability_score") or 0),
         "confidence":            float(opt.get("confidence_score") or 0),
-        "pnMatchLevel":          _pn_match_level(opt, tier),
+        "pnMatchLevel":          _badge.level,
+        # R2: every badge carries the classifier's reason, so it is explainable.
+        "pnMatchReason":         _badge.reason,
         "loc":                   opt.get("ship_from_country") or "",
-        "isExactMatch":          opt.get("match_type") == "Exact OEM",
+        "isExactMatch":          _badge.is_exact,
         "isAftermarket":         opt.get("match_type") == "Aftermarket Compatible",
         "isOemDirect":           bool(opt.get("is_oem_direct")),
         "isAuthorizedDistributor": opt.get("vendor_authorization_status") == "Authorized",
@@ -1105,7 +1156,8 @@ def _quote_overlay(quote: dict) -> dict:
     return overlay
 
 
-def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None) -> dict:
+def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None,
+                                specs: Optional[dict] = None) -> dict:
     """Convert SourcingAgent output dict to the shape expected by the React frontend.
     When `quote_index` is given (the run's confirmed quotes), a matched candidate is
     overlaid with the State-C supplier-confirmed claim; without it the transform is
@@ -1115,7 +1167,8 @@ def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None) -
         for i, o in enumerate(raw.get(key, {}).get("results", [])):
             if o.get("rejection_reason"):
                 continue
-            out.append(_transform_option(o, n, i, quote=_resolve_quote(o, quote_index)))
+            out.append(_transform_option(o, n, i, quote=_resolve_quote(o, quote_index),
+                                         specs=specs))
         return out
     result = {
         "tier1":               _tier("tier_1", 1),
@@ -1124,6 +1177,13 @@ def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None) -
         "warrantyBanner":      raw.get("warranty_banner"),
         "tier3CapabilityPivot": raw.get("tier3_capability_pivot", False),
     }
+    # R4 (F-15): a run that reached sourcing on the explicit override says so, on
+    # every read, above its results. Absent for every other run, so flag-off /
+    # sufficient runs are byte-identical.
+    if (specs or {}).get("spec_incomplete"):
+        from utils import intake_sufficiency
+        result["specIncomplete"] = True
+        result["specIncompleteBanner"] = intake_sufficiency.BANNER
     # RANKING_BANDS_V1 (spec §7) — a BANDED raw result additionally distinguishes
     # findings (Band A/B cards, banded order) from outreachTargets (the Band-C
     # ask-and-see block: onboarded supplier named first, capped seeds, provenance
@@ -1151,7 +1211,8 @@ def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None) -
                             promote_confirmed(_o)
             result["findings"] = [
                 {
-                    **_transform_option(o, n, i, quote=_resolve_quote(o, quote_index)),
+                    **_transform_option(o, n, i, quote=_resolve_quote(o, quote_index),
+                                        specs=specs),
                     "band":            o.get("band"),
                     "evidenceQuality": o.get("evidence_quality"),
                     "isMock":          bool(o.get("is_mock")),  # contract: always False here
@@ -1820,12 +1881,16 @@ def _orm_to_detail(run: SourcingRunORM) -> RunDetail:
     def _parse(col): return json.loads(col) if col else None
 
     raw_sourcing = _parse(run.sourcing_results_json)
+    # R2: the badge gate needs the REQUESTED part number + manufacturer, so the specs
+    # are parsed before the transform (they were previously read only afterwards).
+    _specs_for_badges = _parse(run.asset_specs_json) or {}
     # Transform if we have real sourcing data (not an error stub). State C (3b): overlay
     # any human-confirmed quotes for this run onto their candidates (deterministic thread
     # join, domain fallback) — the assembly step that has run_id in scope.
     sourcing: Optional[Dict[str, Any]] = None
     if raw_sourcing and "error" not in raw_sourcing:
-        sourcing = _transform_sourcing_results(raw_sourcing, _build_quote_index(run.id))
+        sourcing = _transform_sourcing_results(raw_sourcing, _build_quote_index(run.id),
+                                               specs=_specs_for_badges)
     elif raw_sourcing:
         # A failed sourcing run stored a raw `str(exc)` in the error stub. That string can
         # carry upstream API errors / request URLs / internal detail, which must NOT reach a
@@ -1842,7 +1907,7 @@ def _orm_to_detail(run: SourcingRunORM) -> RunDetail:
     # Suppressed when spec_based_sourcing=True or part_number is absent/null-equivalent
     # (spec-based and no-PN scenarios are "by design," not typo cases).
     _null_pn_vals = {"", "N/A", "n/a", "null", "None", "UNKNOWN-PN", "Unknown", "unknown"}
-    _asset_specs = _parse(run.asset_specs_json)
+    _asset_specs = _specs_for_badges or None
     # Strip internal `_`-prefixed ledger keys (intake turn counter / asked-fields ledger) so
     # they never reach the frontend specs display. They ride on asset_specs_json by design
     # (the intake over-questioning fix's state vehicle — no separate column) but are not for
@@ -2773,6 +2838,18 @@ def create_order_now(run_id: str, body: OrderNowRequest):
         # not here). Channel is re-derived server-side — never trust client price/channel.
         price_hidden = cand.get("price_tbd") or cand.get("requires_rfq")
         raw_price = None if price_hidden else cand.get("base_price")
+        source_url = cand.get("source_url")
+        # R1 (F-07, gate finding F-C): this is the SECOND order-creating path, and it
+        # must obey the same rule as /execute — an accepted structured quote is the
+        # price, and a stale one refuses rather than letting the listing price stand in.
+        from utils import order_quote
+        _resolution = order_quote.resolve_for_order(
+            run_id, source_url, vendor_name=cand.get("vendor_name"))
+        if _resolution.refused:
+            raise HTTPException(status_code=409, detail=_resolution.refusal)
+        _quote = _resolution.quote
+        if _quote is not None and _quote.get("unit_price") is not None:
+            raw_price = _quote["unit_price"]      # the quote, never the listing price
         if raw_price is None:
             raise HTTPException(status_code=422,
                                 detail="Candidate has no buyable price — request a quote instead")
@@ -2780,7 +2857,6 @@ def create_order_now(run_id: str, body: OrderNowRequest):
             unit_price = float(raw_price)
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="Candidate price is not a number")
-        source_url = cand.get("source_url")
         channel = "marketplace" if (source_url and is_marketplace(source_url)) else "buy"
 
         qty = body.quantity or 1
@@ -2845,6 +2921,11 @@ def create_order_now(run_id: str, body: OrderNowRequest):
         "source":        channel,
         "quantity":      qty,
     }
+    if _quote is not None:
+        # R1: the quote's currency / lead time / quote id ride with its price. Quantity
+        # stays the buyer's requested qty here — order-now is an explicit qty purchase.
+        order_quote.apply_to_selection(selection, _quote)
+        selection["quantity"] = qty
     order = orders.create_order(selection, quantity=qty, company_id=company_id,
                                 initial_status=orders.STATUS_PENDING_FULFILMENT)
     if not order:
@@ -2978,9 +3059,18 @@ def confirm_intake(
     background_tasks: BackgroundTasks,
     exact_only: bool = False,
     open_family: bool = False,
+    source_anyway: bool = False,
 ):
     """
     Confirm intake specs and atomically advance to sourcing.
+
+    source_anyway=true (R4, arc 5 — the EXPLICIT, LABELLED override of the identity
+    floor): a request with no manufacturer + model and no manufacturer part number
+    has nothing to match a supplier's listing against, so confirm refuses it back to
+    clarification (422, reason "identity_insufficient"). The override starts sourcing
+    anyway, but never silently: an acknowledgement is recorded on the run, the run is
+    marked `spec_incomplete`, its results carry a banner saying they have NOT been
+    checked against the requirement, and no candidate in it may be badged exact.
 
     Writes the inventory stub and transitions phase in a single DB commit so
     there is no window where the run is phase=sourcing without inventory_result.
@@ -3069,6 +3159,30 @@ def confirm_intake(
                     },
                 )
 
+        # Identity-sufficiency floor (R4, F-15) — AFTER the registry-driven family
+        # guard above, which already enforces required fields for the classes that
+        # define them. Where the registry defines none, R4's minimum applies: a
+        # manufacturer plus a model, or a manufacturer part number. Refuses back to
+        # clarification unless the buyer explicitly overrides.
+        from utils import intake_sufficiency
+        sufficiency = intake_sufficiency.identity_block(specs_dict)
+        if sufficiency is not None and not source_anyway:
+            raise HTTPException(status_code=422, detail=sufficiency.as_detail())
+        if sufficiency is not None:
+            intake_sufficiency.record_override(specs_dict, sufficiency)
+            run.asset_specs_json = json.dumps(specs_dict)
+
+        # Hygienic question set (R5, F-16) — a QUESTION-SET addition, nothing more.
+        # When intake context indicates hygienic service (CIP/SIP/sanitary/washdown/
+        # food/dairy/beverage/pharma/3-A/EHEDG/tri-clamp), an instrument or fitting
+        # must answer process connection type and size, wetted material and hygienic
+        # certification before confirm. The same explicit source_anyway override
+        # applies. No hygienic EQUIVALENCE logic anywhere in this arc.
+        from utils import hygienic_context
+        hygienic = hygienic_context.hygienic_block(specs_dict)
+        if hygienic is not None and not source_anyway:
+            raise HTTPException(status_code=422, detail=hygienic.as_detail())
+
         urgency_factor, warranty_status = _commit_intake_to_sourcing(
             session, run, specs_dict, exact_only=exact_only, open_family=open_family,
             background_tasks=background_tasks,
@@ -3077,7 +3191,8 @@ def confirm_intake(
     # Night 1 — capture the confirm-intake user action (RUN_CAPTURE-gated, fail-soft).
     _run_capture.capture_user_action(
         run_id, "confirm_intake",
-        detail={"exact_only": exact_only, "open_family": open_family},
+        detail={"exact_only": exact_only, "open_family": open_family,
+                "source_anyway": bool(sufficiency is not None or hygienic is not None)},
     )
     return {"run_id": run_id, "phase": Phase.SOURCING.value}
 

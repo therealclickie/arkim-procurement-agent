@@ -1,0 +1,8 @@
+{
+  "_source": "eval/e2e-flags-on:eval/e2e/evidence/verify/verify_offline_checks.json",
+  "_finding": "F-03 - with SES_CONFIGURATION_SET_AUTH unset, message_configuration_set refuses every auth-mail send under EVERY provider, and nothing tells the operator: the system boots, the supplier gets {\"ok\": true}, no mail arrives.",
+  "observed_message_configuration_set": [
+    null,
+    "auth mail requires the tracking-off configuration set (SES_CONFIGURATION_SET_AUTH is unset); refusing to send on a tracking-enabled set"
+  ]
+}

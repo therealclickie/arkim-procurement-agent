@@ -48,6 +48,7 @@ import uuid
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from utils import data_dir
 
 
 def _env_truthy(value: Optional[str]) -> bool:
@@ -63,7 +64,7 @@ def _dormant() -> bool:
     return not _active()
 
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+_DATA_DIR = data_dir.data_dir()  # R10: $GOFER_DATA_DIR, else <repo>/data (identical when unset)
 _DB_PATH = os.path.join(_DATA_DIR, "quote_tokens.sqlite")
 
 _TOKEN_BYTES = 32

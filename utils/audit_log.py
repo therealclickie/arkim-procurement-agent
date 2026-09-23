@@ -33,6 +33,7 @@ import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from utils import data_dir
 
 # ---------------------------------------------------------------------------
 # In-process write-failure ring buffer
@@ -62,7 +63,7 @@ def recent_write_failures(hours: int = 24) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     return [f for f in _write_failures if f["timestamp"] >= cutoff]
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+_DATA_DIR = data_dir.data_dir()  # R10: $GOFER_DATA_DIR, else <repo>/data (identical when unset)
 _DB_PATH  = os.path.join(_DATA_DIR, "audit_log.sqlite")
 
 _DDL = """

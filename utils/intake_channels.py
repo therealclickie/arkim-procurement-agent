@@ -73,6 +73,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
+from utils import data_dir
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +306,7 @@ def resolve_tenant_from_number(number: str) -> Optional[str]:
 # fail-soft (never raises into the request path).
 # ---------------------------------------------------------------------------
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+_DATA_DIR = data_dir.data_dir()  # R10: $GOFER_DATA_DIR, else <repo>/data (identical when unset)
 _DB_PATH = os.path.join(_DATA_DIR, "intake_channels.sqlite")
 
 _KNOWN_SENDERS_DDL = """

@@ -156,7 +156,12 @@ def _run_sourcing(client, *, detected_type, manufacturer, part_number="UNKNOWN-P
     specs = {"manufacturer": manufacturer, "part_number": part_number,
              "detected_type": detected_type, "voltage": "N/A"}
     client.put(f"/api/runs/{rid}/asset-specs", json={"asset_specs": specs})
-    client.post(f"/api/runs/{rid}/confirm-intake")
+    # R4 (arc 5): these specs deliberately carry a NULL part-number token and no
+    # model — that IS the fixture (a class-matched request with no brand row). The
+    # identity floor now refuses such a request, so the helper takes the explicit,
+    # labelled "source anyway" override to reach sourcing. Every assertion at the
+    # 13 call sites below is unchanged.
+    client.post(f"/api/runs/{rid}/confirm-intake?source_anyway=true")
     return client.get(f"/api/runs/{rid}").json()
 
 

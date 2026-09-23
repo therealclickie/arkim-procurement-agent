@@ -287,6 +287,53 @@ def rfq_contacts(account_id: str) -> list[dict]:
     return [m for m in notifiable_members(account_id) if member_receives_rfq(m)]
 
 
+#: The request-identity keys an RFQ_NEW mail may name. Deliberately a fixed,
+#: short list: everything else on a run is internal (R8's no-leak rule).
+RFQ_IDENTITY_KEYS: tuple[str, ...] = (
+    "manufacturer", "part_number", "description", "quantity", "need_by",
+)
+
+
+def rfq_identity_for_run(run_id) -> dict:
+    """The part identity for one run's RFQ mail: manufacturer, part number,
+    description, quantity and the needed-by date where known.
+
+    Fail-soft: an unreadable run yields ``{}`` and the mail degrades to its
+    previous generic wording rather than failing the send (R8, F-09).
+    """
+    if not run_id:
+        return {}
+    try:
+        from utils.procurement_agent.state import persistence
+        specs = (persistence.get_run(run_id) or {}).get("asset_specs_json") or {}
+    except Exception as exc:
+        print(f"[Notifications] rfq identity read failed for {run_id}: {exc}")
+        return {}
+    if not isinstance(specs, dict):
+        return {}
+    out = {}
+    for key in RFQ_IDENTITY_KEYS:
+        value = specs.get(key)
+        if isinstance(value, str):
+            value = value.strip()
+        if value not in (None, "", "N/A", "Unknown", "UNKNOWN-PN", "none", "unknown"):
+            out[key] = value
+    # A family-level request has a model but no part number; the supplier needs
+    # to know WHICH part, and "Chesterton 155" is that answer.
+    if "part_number" not in out:
+        model = specs.get("model")
+        if isinstance(model, str) and model.strip():
+            out["part_number"] = model.strip()
+    return out
+
+
+def rfq_part_label(rfq: dict) -> str:
+    """The supplier-facing name of the part: "<manufacturer> <part number>",
+    falling back to the description when no identity resolved."""
+    part = " ".join(str(x) for x in (rfq.get("manufacturer"), rfq.get("part_number")) if x)
+    return part or str(rfq.get("description") or "").strip()
+
+
 def _rfq_subject_and_body(rfq: dict) -> tuple[str, str]:
     """The ONE-request RFQ_NEW mail. Deliberately content-free about price and
     buyer: it says a request is waiting and points at the portal, because the
@@ -294,14 +341,22 @@ def _rfq_subject_and_body(rfq: dict) -> tuple[str, str]:
     produces D5's strong 'seen' signal). Takes the request identity as a plain
     dict, so the fan-out and the coalescing flush build it from the same
     keys."""
-    part = " ".join(str(x) for x in (rfq.get("manufacturer"), rfq.get("part_number")) if x)
+    part = rfq_part_label(rfq)
     subject = f"New quote request{f' — {part}' if part else ''}"
     portal = _portal_url()
     quantity = rfq.get("quantity")
+    # R8: description and needed-by where known, still with NO prices (the
+    # existing no-numbers rule) and nothing internal.
+    description = str(rfq.get("description") or "").strip()
+    if description and description == part:
+        description = ""
+    need_by = str(rfq.get("need_by") or "").strip()
     body = (
         "Hello,\n\n"
         f"Arkim has sent you a request for quote{f' for {part}' if part else ''}.\n"
+        f"{f'{description}' + chr(10) if description else ''}"
         f"{f'Quantity: {quantity}' + chr(10) if quantity else ''}"
+        f"{f'Needed by: {need_by}' + chr(10) if need_by else ''}"
         "\nYou can review it and submit a quote in your supplier portal:\n"
         f"{portal}\n\n"
         "Regards,\nArkim Procurement\nprocurement@arkim.ai"
@@ -581,8 +636,7 @@ def _open_window_until(recipient: str, now: datetime):
 def _rfq_line(notification: dict) -> str:
     """One request, as a line in a batched mail."""
     detail = notification.get("detail") or {}
-    part = " ".join(str(x) for x in (detail.get("manufacturer"),
-                                     detail.get("part_number")) if x)
+    part = rfq_part_label(detail)
     quantity = detail.get("quantity")
     suffix = f" (qty {quantity})" if quantity else ""
     return f"{part or 'Quote request'}{suffix}"
@@ -717,6 +771,12 @@ def notify_rfq_sent(*, sent_message_id: Optional[str], run_id: Optional[str],
         account = supplier_accounts.get_account_by_domain(supplier_domain)
         rfq: dict[str, Any] = {"run_id": run_id, "supplier_domain": supplier_domain,
                                "sent_message_id": sent_message_id}
+        # R8 (arc 5, F-09): this caller used to pass these three keys and nothing
+        # else, so _rfq_subject_and_body had no part to name and every RFQ_NEW
+        # degraded to a bare "New quote request" with a portal link (observed in
+        # s1_outbox_final.json, mails 5-6). The identity is on the run; read it
+        # here, fail-soft, exactly as rfq_send._substitute_quote_link does.
+        rfq.update(rfq_identity_for_run(run_id))
         return notify_rfq_new(rfq, account)
     except Exception as exc:
         print(f"[Notifications] notify_rfq_sent failed: {exc}")

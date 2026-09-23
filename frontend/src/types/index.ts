@@ -27,7 +27,12 @@ export type Phase =
 export type Urgency = "Stocking" | "Predictive" | "Emergency";
 export type Warranty = "Active" | "Expired" | "Unknown";
 
-export type PnMatchLevel = "exact" | "normalized" | "stem" | "substring" | "none";
+// R3 (arc 5): "mismatch" is a NAMED difference (a bearing clearance difference),
+// "needs_verification" a same-family seal-designation difference. Neither is ever
+// presented as an exact replacement, and neither is a bare "no match".
+export type PnMatchLevel =
+  | "exact" | "normalized" | "stem" | "substring" | "none"
+  | "mismatch" | "needs_verification";
 export type VendorType =
   | "NetworkPartner"
   | "NationalDistributor"
@@ -136,6 +141,9 @@ export interface Candidate {
   suitability: number;
   confidence: number;
   pnMatchLevel: PnMatchLevel;
+  // R2 (arc 5): the deterministic classifier's reason for this badge. Every badge
+  // carries one — the extractor's own verdict can only lower a badge, never raise it.
+  pnMatchReason?: string;
   comparisonArtifact?: ComparisonArtifact;
   loc: string;
   // Display-layer extras
@@ -242,6 +250,11 @@ export interface SourcingResults {
   tier2: Candidate[];
   tier3: Candidate[];
   warrantyBanner?: string;
+  // R4 (arc 5): present only when the run reached sourcing on the explicit
+  // "source anyway" override — its results have NOT been checked against a
+  // requirement, and no candidate in it is badged exact.
+  specIncomplete?: boolean;
+  specIncompleteBanner?: string;
   tier3CapabilityPivot?: boolean;
   // RANKING_BANDS_V1: present ONLY when the stored result carries the
   // ranking_bands:v1 marker (the backend keys these off the result, not the env —
