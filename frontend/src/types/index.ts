@@ -136,6 +136,9 @@ export interface Candidate {
   suitability: number;
   confidence: number;
   pnMatchLevel: PnMatchLevel;
+  // R2 (arc 5): the deterministic classifier's reason for this badge. Every badge
+  // carries one — the extractor's own verdict can only lower a badge, never raise it.
+  pnMatchReason?: string;
   comparisonArtifact?: ComparisonArtifact;
   loc: string;
   // Display-layer extras

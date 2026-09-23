@@ -144,6 +144,7 @@ from utils.procurement_agent.agents.intake_agent import IntakeAgent
 from utils.models import SourcingRun
 from utils.marketplace_registry import is_marketplace
 from utils import run_capture as _run_capture  # Night 1 — RUN_CAPTURE flag-gated, inert when off
+from utils import badge_integrity  # Arc 5 / R2 — the match-badge gate (F-11)
 
 import secrets
 
@@ -877,9 +878,24 @@ def _camel_artifact(art: Optional[dict]) -> Optional[dict]:
     }
 
 
-def _transform_option(opt: dict, tier: int, idx: int, quote: Optional[dict] = None) -> dict:
+def _transform_option(opt: dict, tier: int, idx: int, quote: Optional[dict] = None,
+                     specs: Optional[dict] = None) -> dict:
     price_hidden = opt.get("price_tbd", False) or opt.get("requires_rfq", False)
     price = None if price_hidden else opt.get("base_price")
+    # R2 (F-11): the badge is gated on the DETERMINISTIC classifier. The extractor's
+    # pn_match_status / "Exact OEM" claim is advisory — it may lower this verdict but
+    # can never raise it — and a row pointing only at a bare domain can never be exact.
+    # Gating here, at the single read boundary where the badge fields are produced,
+    # also covers the cache-replay paths that re-derive pn_match_status from
+    # match_type (gate finding F-B).
+    _specs = specs or {}
+    _badge = badge_integrity.resolve(
+        opt,
+        advisory_level=_pn_match_level(opt, tier),
+        searched_pn=_specs.get("part_number"),
+        manufacturer=_specs.get("manufacturer"),
+        claims_exact=(opt.get("match_type") == "Exact OEM"),
+    )
     out = {
         "id":                    f"{opt.get('vendor_name','')}-t{tier}-{idx}",
         "vendorName":            opt.get("vendor_name") or "Unknown",
@@ -912,9 +928,11 @@ def _transform_option(opt: dict, tier: int, idx: int, quote: Optional[dict] = No
         "foundPartNumber":       opt.get("found_part_number"),
         "suitability":           float(opt.get("suitability_score") or 0),
         "confidence":            float(opt.get("confidence_score") or 0),
-        "pnMatchLevel":          _pn_match_level(opt, tier),
+        "pnMatchLevel":          _badge.level,
+        # R2: every badge carries the classifier's reason, so it is explainable.
+        "pnMatchReason":         _badge.reason,
         "loc":                   opt.get("ship_from_country") or "",
-        "isExactMatch":          opt.get("match_type") == "Exact OEM",
+        "isExactMatch":          _badge.is_exact,
         "isAftermarket":         opt.get("match_type") == "Aftermarket Compatible",
         "isOemDirect":           bool(opt.get("is_oem_direct")),
         "isAuthorizedDistributor": opt.get("vendor_authorization_status") == "Authorized",
@@ -1105,7 +1123,8 @@ def _quote_overlay(quote: dict) -> dict:
     return overlay
 
 
-def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None) -> dict:
+def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None,
+                                specs: Optional[dict] = None) -> dict:
     """Convert SourcingAgent output dict to the shape expected by the React frontend.
     When `quote_index` is given (the run's confirmed quotes), a matched candidate is
     overlaid with the State-C supplier-confirmed claim; without it the transform is
@@ -1115,7 +1134,8 @@ def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None) -
         for i, o in enumerate(raw.get(key, {}).get("results", [])):
             if o.get("rejection_reason"):
                 continue
-            out.append(_transform_option(o, n, i, quote=_resolve_quote(o, quote_index)))
+            out.append(_transform_option(o, n, i, quote=_resolve_quote(o, quote_index),
+                                         specs=specs))
         return out
     result = {
         "tier1":               _tier("tier_1", 1),
@@ -1151,7 +1171,8 @@ def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None) -
                             promote_confirmed(_o)
             result["findings"] = [
                 {
-                    **_transform_option(o, n, i, quote=_resolve_quote(o, quote_index)),
+                    **_transform_option(o, n, i, quote=_resolve_quote(o, quote_index),
+                                        specs=specs),
                     "band":            o.get("band"),
                     "evidenceQuality": o.get("evidence_quality"),
                     "isMock":          bool(o.get("is_mock")),  # contract: always False here
@@ -1820,12 +1841,16 @@ def _orm_to_detail(run: SourcingRunORM) -> RunDetail:
     def _parse(col): return json.loads(col) if col else None
 
     raw_sourcing = _parse(run.sourcing_results_json)
+    # R2: the badge gate needs the REQUESTED part number + manufacturer, so the specs
+    # are parsed before the transform (they were previously read only afterwards).
+    _specs_for_badges = _parse(run.asset_specs_json) or {}
     # Transform if we have real sourcing data (not an error stub). State C (3b): overlay
     # any human-confirmed quotes for this run onto their candidates (deterministic thread
     # join, domain fallback) — the assembly step that has run_id in scope.
     sourcing: Optional[Dict[str, Any]] = None
     if raw_sourcing and "error" not in raw_sourcing:
-        sourcing = _transform_sourcing_results(raw_sourcing, _build_quote_index(run.id))
+        sourcing = _transform_sourcing_results(raw_sourcing, _build_quote_index(run.id),
+                                               specs=_specs_for_badges)
     elif raw_sourcing:
         # A failed sourcing run stored a raw `str(exc)` in the error stub. That string can
         # carry upstream API errors / request URLs / internal detail, which must NOT reach a
@@ -1842,7 +1867,7 @@ def _orm_to_detail(run: SourcingRunORM) -> RunDetail:
     # Suppressed when spec_based_sourcing=True or part_number is absent/null-equivalent
     # (spec-based and no-PN scenarios are "by design," not typo cases).
     _null_pn_vals = {"", "N/A", "n/a", "null", "None", "UNKNOWN-PN", "Unknown", "unknown"}
-    _asset_specs = _parse(run.asset_specs_json)
+    _asset_specs = _specs_for_badges or None
     # Strip internal `_`-prefixed ledger keys (intake turn counter / asked-fields ledger) so
     # they never reach the frontend specs display. They ride on asset_specs_json by design
     # (the intake over-questioning fix's state vehicle — no separate column) but are not for

@@ -1,0 +1,986 @@
+{
+  "_source": [
+    "eval/e2e-flags-on:eval/e2e/evidence/s2_step4_candidate_analysis.json",
+    "eval/e2e-flags-on:eval/e2e/evidence/s2_step3_run_detail.json"
+  ],
+  "_finding": "F-11 - for the '6205-2RS C3' request, three Tier-3 rows carrying foundPartNumber '6205-2RS' (no C3) on a BARE-DOMAIN url were badged isExactMatch:true / pnMatchLevel:'exact' straight off the extractor's pn_match_status; the deterministic classifier, which scores that pair 'none', was never consulted on the badge path.",
+  "asset_specs": {
+    "manufacturer": "SKF",
+    "model": "6205-2RS C3",
+    "part_number": "6205-2RS C3",
+    "category": "Part",
+    "description": "Deep groove ball bearing, double rubber sealed, C3 internal clearance, for conveyor motor",
+    "detected_type": "deep groove ball bearing",
+    "bore_diameter": "25mm",
+    "use_case": "conveyor motor bearing replacement",
+    "manufacturer_confidence": 97.0,
+    "part_id_confidence": 95.0,
+    "confidence_reasoning": "Manufacturer SKF explicitly stated. Part number 6205-2RS C3 is a fully specified, unambiguous industry-standard bearing designation: 25mm bore, 52mm OD, 15mm width, double rubber sealed, C3 radial clearance. Cross-reference equivalents available from NSK, NTN, FAG, Timken, and others using the same 6205-2RS C3 designation.",
+    "quantity": 1
+  },
+  "candidates": [
+    {
+      "vendor": "DXP Enterprises",
+      "tier": 1,
+      "band": null,
+      "foundPartNumber": "",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": false,
+      "evidenceState": "uncontacted",
+      "price": null,
+      "url": "https://dxpe.com",
+      "suitability": 92.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": null,
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Radwell",
+      "tier": 2,
+      "band": null,
+      "foundPartNumber": "6205-2RS-C3",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": true,
+      "evidenceState": "priced",
+      "price": 18.29,
+      "url": "https://www.radwell.com/Buy/TIMKEN/TIMKEN/6205-2RS",
+      "suitability": 4.4,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "medium",
+        "compatibilitySummary": "incompatible",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not visible in listing \u2014 verify with vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": "6205-2RS-C3",
+            "match": "different",
+            "notes": "deep groove ball bearing vs 6205-2RS-C3"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "Some fields could not be verified from the vendor's listing. Confirm the following with the vendor before approval: bore_diameter, detected_type."
+      },
+      "c3_in_found_pn": true,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "123bearing.com",
+      "tier": 2,
+      "band": null,
+      "foundPartNumber": "6205-2RS-C3-SKF",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": true,
+      "evidenceState": "priced",
+      "price": 6.64,
+      "url": "https://www.123bearing.com/bearing-housing/deep-groove-bearing/single-row/6205-2rs-c3-skf",
+      "suitability": 53.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "medium",
+        "compatibilitySummary": "incompatible",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not visible in listing \u2014 verify with vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": "6205-2RS-C3-SKF",
+            "match": "different",
+            "notes": "deep groove ball bearing vs 6205-2RS-C3-SKF"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "Some fields could not be verified from the vendor's listing. Confirm the following with the vendor before approval: bore_diameter, detected_type."
+      },
+      "c3_in_found_pn": true,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Quality Bearings Online",
+      "tier": 2,
+      "band": null,
+      "foundPartNumber": "6205-2rsh/c3-skf",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": true,
+      "evidenceState": "priced",
+      "price": 14.6,
+      "url": "https://www.qualitybearingsonline.com/6205-2rs-c3-skf-deep-groove-bearing-25-x-52-x-15mm",
+      "suitability": 10.5,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "medium",
+        "compatibilitySummary": "incompatible",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not visible in listing \u2014 verify with vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": "6205-2rsh/c3-skf",
+            "match": "different",
+            "notes": "deep groove ball bearing vs 6205-2rsh/c3-skf"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "Some fields could not be verified from the vendor's listing. Confirm the following with the vendor before approval: bore_diameter, detected_type."
+      },
+      "c3_in_found_pn": true,
+      "cross_maker_seal_code": true
+    },
+    {
+      "vendor": "Rodavictoria USA",
+      "tier": 3,
+      "band": null,
+      "foundPartNumber": "6205-2RS",
+      "isExactMatch": true,
+      "pnMatchLevel": "exact",
+      "isAftermarket": false,
+      "evidenceState": "priced",
+      "price": 18.81,
+      "url": "https://rodavictoriausa.com",
+      "suitability": 6.3,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://rodavictoriausa.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Intech Bearing Inc.",
+      "tier": 3,
+      "band": null,
+      "foundPartNumber": "6205-2RS",
+      "isExactMatch": true,
+      "pnMatchLevel": "exact",
+      "isAftermarket": false,
+      "evidenceState": "priced",
+      "price": 15.05,
+      "url": "https://intechbearing.com",
+      "suitability": 32.2,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://intechbearing.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "BDS Bearing",
+      "tier": 3,
+      "band": null,
+      "foundPartNumber": "6205-2RS",
+      "isExactMatch": true,
+      "pnMatchLevel": "exact",
+      "isAftermarket": false,
+      "evidenceState": "uncontacted",
+      "price": null,
+      "url": "https://store.bdsbearing.com",
+      "suitability": 34.3,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://store.bdsbearing.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "EIS Inc.",
+      "tier": 3,
+      "band": null,
+      "foundPartNumber": "6205-2RS04",
+      "isExactMatch": false,
+      "pnMatchLevel": "normalized",
+      "isAftermarket": true,
+      "evidenceState": "priced",
+      "price": 31.44,
+      "url": "https://www.eis-inc.com",
+      "suitability": 0.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.eis-inc.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "VXB (Premium Heavy Duty Bearings)",
+      "tier": 3,
+      "band": null,
+      "foundPartNumber": "",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": false,
+      "evidenceState": "priced",
+      "price": 5187.95,
+      "url": "https://vxb.com/",
+      "suitability": 7.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://vxb.com/ \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Baker Bearing Company",
+      "tier": 3,
+      "band": null,
+      "foundPartNumber": "",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": false,
+      "evidenceState": "uncontacted",
+      "price": null,
+      "url": "https://www.bakerbearing.com",
+      "suitability": 26.6,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.bakerbearing.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "SKF Authorized Distributor",
+      "tier": 3,
+      "band": null,
+      "foundPartNumber": "",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": false,
+      "evidenceState": "uncontacted",
+      "price": null,
+      "url": "",
+      "suitability": 0.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at [URL not available] \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "SKF Service Center",
+      "tier": 3,
+      "band": null,
+      "foundPartNumber": "",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": false,
+      "evidenceState": "uncontacted",
+      "price": null,
+      "url": "",
+      "suitability": 0.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at [URL not available] \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Motion Industries",
+      "tier": 3,
+      "band": null,
+      "foundPartNumber": "",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": false,
+      "evidenceState": "uncontacted",
+      "price": null,
+      "url": "",
+      "suitability": 0.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at [URL not available] \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Applied Industrial Technologies",
+      "tier": 3,
+      "band": null,
+      "foundPartNumber": "",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": false,
+      "evidenceState": "uncontacted",
+      "price": null,
+      "url": "",
+      "suitability": 0.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at [URL not available] \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Radwell",
+      "tier": 2,
+      "band": "A",
+      "foundPartNumber": "6205-2RS-C3",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": true,
+      "evidenceState": "priced",
+      "price": 18.29,
+      "url": "https://www.radwell.com/Buy/TIMKEN/TIMKEN/6205-2RS",
+      "suitability": 4.4,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "medium",
+        "compatibilitySummary": "incompatible",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not visible in listing \u2014 verify with vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": "6205-2RS-C3",
+            "match": "different",
+            "notes": "deep groove ball bearing vs 6205-2RS-C3"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "Some fields could not be verified from the vendor's listing. Confirm the following with the vendor before approval: bore_diameter, detected_type."
+      },
+      "c3_in_found_pn": true,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "123bearing.com",
+      "tier": 2,
+      "band": "A",
+      "foundPartNumber": "6205-2RS-C3-SKF",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": true,
+      "evidenceState": "priced",
+      "price": 6.64,
+      "url": "https://www.123bearing.com/bearing-housing/deep-groove-bearing/single-row/6205-2rs-c3-skf",
+      "suitability": 53.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "medium",
+        "compatibilitySummary": "incompatible",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not visible in listing \u2014 verify with vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": "6205-2RS-C3-SKF",
+            "match": "different",
+            "notes": "deep groove ball bearing vs 6205-2RS-C3-SKF"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "Some fields could not be verified from the vendor's listing. Confirm the following with the vendor before approval: bore_diameter, detected_type."
+      },
+      "c3_in_found_pn": true,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Rodavictoria USA",
+      "tier": 3,
+      "band": "A",
+      "foundPartNumber": "6205-2RS",
+      "isExactMatch": true,
+      "pnMatchLevel": "exact",
+      "isAftermarket": false,
+      "evidenceState": "priced",
+      "price": 18.81,
+      "url": "https://rodavictoriausa.com",
+      "suitability": 6.3,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://rodavictoriausa.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Intech Bearing Inc.",
+      "tier": 3,
+      "band": "A",
+      "foundPartNumber": "6205-2RS",
+      "isExactMatch": true,
+      "pnMatchLevel": "exact",
+      "isAftermarket": false,
+      "evidenceState": "priced",
+      "price": 15.05,
+      "url": "https://intechbearing.com",
+      "suitability": 32.2,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://intechbearing.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "BDS Bearing",
+      "tier": 3,
+      "band": "A",
+      "foundPartNumber": "6205-2RS",
+      "isExactMatch": true,
+      "pnMatchLevel": "exact",
+      "isAftermarket": false,
+      "evidenceState": "uncontacted",
+      "price": null,
+      "url": "https://store.bdsbearing.com",
+      "suitability": 34.3,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://store.bdsbearing.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Quality Bearings Online",
+      "tier": 2,
+      "band": "B",
+      "foundPartNumber": "6205-2rsh/c3-skf",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": true,
+      "evidenceState": "priced",
+      "price": 14.6,
+      "url": "https://www.qualitybearingsonline.com/6205-2rs-c3-skf-deep-groove-bearing-25-x-52-x-15mm",
+      "suitability": 10.5,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "medium",
+        "compatibilitySummary": "incompatible",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not visible in listing \u2014 verify with vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": "6205-2rsh/c3-skf",
+            "match": "different",
+            "notes": "deep groove ball bearing vs 6205-2rsh/c3-skf"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "Some fields could not be verified from the vendor's listing. Confirm the following with the vendor before approval: bore_diameter, detected_type."
+      },
+      "c3_in_found_pn": true,
+      "cross_maker_seal_code": true
+    },
+    {
+      "vendor": "EIS Inc.",
+      "tier": 3,
+      "band": "B",
+      "foundPartNumber": "6205-2RS04",
+      "isExactMatch": false,
+      "pnMatchLevel": "normalized",
+      "isAftermarket": true,
+      "evidenceState": "priced",
+      "price": 31.44,
+      "url": "https://www.eis-inc.com",
+      "suitability": 0.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.eis-inc.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "VXB (Premium Heavy Duty Bearings)",
+      "tier": 3,
+      "band": "B",
+      "foundPartNumber": "",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": false,
+      "evidenceState": "priced",
+      "price": 5187.95,
+      "url": "https://vxb.com/",
+      "suitability": 7.0,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://vxb.com/ \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    },
+    {
+      "vendor": "Baker Bearing Company",
+      "tier": 3,
+      "band": "B",
+      "foundPartNumber": "",
+      "isExactMatch": false,
+      "pnMatchLevel": "none",
+      "isAftermarket": false,
+      "evidenceState": "uncontacted",
+      "price": null,
+      "url": "https://www.bakerbearing.com",
+      "suitability": 26.6,
+      "aftermarketDisclosure": null,
+      "comparisonArtifact": {
+        "fidelity": "low",
+        "compatibilitySummary": "verification_required",
+        "comparison": [
+          {
+            "field": "bore_diameter",
+            "fieldLabel": "Bore Diameter",
+            "assetValue": "25mm",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          },
+          {
+            "field": "detected_type",
+            "fieldLabel": "Equipment Type",
+            "assetValue": "deep groove ball bearing",
+            "candidateValue": null,
+            "match": "unknown",
+            "notes": "not available \u2014 request from vendor"
+          }
+        ],
+        "verificationRequiredFields": [
+          "bore_diameter",
+          "detected_type"
+        ],
+        "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.bakerbearing.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+      },
+      "c3_in_found_pn": false,
+      "cross_maker_seal_code": false
+    }
+  ]
+}
