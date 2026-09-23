@@ -250,6 +250,11 @@ export interface SourcingResults {
   tier2: Candidate[];
   tier3: Candidate[];
   warrantyBanner?: string;
+  // R4 (arc 5): present only when the run reached sourcing on the explicit
+  // "source anyway" override — its results have NOT been checked against a
+  // requirement, and no candidate in it is badged exact.
+  specIncomplete?: boolean;
+  specIncompleteBanner?: string;
   tier3CapabilityPivot?: boolean;
   // RANKING_BANDS_V1: present ONLY when the stored result carries the
   // ranking_bands:v1 marker (the backend keys these off the result, not the env —

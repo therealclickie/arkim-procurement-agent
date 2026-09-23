@@ -56,6 +56,16 @@ export function SourcingView({ run, className }: SourcingViewProps) {
         </div>
       )}
 
+      {results.specIncompleteBanner && (
+        <div
+          data-testid="spec-incomplete-banner"
+          className="px-4 py-2.5 bg-amber-tint border-b border-amber-line shrink-0 flex items-start gap-2"
+        >
+          <Warn size={14} className="text-amber-fg mt-0.5 shrink-0" />
+          <p className="text-[12px] text-amber-fg">{results.specIncompleteBanner}</p>
+        </div>
+      )}
+
       {run.no_exact_match && (
         <div className="px-4 py-2.5 bg-amber-tint border-b border-amber-line shrink-0 flex items-start gap-2">
           <Warn size={14} className="text-amber-fg mt-0.5 shrink-0" />

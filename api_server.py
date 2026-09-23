@@ -895,6 +895,9 @@ def _transform_option(opt: dict, tier: int, idx: int, quote: Optional[dict] = No
         searched_pn=_specs.get("part_number"),
         manufacturer=_specs.get("manufacturer"),
         claims_exact=(opt.get("match_type") == "Exact OEM"),
+        # R4 (F-15): no candidate in a spec-incomplete run may be badged exact —
+        # the request it would claim to match was never specified.
+        spec_incomplete=bool(_specs.get("spec_incomplete")),
     )
     out = {
         "id":                    f"{opt.get('vendor_name','')}-t{tier}-{idx}",
@@ -1144,6 +1147,13 @@ def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None,
         "warrantyBanner":      raw.get("warranty_banner"),
         "tier3CapabilityPivot": raw.get("tier3_capability_pivot", False),
     }
+    # R4 (F-15): a run that reached sourcing on the explicit override says so, on
+    # every read, above its results. Absent for every other run, so flag-off /
+    # sufficient runs are byte-identical.
+    if (specs or {}).get("spec_incomplete"):
+        from utils import intake_sufficiency
+        result["specIncomplete"] = True
+        result["specIncompleteBanner"] = intake_sufficiency.BANNER
     # RANKING_BANDS_V1 (spec §7) — a BANDED raw result additionally distinguishes
     # findings (Band A/B cards, banded order) from outreachTargets (the Band-C
     # ask-and-see block: onboarded supplier named first, capped seeds, provenance
@@ -3019,9 +3029,18 @@ def confirm_intake(
     background_tasks: BackgroundTasks,
     exact_only: bool = False,
     open_family: bool = False,
+    source_anyway: bool = False,
 ):
     """
     Confirm intake specs and atomically advance to sourcing.
+
+    source_anyway=true (R4, arc 5 — the EXPLICIT, LABELLED override of the identity
+    floor): a request with no manufacturer + model and no manufacturer part number
+    has nothing to match a supplier's listing against, so confirm refuses it back to
+    clarification (422, reason "identity_insufficient"). The override starts sourcing
+    anyway, but never silently: an acknowledgement is recorded on the run, the run is
+    marked `spec_incomplete`, its results carry a banner saying they have NOT been
+    checked against the requirement, and no candidate in it may be badged exact.
 
     Writes the inventory stub and transitions phase in a single DB commit so
     there is no window where the run is phase=sourcing without inventory_result.
@@ -3110,6 +3129,19 @@ def confirm_intake(
                     },
                 )
 
+        # Identity-sufficiency floor (R4, F-15) — AFTER the registry-driven family
+        # guard above, which already enforces required fields for the classes that
+        # define them. Where the registry defines none, R4's minimum applies: a
+        # manufacturer plus a model, or a manufacturer part number. Refuses back to
+        # clarification unless the buyer explicitly overrides.
+        from utils import intake_sufficiency
+        sufficiency = intake_sufficiency.identity_block(specs_dict)
+        if sufficiency is not None and not source_anyway:
+            raise HTTPException(status_code=422, detail=sufficiency.as_detail())
+        if sufficiency is not None:
+            intake_sufficiency.record_override(specs_dict, sufficiency)
+            run.asset_specs_json = json.dumps(specs_dict)
+
         urgency_factor, warranty_status = _commit_intake_to_sourcing(
             session, run, specs_dict, exact_only=exact_only, open_family=open_family,
             background_tasks=background_tasks,
@@ -3118,7 +3150,8 @@ def confirm_intake(
     # Night 1 — capture the confirm-intake user action (RUN_CAPTURE-gated, fail-soft).
     _run_capture.capture_user_action(
         run_id, "confirm_intake",
-        detail={"exact_only": exact_only, "open_family": open_family},
+        detail={"exact_only": exact_only, "open_family": open_family,
+                "source_anyway": bool(sufficiency is not None)},
     )
     return {"run_id": run_id, "phase": Phase.SOURCING.value}
 

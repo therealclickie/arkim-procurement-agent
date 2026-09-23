@@ -142,9 +142,15 @@ def classify(searched_pn: Optional[str], found_pn: Optional[str],
     return level, _REASONS.get(level, _REASONS["none"])
 
 
+#: Reason used when the whole RUN was sourced without a specified requirement.
+SPEC_INCOMPLETE_REASON = ("the request was sourced without a manufacturer and model "
+                          "or a manufacturer part number — nothing was checked "
+                          "against a requirement")
+
+
 def resolve(opt: dict[str, Any], *, advisory_level: str,
             searched_pn: Optional[str], manufacturer: Optional[str],
-            claims_exact: bool) -> BadgeVerdict:
+            claims_exact: bool, spec_incomplete: bool = False) -> BadgeVerdict:
     """Gate one candidate's badge.
 
     ``advisory_level`` is the extractor-derived level the caller would have shown
@@ -170,6 +176,12 @@ def resolve(opt: dict[str, Any], *, advisory_level: str,
     if level in EXACT_GRADE and not has_resolvable_listing(url):
         level = _NO_LISTING_CAP
         reason = _NO_LISTING_REASON
+
+    # R4 (F-15): in a spec-incomplete run there is no requirement to have matched,
+    # so no row may carry an exact-grade badge whatever the strings say.
+    if spec_incomplete and level in EXACT_GRADE:
+        level = _NO_LISTING_CAP
+        reason = SPEC_INCOMPLETE_REASON
 
     is_exact = bool(claims_exact) and level == "exact"
     return BadgeVerdict(level=level, is_exact=is_exact, reason=reason,

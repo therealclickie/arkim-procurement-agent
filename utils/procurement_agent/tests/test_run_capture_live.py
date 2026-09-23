@@ -205,7 +205,11 @@ class TestLiveSourcingCapture:
 
     def test_zero_results_outcome(self, api, cap_on, monkeypatch):
         rid = _create_run(api)
-        _set_run(api, rid, asset_specs_json=json.dumps({"manufacturer": "ObscureCo"}))
+        # R4 (arc 5): a manufacturer alone no longer clears the identity floor. A
+        # model is added so this test still exercises its own subject (the
+        # zero-results outcome signal); every assertion below is unchanged.
+        _set_run(api, rid, asset_specs_json=json.dumps(
+            {"manufacturer": "ObscureCo", "model": "OC-1"}))
         _mock_sourcing_pipeline(monkeypatch, sourcing_result=_empty_sourcing(), artifact=None)
         api.post(f"/api/runs/{rid}/confirm-intake")
         # displayed set is empty across all tiers

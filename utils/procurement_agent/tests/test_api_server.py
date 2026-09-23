@@ -1011,7 +1011,10 @@ class TestConfirmIntake:
 
     def test_happy_sync_response_then_advances_to_comparison(self, api, monkeypatch):
         rid = _create_run(api)
-        _set_run(api, rid, asset_specs_json=json.dumps({"manufacturer": "Goulds"}))
+        _set_run(api, rid, asset_specs_json=json.dumps(
+            # R4 (arc 5): a manufacturer alone no longer clears the identity floor;
+            # a model is added so these tests still exercise their own subject.
+            {"manufacturer": "Goulds", "model": "3196"}))
         _mock_sourcing_pipeline(monkeypatch, sourcing_result=_empty_sourcing())
 
         # (i) Synchronous response: phase reported as "sourcing".
@@ -1033,7 +1036,10 @@ class TestConfirmIntake:
 
     def test_happy_attaches_comparison_artifact_to_candidate(self, api, monkeypatch):
         rid = _create_run(api)
-        _set_run(api, rid, asset_specs_json=json.dumps({"manufacturer": "Goulds"}))
+        _set_run(api, rid, asset_specs_json=json.dumps(
+            # R4 (arc 5): a manufacturer alone no longer clears the identity floor;
+            # a model is added so these tests still exercise their own subject.
+            {"manufacturer": "Goulds", "model": "3196"}))
         sourcing = _empty_sourcing()
         sourcing["tier_1"]["results"] = [{
             "vendor_name": "Acme", "base_price": 100, "lead_time_days": 3,
@@ -1101,7 +1107,10 @@ class TestConfirmIntake:
         # (200 {phase:"sourcing"}); the failure surfaces via the polled phase.
         # Error detail is retained in sourcing_results.error for debugging.
         rid = _create_run(api)
-        _set_run(api, rid, asset_specs_json=json.dumps({"manufacturer": "Goulds"}))
+        _set_run(api, rid, asset_specs_json=json.dumps(
+            # R4 (arc 5): a manufacturer alone no longer clears the identity floor;
+            # a model is added so these tests still exercise their own subject.
+            {"manufacturer": "Goulds", "model": "3196"}))
         _mock_sourcing_pipeline(monkeypatch, sourcing_exc=RuntimeError("tavily boom"))
 
         resp = api.post(f"/api/runs/{rid}/confirm-intake")
@@ -1120,7 +1129,10 @@ class TestConfirmIntake:
         # the stored sourcing_results_json column (read raw via the admin surface / direct
         # DB read), so debugging is unaffected.
         rid = _create_run(api)
-        _set_run(api, rid, asset_specs_json=json.dumps({"manufacturer": "Goulds"}))
+        _set_run(api, rid, asset_specs_json=json.dumps(
+            # R4 (arc 5): a manufacturer alone no longer clears the identity floor;
+            # a model is added so these tests still exercise their own subject.
+            {"manufacturer": "Goulds", "model": "3196"}))
         _mock_sourcing_pipeline(monkeypatch, sourcing_exc=RuntimeError("tavily boom https://api.tavily.com/search?key=SECRET"))
 
         api.post(f"/api/runs/{rid}/confirm-intake")
@@ -1244,9 +1256,13 @@ class TestConfirmIntakeFamilyVariantGuard:
         resp = api.post(f"/api/runs/{rid}/confirm-intake")
         assert resp.status_code == 200
 
-    def test_spec_described_no_model_unaffected(self, api, monkeypatch):
-        """A spec-described request with no model is NOT family-level — the
-        guard never fires (the existing spec-based path is byte-identical)."""
+    def test_spec_described_no_model_refused_by_the_identity_floor(self, api, monkeypatch):
+        """A spec-described request with no model is NOT family-level, so the
+        FAMILY guard still never fires — but R4 (arc 5) adds the identity floor
+        beneath it, and a request with no manufacturer, model or part number has
+        nothing to match a listing against. It is refused back to clarification
+        (this test previously pinned the 200 that let F-15's unspecified request
+        reach priced results)."""
         rid = _create_run(api)
         _set_run(api, rid, asset_specs_json=json.dumps({
             "manufacturer": None, "model": None, "part_number": None,
@@ -1255,7 +1271,13 @@ class TestConfirmIntakeFamilyVariantGuard:
         }))
         _mock_sourcing_pipeline(monkeypatch, sourcing_result=_empty_sourcing())
         resp = api.post(f"/api/runs/{rid}/confirm-intake")
-        assert resp.status_code == 200
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "identity_insufficient"      # not the family guard
+        assert detail["override"] == "source_anyway"
+        # ...and the explicit, labelled override still starts sourcing.
+        assert api.post(
+            f"/api/runs/{rid}/confirm-intake?source_anyway=true").status_code == 200
 
 
 def test_variant_selecting_attrs_all_have_field_mappings():

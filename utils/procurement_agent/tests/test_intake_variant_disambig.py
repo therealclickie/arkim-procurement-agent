@@ -539,9 +539,13 @@ class TestVariantDisambigConfirmIntakeLive:
         assert resp.status_code == 422
         assert resp.json()["detail"]["pending"] is True
 
-    def test_run_spec_described_then_confirm_200_unaffected(self, api, monkeypatch):
-        """Case 4 (confirm gate): a spec-described run (no model) -> confirm 200
-        (the guard never fires — not family-level)."""
+    def test_run_spec_described_then_confirm_refused_by_identity_floor(self, api, monkeypatch):
+        """Case 4 (confirm gate): a spec-described run (no model) is not
+        family-level, so the FAMILY guard still never fires. R4 (arc 5) adds the
+        identity floor beneath it: with no manufacturer, model or part number
+        there is nothing to match a listing against, so confirm returns the
+        request to clarification. (This previously pinned a 200 — the F-15 path
+        by which an unspecified request reached priced results.)"""
         monkeypatch.setenv("INTAKE_TYPE_AWARE", "1")
         agent = IntakeAgent(anthropic_api_key="test-key")
         payload = {
@@ -562,4 +566,10 @@ class TestVariantDisambigConfirmIntakeLive:
         _mock_sourcing_pipeline(monkeypatch, sourcing_result=_empty_sourcing())
 
         resp = api.post(f"/api/runs/{rid}/confirm-intake")
-        assert resp.status_code == 200
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "identity_insufficient"   # not "family_variant"
+        assert detail["override"] == "source_anyway"
+        # The explicit override still starts sourcing, labelled.
+        assert api.post(
+            f"/api/runs/{rid}/confirm-intake?source_anyway=true").status_code == 200
