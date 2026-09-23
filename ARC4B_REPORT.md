@@ -453,3 +453,258 @@ exactly that dict.
 ---
 
 GATE STOP: F1–F5 show that T1, T6, T7, T8 and T10 each require behaviour whose opposite is asserted by a pre-existing, un-editable test — notification mail MUST be RFQ-capped (`test_notifications_governance.py:88-99`); an ACTIVE MEMBER MUST receive RFQ_NEW (`test_notifications_rfq_new.py:57-66`); a SOFT_BOUNCE_REPEATED alert MUST appear in the admin queue (`test_notifications_admin_alerts.py:100-116`); reminders MUST fire on wall-clock hours (`test_notifications_escalation.py:156-253`); RFQ_NEW MUST be SENT immediately (`test_notifications_rfq_new.py:65`, `:140`). The brief authorises editing only `verify-screen.test.tsx` (plus `conftest.py`, which F6 shows is already done) and requires all 2808 backend tests to pass, so the rulings as written cannot ship under `NOTIFICATIONS_V1` alone. Which resolution do you want — (a) a NEW default-OFF flag (e.g. `NOTIFY_SIGNAL_V2`) gating every S-series and R-F8 behaviour change, so arc-4 behaviour is preserved when off and the volume proof plus criteria 4 and 9 run with it on, accepting that a pilot must then flip two flags rather than one; or (b) extend the prime-directive exception to the four arc-4 test files named above, so the new behaviour becomes the only behaviour under `NOTIFICATIONS_V1`?
+
+---
+---
+
+# ARC 4b — BUILD REPORT
+
+**Branch:** `arc4b/flag-on-rulings` · **Builder:** Claude Opus 5 · **Date:** 2026-09-23
+**Status:** T1–T11 complete and committed, one commit per task. **Not pushed.**
+
+## Test counts (observed, this branch, this machine)
+
+| Suite | Command | Baseline | Final |
+|---|---|---|---|
+| Backend | `uv run pytest -q` | 2808 passed, 73 skipped | **2966 passed, 73 skipped** (241s) |
+| Frontend | `cd frontend && npm test` | 197 passed (24 files) | **200 passed** (25 files) |
+
+Criterion 1: **2808 + 158**. Criterion 2: **197 + 3**. Every pre-existing test
+passes; the only modified pre-existing test files are the five in the
+PRIME DIRECTIVE exception table (criterion 7, verified with
+`git diff --name-status 02cde91..HEAD`):
+
+```
+M  frontend/src/app/supplier/verify/__tests__/verify-screen.test.tsx
+M  utils/procurement_agent/tests/test_notifications_admin_alerts.py
+M  utils/procurement_agent/tests/test_notifications_escalation.py
+M  utils/procurement_agent/tests/test_notifications_governance.py
+M  utils/procurement_agent/tests/test_notifications_rfq_new.py
+```
+
+`conftest.py` is **not** modified — T5 was already satisfied (below). No other
+pre-existing test file, frontend or backend, appears with `M`.
+
+## Task status
+
+| Task | Commit | Ruling |
+|---|---|---|
+| T1 notification class + cap + alert | `bf3a6ec` | R-F8 |
+| T2 webhook rejection throttle | `54d9928` | R-F10 |
+| T3 verify click-to-continue | `070cbb1` | R-F1 |
+| T4 invite governance | `e88fd18` | R-F5 |
+| **T5 conftest pin** | — | **ALREADY DONE**, recorded as satisfied. `utils/procurement_agent/tests/conftest.py:74` already contains `"NOTIFICATIONS_V1"` in `_FEATURE_FLAG_ENVS`, landed as commit `442667e`. No edit made, and none needed. |
+| T6 designated RFQ contacts | `98033f7` | S1 |
+| T7 coalescing + consolidated reminders | `89d6739` | S2 |
+| T8 business-hours clocks | `d1ee304` | S3 |
+| T9 cancel on resolution | `e3aa3d0` | S4 |
+| T10 ceiling + tiers + volume proof | `36617ce` | S5, S6, criterion 9 |
+| T11 actionability | `9383fac` | S7 |
+
+## S-criterion-9 volume scenario — BOTH COUNTS
+
+Named test: `utils/procurement_agent/tests/test_notifications_volume_scenario.py`.
+Scenario verbatim from the brief — one five-member account (1 OWNER, 1 ADMIN,
+3 MEMBERs), ten RFQs across a Friday afternoon and the following Monday, two of
+them closed before Monday, nobody at the supplier looking at anything.
+
+| Measure | Arc 4 behaviour | Arc 4b (shipped defaults) |
+|---|---|---|
+| **Supplier emails** | **60** | **10** |
+| **Concierge queue rows** | **50** | **2** |
+
+Both columns drive the SAME code on the SAME scenario; the arc-4 column is
+produced by returning the configurable knobs to arc 4's settings
+(`NOTIFY_COALESCE_MINUTES=0`, `MEMBER_DAILY_NOTIFICATION_CEILING=0`, every
+member a designated contact, `ESCALATE_REMIND_HOURS=4` /
+`ESCALATE_ALERT_HOURS=24`).
+
+**The arc-4 column is deliberately CONSERVATIVE and under-counts arc 4.** Two
+of the changes are not configurable by design, so the baseline cannot express
+them: reminders are consolidated per mailbox per day in this code (arc 4 sent
+one per request per member, so its true email count is higher than 60), and
+escalation alerts aggregate per account per day (arc 4 deduped per
+notification, so its queue would have held one row per request × contact — the
+50 figure, which the run MEASURES as `rfq_member_pairs` rather than recalling
+it from the old code). Every number above is therefore a lower bound on the
+reduction.
+
+**The reduction is not a silent drop** (reviewer R9).
+`test_the_reduction_never_drops_a_notification` asserts that all ten requests
+are still accounted for in the arc-4b run: SENT, deferred into a digest, or
+cancelled because the request itself was resolved.
+`test_every_remaining_email_is_actionable_by_its_recipient` asserts that every
+surviving email goes to a designated contact, names quote-request work, and
+carries a portal link to act on. The ten arc-4b emails are: 2 anchors + 2 batch
+mails on Friday (owner + admin), 2 anchors + 2 batch mails on Monday, and 2
+consolidated reminders on Tuesday. `test_the_weekend_produces_nothing_at_all`
+pins the headline S3 case separately.
+
+## FINDINGS
+
+### F1 — S2's RFQ_NEW coalescing is "send the first, batch the rest", not "hold them all"
+
+S2's wording is "three RFQs arriving together produce one email listing three".
+Full coalescing (hold every request until the window closes) is blocked by two
+**pre-existing, un-fenced** test files that G-STOP-1 does not list:
+
+- `utils/procurement_agent/tests/test_notifications_preferences.py:142-147`
+  (`test_immediate_sends_now`) asserts `state == STATE_SENT` and
+  `len(outbox) == 1` immediately after the fan-out;
+- `test_notifications_preferences.py:238-244`
+  (`test_immediate_notifications_are_untouched_by_the_digest`) asserts the same
+  `STATE_SENT`.
+
+The prime directive forbids editing them and G-STOP-1 extends the exception to
+four named files only, so the edit was **not** silently widened to a sixth and
+seventh file. The shipped behaviour is the compromise the gate's own FINDING
+F5(b) identified: the first request to an idle mailbox is mailed immediately
+and opens the window; everything inside that window is mailed once, together,
+listing each request. Ten requests → two emails rather than one.
+
+It is also defensible on its own terms — a line-down part should not wait
+fifteen minutes for a tidier email — and, unlike a scheme that silently
+attaches the extras to the first mail, every request is named in an email
+somebody actually receives. **Ruling wanted:** accept this, or extend the
+exception to those two files and hold the first send as well.
+
+### F2 — the exception on `test_notifications_escalation.py` is WIDER than the gate's `:156-253`
+
+Reported rather than silently widened, per the brief's instruction. Wall-clock
+arithmetic is also encoded outside the gate's range:
+
+- `:34` `NOW`, and `:48-66` `notification_row(age_hours=...)` — the decision
+  table's ages are wall-clock offsets, so the table at `:78-113` and
+  `test_an_open_alone_is_never_seen` at `:116-122` depend on them;
+- `:139-153` `aged_notification`, back-dated against the **wall clock**;
+- `:278-295`, the two CLI tests (`run_escalations()` with no `now`; a
+  wall-clock `future`).
+
+All of it is the same superseded decision the fence names (S3: the ladder's
+unit is business hours). **Only the clock changed.** Every rung, label and
+expected outcome is byte-identical; ages are now expressed in business hours
+against a FIXED instant, and every scheduler call is given that instant.
+
+One further line changed for an incidental reason, called out here rather than
+buried: `:315` now parses the LAST line of captured stdout, because S4's
+cancellation sweep touches the supplier registry, which prints as it creates
+its `tmp_path` database. That is a parsing change, not an assertion change; the
+two assertions after it are untouched.
+
+Side effect worth stating plainly: arc 4's file was itself date-dependent (it
+back-dated against the wall clock and ran the scheduler with no `now`), so
+under S3 it would have been green on a Tuesday and red on a Sunday. It is now a
+function of the instants it supplies and nothing else.
+
+### F3 — a real date-dependence was found and fixed in the SEND path
+
+Not in the brief; found while building the volume scenario.
+`_send_notification_mail` stamped `sent_at` from the wall clock while the
+escalation ladder judged against the supplied `now`, so the two disagreed by
+however far apart they were — the same bug class as arc 4's review finding.
+Every send now stamps the scheduler's instant
+(`utils/notifications.py`, `_send_notification_mail(at=)`), and the coalescing
+and digest transitions do too.
+
+### F4 — the R-F10 limiter cannot shed verification work, and the code says so
+
+You cannot know an envelope is unverified without verifying it, and R-F10
+forbids dropping a verified event. The limiter therefore counts and records
+rejections but cannot short-circuit verification. What it provides is a
+counted per-IP abuse signal at the seam an upstream WAF/ALB rule keys on — not
+a saving in RSA work. The cheap topic-allowlist check already runs before any
+certificate fetch, so a foreign-topic spray costs nothing either way. Stated in
+the code, not only here. (The gate predicted this as its FINDING F8.)
+
+### F5 — notification ledger rows deliberately carry no `supplier_domain`
+
+R-F8 requires notification mail to write `sent_messages` rows.
+`get_sent_messages(domain=...)` IS the RFQ-ledger read behind the supplier
+portal inbox and the admin RFQ views, so a notification row carrying the domain
+would surface there as a request. The rows carry `run_id`, the message class
+and the full recipient address (so the account stays recoverable) but not the
+domain, and `_supplier_open_requests` additionally filters on `message_class`
+as defence in depth. Both facts are pinned by tests in
+`test_notifications_cap_class.py`.
+
+### F6 — `_arc4_notifications_fixtures.py:11-18` still carries a stale comment
+
+It claims `NOTIFICATIONS_V1` "is NOT in `conftest.py`'s `_FEATURE_FLAG_ENVS`
+pin list". That has been false since `442667e`. Not corrected here: it is a
+docstring in a pre-existing test-support file and outside this arc's scope.
+(Carried forward from the gate's FINDING F6.)
+
+### F7 — `tzdata` is still not a declared dependency
+
+T8 uses stdlib `zoneinfo`. On Windows it resolves only because `tzdata` is
+installed transitively via pandas (`uv.lock:1066-1074`); it is not in
+`pyproject.toml`. If pandas were removed, every business-hours calculation on a
+Windows box would silently fall back to UTC — `business_hours.zone()` is
+fail-soft, so it would degrade quietly rather than fail loudly. Recommendation
+unchanged from the gate's H11: declare `tzdata; sys_platform == "win32"`
+explicitly. Not done here — a dependency change is outside this arc's scope.
+
+### F8 — one new cron entry is load-bearing
+
+`scripts/notifications_scheduler.py coalesce` is what actually delivers batched
+RFQ mail. A deployment that schedules `escalations` but not `coalesce` will
+chase suppliers about requests it never sent them. Said in the CLI's own
+docstring and in its cron block; flagged here because it is a new operational
+dependency, not merely a new command.
+
+## Updated env-config list
+
+**New in arc 4b** (all read LIVE, all with safe defaults, all documented at
+their definition):
+
+| Var | Default | Task | Effect |
+|---|---|---|---|
+| `NOTIFICATION_DAILY_CAP` | 200 | T1 | notification-mail daily cap, in its own class |
+| `WEBHOOK_REJECT_RATE_LIMIT` | 60 | T2 | rejected webhook requests per IP per window; `<= 0` inert |
+| `WEBHOOK_REJECT_RATE_WINDOW_SEC` | 60 | T2 | that window, in seconds |
+| `INVITE_DAILY_CAP_PER_ACCOUNT` | 10 | T4 | invites one account may send per day; `<= 0` inert |
+| `NOTIFY_COALESCE_MINUTES` | 15 | T7 | RFQ_NEW batching window; `0` restores one email per request |
+| `ACCOUNT_DEFAULT_TIMEZONE` | `America/Los_Angeles` | T8 | fallback when an account has no timezone |
+| `BUSINESS_HOURS_START` / `BUSINESS_HOURS_END` | 8 / 17 | T8 | local business window; an empty window falls back to the default |
+| `MEMBER_DAILY_NOTIFICATION_CEILING` | 5 | T10 | notification emails per mailbox per business day; `<= 0` inert |
+| `NOTIFY_ACTIONABILITY_FLOOR` | 0.20 | T11 | rate below which a kind is flagged for review |
+
+**Changed in arc 4b:**
+
+| Var | Was | Now | Why |
+|---|---|---|---|
+| `ESCALATE_REMIND_HOURS` | 4.0 wall-clock | 4.0 **business** | S3 — the unit changed, the name did not |
+| `ESCALATE_ALERT_HOURS` | 24.0 wall-clock | **8.0 business** | S3 — one business day IS eight business hours; 24 business hours would be three working days |
+
+**Per-account, not env:** `supplier_accounts.timezone` (nullable — NULL reads
+as `ACCOUNT_DEFAULT_TIMEZONE`) and `supplier_members.receives_rfq` (nullable —
+NULL reads as the role default: OWNER/ADMIN yes, MEMBER no). Both are nullable
+on purpose, so a later change to a product default reaches the accounts and
+members that never chose, and only them.
+
+**Unchanged and still relevant:** `NOTIFICATIONS_V1`, `SUPPLIER_ACCOUNTS_V1`,
+`NEXT_PUBLIC_SUPPLIER_SESSION_V1`, `SEND_GOVERNANCE_V1`,
+`SEND_GOVERNANCE_DAILY_CAP`, `SEND_GOVERNANCE_AUTH_DAILY_CAP`,
+`SEND_GOVERNANCE_OPEN_RFQ_CAP`, `SES_CONFIGURATION_SET_NOTIFICATIONS`,
+`SES_CONFIGURATION_SET_AUTH`, `SES_SNS_TOPIC_ARN_ALLOWLIST`,
+`SUPPLIER_AUTH_RATE_CAP_EMAIL` / `_IP` / `SUPPLIER_AUTH_RATE_WINDOW_SEC`.
+
+All flags remain **default OFF**. With `NOTIFICATIONS_V1` off every entry point
+this arc adds is a no-op returning `None` / `[]` / `{}` / zeroes; each new test
+file carries a `test_flag_off_*` case, and both suites are green with the flags
+off (criterion 3).
+
+## New scheduler entry points (cron, UTC)
+
+```
+*/5 * * * *   notifications_scheduler.py coalesce          # REQUIRED — delivers RFQ mail
+0   * * * *   notifications_scheduler.py escalations       # runs cancel_resolved first
+0   7 * * *   notifications_scheduler.py digest
+0   8 * * *   notifications_scheduler.py concierge-digest  # the DIGEST tier
+              notifications_scheduler.py cancel            # optional; escalations does it
+```
+
+## Behaviour documentation
+
+`design/interactions.md` gained a "Notification signal discipline (arc 4b)"
+section in the same change, per CLAUDE.md §5.
