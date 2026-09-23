@@ -1029,9 +1029,55 @@ def send_magic_link_email(email: str, raw_token: str, *,
     return result.status
 
 
+ENV_INVITE_DAILY_CAP = "INVITE_DAILY_CAP_PER_ACCOUNT"
+DEFAULT_INVITE_DAILY_CAP = 10
+
+
+def invite_daily_cap() -> int:
+    """Arc 4b R-F5: how many invites ONE account may send in a UTC day.
+
+    Read LIVE. Unset or unparseable ⇒ the default — a typo in a cap must not
+    silently mean "no cap" on mail leaving our domain to strangers. ``<= 0``
+    switches the cap off, the house convention for an inert limiter.
+    """
+    raw = (os.environ.get(ENV_INVITE_DAILY_CAP) or "").strip()
+    if not raw:
+        return DEFAULT_INVITE_DAILY_CAP
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"[SupplierAccounts] {ENV_INVITE_DAILY_CAP}={raw!r} is not a "
+              f"number — using {DEFAULT_INVITE_DAILY_CAP}")
+        return DEFAULT_INVITE_DAILY_CAP
+
+
+def invite_cap_reached(supplier_domain: str, *, day: Optional[str] = None) -> bool:
+    """Has this ACCOUNT already spent its invite budget for ``day``?
+
+    Counted per account, never globally and never per recipient: invite mail
+    is outward mail from our domain to a person who has never heard of us, so
+    the blast radius that matters is one account's member list. A busy account
+    must not be able to shut the channel for every other account.
+
+    ``day`` is ``'YYYY-MM-DD'`` and defaults to today UTC; passing it makes the
+    decision a pure function of the caller's instant.
+    """
+    cap = invite_daily_cap()
+    if cap <= 0:
+        return False
+    from utils import notifications_store
+    dom = _normalize_domain(supplier_domain or "")
+    today = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    sent = notifications_store.count_notifications_on_day(
+        kind=notifications_store.KIND_MEMBER_INVITE, day=today,
+        supplier_domain=dom)
+    return sent >= cap
+
+
 def send_member_invite_email(email: str, *, account_domain: str,
                              invited_by_email: Optional[str] = None,
-                             member_id: Optional[str] = None) -> Optional[str]:
+                             member_id: Optional[str] = None,
+                             day: Optional[str] = None) -> Optional[str]:
     """Tell an invited person they have been added to a supplier account.
 
     NEW MAIL, NOT A MIGRATION — and worth saying plainly (gate FINDING F5):
@@ -1054,18 +1100,32 @@ def send_member_invite_email(email: str, *, account_domain: str,
     from utils.email_sender import EmailMessage, GmailSender
     from utils import supplier_registry
     dom = _normalize_domain(account_domain)
-    inviter = f" by {invited_by_email}" if invited_by_email else ""
+    # R-F5: one account cannot spray invites. Checked BEFORE the send, so a
+    # refused invite costs no mail and writes no ledger row; other accounts are
+    # unaffected because the count is keyed on THIS account's domain.
+    if invite_cap_reached(dom, day=day):
+        print(f"[SupplierAccounts] invite cap_blocked for {dom} -> {email}")
+        return "cap_blocked"
+    # R-F5: the copy must let the recipient tell this is not spam, which means
+    # naming a person they know AND the company that person works for. "You
+    # have been added", from a domain they have never heard of, is
+    # indistinguishable from phishing.
+    company = dom or "your company"
+    inviter = invited_by_email or f"A colleague at {company}"
     msg = EmailMessage(
         to=[email],
-        subject="You have been added to your Arkim supplier account",
+        subject=f"{inviter} added you to their Arkim supplier account",
         body=(
             "Hello,\n\n"
-            f"You have been added{inviter} to the Arkim supplier account for "
-            f"{dom or 'your company'}.\n\n"
+            f"{inviter} at {company} added you to the Arkim supplier account "
+            f"for {company}.\n\n"
+            "Arkim sends quote requests to your company; this is how you see "
+            "them and answer them.\n\n"
             "To sign in, request a link here — we will email you a single-use "
             "sign-in link:\n"
             f"{magic_link_url('').split('?token=')[0]}\n\n"
-            "If you were not expecting this, you can ignore this email.\n\n"
+            f"If you were not expecting this, check with {inviter} — or ignore "
+            "this email.\n\n"
             "Regards,\nArkim Procurement\nprocurement@arkim.ai"
         ),
         metadata={"supplier_domain": dom, "member_invite": True,

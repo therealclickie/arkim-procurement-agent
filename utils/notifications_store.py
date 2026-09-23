@@ -529,6 +529,38 @@ def list_notifications(*, kind: Optional[str] = None,
         return []
 
 
+def count_notifications_on_day(*, kind: str, day: str,
+                               account_id: Optional[str] = None,
+                               supplier_domain: Optional[str] = None) -> int:
+    """How many notifications of ``kind`` were created on one UTC day.
+
+    The per-account invite cap (arc 4b R-F5) counts with this. ``day`` is
+    ``'YYYY-MM-DD'`` and is a PARAMETER: no wall-clock read happens here, so
+    the count a caller gets is a function of the instant it supplied.
+
+    Fail-soft ``0``. A store failure must not silently *block* invites (the
+    caller would refuse a legitimate one) — the cap fails OPEN here because
+    the ledger and the governance auth cap still stand behind it.
+    """
+    where = ["kind = ?", "substr(created_at, 1, 10) = ?"]
+    args: list[Any] = [kind, day]
+    if account_id:
+        where.append("account_id = ?")
+        args.append(account_id)
+    if supplier_domain:
+        where.append("supplier_domain = ?")
+        args.append(supplier_domain)
+    try:
+        with closing(_get_conn()) as conn:
+            r = conn.execute(
+                f"SELECT COUNT(*) FROM notifications WHERE {' AND '.join(where)}",
+                tuple(args)).fetchone()
+            return int(r[0]) if r else 0
+    except Exception as exc:
+        print(f"[Notifications] count_notifications_on_day failed: {exc}")
+        return 0
+
+
 def set_provider_message_id(notification_id: str, provider_message_id: str,
                             *, provider: Optional[str] = None) -> bool:
     """Bind the provider's message id to a notification (the join key every
