@@ -87,13 +87,18 @@ class TestTheEvaluationsOverclaimedRows:
         assert verdict.reason
 
     @pytest.mark.parametrize("vendor", OVERCLAIMED_VENDORS)
-    def test_the_extractors_exact_match_cannot_raise_a_classifier_none(self, vendor):
-        """`pn_match_status: exact_match` on a row the classifier scores `none`."""
+    def test_the_extractors_exact_match_cannot_raise_the_deterministic_verdict(self, vendor):
+        """`pn_match_status: exact_match` on a row the classifier will not agree to.
+
+        R3 refines what the classifier says here: `6205-2RS` against a `6205-2RS C3`
+        request is a named clearance MISMATCH, not a bare "none". Either way it is
+        not exact-grade and the extractor cannot lift it.
+        """
         row = _row(vendor)
         verdict = _resolve(row)
-        assert verdict.classifier_level == "none", (
-            "6205-2RS against a 6205-2RS C3 request is 'none' to the classifier")
-        assert verdict.level == "none"
+        assert verdict.classifier_level == "mismatch"
+        assert verdict.level == "mismatch"
+        assert "C3 requested" in verdict.reason
 
     def test_every_bare_domain_row_in_the_evidence_is_denied_exact_grade(self):
         bare = [r for r in CANDIDATES if not badge_integrity.has_resolvable_listing(r["url"])]
@@ -122,7 +127,7 @@ class TestTheGateRules:
             manufacturer=MANUFACTURER, claims_exact=claims_exact)
 
     def test_the_classifier_is_the_ceiling(self):
-        assert self._verdict(found_pn="6205-2RS").level == "none"
+        assert self._verdict(found_pn="6205-2RS").level == "mismatch"   # R3: named difference
         assert self._verdict(found_pn="6205-2RS C3").level == "exact"
 
     def test_the_extractor_may_downgrade(self):
@@ -133,7 +138,8 @@ class TestTheGateRules:
 
     def test_the_extractor_may_not_upgrade(self):
         v = self._verdict(found_pn="6205-2RS", advisory="exact", claims_exact=True)
-        assert v.level == "none" and v.is_exact is False
+        assert v.level == "mismatch" and v.is_exact is False
+        assert v.level not in badge_integrity.EXACT_GRADE
 
     def test_a_bare_domain_can_never_be_exact_even_on_a_perfect_string_match(self):
         v = self._verdict(found_pn="6205-2RS C3", url="https://rodavictoriausa.com")
@@ -183,7 +189,8 @@ class TestThroughTheApiTransform:
         row = _row("Rodavictoria USA")
         out = _transform_option(_as_option(row), row["tier"], 0, specs=SPECS)
         assert out["isExactMatch"] is False
-        assert out["pnMatchLevel"] == "none"
+        assert out["pnMatchLevel"] == "mismatch"      # R3 names the clearance difference
+        assert out["pnMatchLevel"] not in badge_integrity.EXACT_GRADE
         assert out["pnMatchReason"]
 
     def test_transform_option_keeps_a_verifiable_exact_badge(self):
@@ -205,4 +212,5 @@ class TestThroughTheApiTransform:
                "source_url": "https://replayed.example.com/p/x",
                "match_type": "Exact OEM", "pn_match_status": "exact_match"}
         out = _transform_option(opt, 2, 0, specs=SPECS)
-        assert out["isExactMatch"] is False and out["pnMatchLevel"] == "none"
+        assert out["isExactMatch"] is False
+        assert out["pnMatchLevel"] not in badge_integrity.EXACT_GRADE

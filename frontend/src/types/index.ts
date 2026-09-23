@@ -27,7 +27,12 @@ export type Phase =
 export type Urgency = "Stocking" | "Predictive" | "Emergency";
 export type Warranty = "Active" | "Expired" | "Unknown";
 
-export type PnMatchLevel = "exact" | "normalized" | "stem" | "substring" | "none";
+// R3 (arc 5): "mismatch" is a NAMED difference (a bearing clearance difference),
+// "needs_verification" a same-family seal-designation difference. Neither is ever
+// presented as an exact replacement, and neither is a bare "no match".
+export type PnMatchLevel =
+  | "exact" | "normalized" | "stem" | "substring" | "none"
+  | "mismatch" | "needs_verification";
 export type VendorType =
   | "NetworkPartner"
   | "NationalDistributor"

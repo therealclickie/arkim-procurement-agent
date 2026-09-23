@@ -20,6 +20,8 @@ const pnMatchConfig: Record<
   stem: { tone: "amber", label: "Stem match" },
   substring: { tone: "amber", label: "Partial" },
   none: { tone: "ghost", label: "No match" },
+  mismatch: { tone: "red", label: "Mismatch" },
+  needs_verification: { tone: "amber", label: "Needs verification" },
 };
 
 export function PnMatch({ level, className }: PnMatchProps) {

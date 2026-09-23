@@ -34,13 +34,27 @@ from urllib.parse import urlparse
 #: Badge strength, weakest first. "Exact-grade" is the tail the UI renders as an
 #: exact replacement (``options-screen.tsx``: ``isExactMatch || pnMatchLevel in
 #: {exact, normalized}``), which is why the bare-domain cap has to sit below BOTH.
-LEVEL_ORDER: tuple[str, ...] = ("none", "substring", "stem", "normalized", "exact")
+#: R3 (F-12) adds two deterministic NOTATION verdicts to the vocabulary:
+#:   "mismatch"           — a named, fit-affecting difference (a clearance difference).
+#:                          Weaker than "none": "none" is "the strings do not match",
+#:                          "mismatch" is "they differ, and here is how".
+#:   "needs_verification" — a seal-designation difference within one family, or an
+#:                          extra designation code. Never "exact", never "none".
+LEVEL_ORDER: tuple[str, ...] = (
+    "mismatch", "none", "needs_verification", "substring", "stem", "normalized", "exact",
+)
 
 #: The levels the UI presents as "this IS the requested part".
 EXACT_GRADE: frozenset[str] = frozenset({"exact", "normalized"})
 
 #: The strongest badge a row with no resolvable listing URL may carry.
 _NO_LISTING_CAP = "stem"
+
+#: R3 verdicts that the extractor's advisory level may NOT override. These are not
+#: claims of a match — they are statements of what differs — so an extractor's vague
+#: "no_match" must not erase them (R3: such a row is never `none`). Neither is
+#: exact-grade, so R2's "never raise a badge" guarantee is untouched.
+DETERMINISTIC_VERDICTS: frozenset[str] = frozenset({"mismatch", "needs_verification"})
 
 _REASONS: dict[str, str] = {
     "exact":      "the listing's part number is the requested part number",
@@ -101,6 +115,21 @@ def classify(searched_pn: Optional[str], found_pn: Optional[str],
     if not searched:
         return "none", _NO_PN_REASON
 
+    # R3 (F-12) first: notation — clearance and seal designation — is deterministic
+    # and SAYS MORE than a string comparison can. A clearance difference is a named
+    # mismatch; a same-family seal-designation difference needs verification. Only
+    # when notation has nothing to say does the string classifier decide.
+    from utils import pn_notation
+    try:
+        notation = pn_notation.classify(searched, found_pn, manufacturer)
+    except Exception as exc:  # fail soft to the string classifier
+        print(f"[BadgeIntegrity] notation classify failed for {searched!r}/{found_pn!r}: {exc}")
+        notation = pn_notation.NotationVerdict(pn_notation.UNRELATED)
+    if notation.verdict == pn_notation.MISMATCH:
+        return "mismatch", notation.reason
+    if notation.verdict == pn_notation.NEEDS_VERIFICATION:
+        return "needs_verification", notation.reason
+
     from utils.sourcing_archieved.scoring import _classify_pn_match
     try:
         level = _classify_pn_match(searched, found_pn, snippet or "", manufacturer)
@@ -130,7 +159,9 @@ def resolve(opt: dict[str, Any], *, advisory_level: str,
     classifier_level, reason = classify(searched_pn, found_pn, snippet, manufacturer)
 
     level = classifier_level
-    if _rank(advisory_level) < _rank(level):      # rule 2 — downgrade only
+    if classifier_level in DETERMINISTIC_VERDICTS:
+        pass                                      # R3 — the extractor cannot erase this
+    elif _rank(advisory_level) < _rank(level):    # rule 2 — downgrade only
         level = advisory_level or "none"
         reason = _DOWNGRADE_REASON
 
