@@ -56,6 +56,12 @@ ENV_ALERT_HOURS = "ESCALATE_ALERT_HOURS"
 DEFAULT_REMIND_HOURS = 4.0
 DEFAULT_ALERT_HOURS = 24.0
 
+# Arc 4b S2: how long an RFQ_NEW waits so that requests arriving together
+# become ONE email. Three RFQs released in the same batch are one event to the
+# supplier, and three emails about them is three chances to ignore the third.
+ENV_COALESCE_MINUTES = "NOTIFY_COALESCE_MINUTES"
+DEFAULT_COALESCE_MINUTES = 15.0
+
 # D8: soft bounces do not suppress; this many CONSECUTIVE ones raise an alert.
 SOFT_BOUNCE_ALERT_THRESHOLD = 3
 
@@ -82,6 +88,13 @@ def _env_float(name: str, default: float) -> float:
     except ValueError:
         print(f"[Notifications] {name}={raw!r} is not a number — using {default}")
         return default
+
+
+def coalesce_minutes() -> float:
+    """S2's coalescing window (default 15). ``<= 0`` sends immediately, which
+    is the escape hatch for a deployment that wants arc-4 timing back without
+    a code change."""
+    return _env_float(ENV_COALESCE_MINUTES, DEFAULT_COALESCE_MINUTES)
 
 
 def remind_hours() -> float:
@@ -232,14 +245,15 @@ def rfq_contacts(account_id: str) -> list[dict]:
 
 
 def _rfq_subject_and_body(rfq: dict) -> tuple[str, str]:
-    """The RFQ_NEW mail. Deliberately content-free about price and buyer: it
-    says a request is waiting and points at the portal, because the portal is
-    where the supplier is meant to act (and where viewing it produces D5's
-    strong 'seen' signal)."""
+    """The ONE-request RFQ_NEW mail. Deliberately content-free about price and
+    buyer: it says a request is waiting and points at the portal, because the
+    portal is where the supplier is meant to act (and where viewing it
+    produces D5's strong 'seen' signal). Takes the request identity as a plain
+    dict, so the fan-out and the coalescing flush build it from the same
+    keys."""
     part = " ".join(str(x) for x in (rfq.get("manufacturer"), rfq.get("part_number")) if x)
     subject = f"New quote request{f' — {part}' if part else ''}"
-    from utils.supplier_accounts import magic_link_url
-    portal = magic_link_url("").split("/supplier/verify")[0] + "/supplier/requests"
+    portal = _portal_url()
     quantity = rfq.get("quantity")
     body = (
         "Hello,\n\n"
@@ -334,7 +348,13 @@ def _record_notification_send(notification: dict, *, subject: str,
         from utils import supplier_registry
         return supplier_registry.record_sent_message(
             run_id=notification.get("run_id"),
-            supplier_domain=notification.get("supplier_domain"),
+            # DELIBERATELY no supplier_domain. ``get_sent_messages(domain=...)``
+            # IS the RFQ-ledger read — the portal inbox and the admin RFQ views
+            # are built on it — and a notification is not an RFQ. The recipient
+            # address is recorded in full, so the account is still recoverable
+            # from the row; what is not recoverable is a notification row
+            # masquerading as a request in somebody's inbox.
+            supplier_domain=None,
             vendor_name=None, to=[recipient], cc=[], subject=subject,
             body=None, status="released",
             message_class=supplier_registry.MESSAGE_CLASS_NOTIFICATION,
@@ -398,7 +418,8 @@ def notify_rfq_new(rfq: dict, account: Optional[dict]) -> list[dict]:
         return []
 
 
-def _notify_rfq_new(rfq: dict, account: Optional[dict]) -> list[dict]:
+def _notify_rfq_new(rfq: dict, account: Optional[dict],
+                    now: Optional[datetime] = None) -> list[dict]:
     domain = rfq.get("supplier_domain") or ""
     run_id = rfq.get("run_id")
     account_id = (account or {}).get("id")
@@ -414,30 +435,180 @@ def _notify_rfq_new(rfq: dict, account: Optional[dict]) -> list[dict]:
         print(f"[Notifications] RFQ_NEW for {domain}: no notifiable members -> alert")
         return []
 
-    subject, body = _rfq_subject_and_body(rfq)
     from utils.mail_provider import notifications_configuration_set
+    moment = now or _now()
+    window = max(coalesce_minutes(), 0.0)
+    subject, body = _rfq_subject_and_body(rfq)
     created: list[dict] = []
     for member in members:
         pref = store.get_preference(member["id"])
         if pref == store.PREF_NONE:
             continue
+        deferred = pref == store.PREF_DAILY_DIGEST
+        recipient = member["email"]
+        # S2, and the ONE judgement call in it. The first request to an idle
+        # mailbox is mailed STRAIGHT AWAY — a supplier waiting on a line-down
+        # part must not be held back fifteen minutes to make a tidier email —
+        # and it opens a window. Every further request inside that window
+        # JOINS the open batch and is mailed once, with the others, when the
+        # window closes. Ten requests released together therefore produce two
+        # emails, not ten, and no request goes unnamed in any of them.
+        open_until = None if deferred else _open_window_until(recipient, moment)
+        joins_batch = open_until is not None
         notification = store.create_notification(
             kind=store.KIND_RFQ_NEW, account_id=account_id,
             member_id=member["id"], subject_ref=rfq.get("sent_message_id"),
-            run_id=run_id, supplier_domain=domain, recipient=member["email"],
+            run_id=run_id, supplier_domain=domain, recipient=recipient,
             configuration_set=notifications_configuration_set(),
-            deferred=(pref == store.PREF_DAILY_DIGEST),
+            deferred=deferred,
+            # The digest owns a DAILY_DIGEST member's mail outright, so those
+            # rows carry no window: two batchers claiming the same row is how
+            # a supplier gets told about the same RFQ twice.
+            coalesce_until=(None if deferred else
+                            (open_until.isoformat() if joins_batch
+                             else (moment + timedelta(minutes=window)).isoformat())),
             detail={"manufacturer": rfq.get("manufacturer"),
                     "part_number": rfq.get("part_number"),
                     "quantity": rfq.get("quantity")})
         if notification is None:
             continue
-        if pref == store.PREF_IMMEDIATE:
+        if not deferred and not joins_batch:
+            # The anchor: mailed now, and its coalesce_until is what marks the
+            # mailbox's window open for the joiners behind it. The flush only
+            # ever picks up QUEUED rows, so an anchor is never sent twice.
             notification = _send_notification_mail(
-                notification, subject=subject, body=body,
-                recipient=member["email"])
+                notification, subject=subject, body=body, recipient=recipient)
         created.append(notification)
     return created
+
+
+def _open_window_until(recipient: str, now: datetime):
+    """The end of this mailbox's OPEN coalescing window, or ``None`` (S2).
+
+    Pure over ``now`` apart from the store read — no clock is consulted — so
+    the batching decision is reproducible for a supplied instant.
+    """
+    if not recipient:
+        return None
+    latest = None
+    for n in store.list_notifications(kind=store.KIND_RFQ_NEW,
+                                      recipient=recipient, cancelled=False):
+        until = _parse(n.get("coalesce_until"))
+        if until is not None and until > now and (latest is None or until > latest):
+            latest = until
+    return latest
+
+
+# ---------------------------------------------------------------------------
+# T7 / S2 — the coalescing flush
+# ---------------------------------------------------------------------------
+
+def _rfq_line(notification: dict) -> str:
+    """One request, as a line in a batched mail."""
+    detail = notification.get("detail") or {}
+    part = " ".join(str(x) for x in (detail.get("manufacturer"),
+                                     detail.get("part_number")) if x)
+    quantity = detail.get("quantity")
+    suffix = f" (qty {quantity})" if quantity else ""
+    return f"{part or 'Quote request'}{suffix}"
+
+
+def _portal_url() -> str:
+    from utils.supplier_accounts import magic_link_url
+    return magic_link_url("").split("/supplier/verify")[0] + "/supplier/requests"
+
+
+def _batch_subject_and_body(items: list[dict]) -> tuple[str, str]:
+    """ONE mail for a batch of RFQ_NEW notifications (S2).
+
+    A single-item batch keeps arc 4's wording exactly: the common case must
+    not read like a list of one. Deliberately content-free about price and
+    buyer — the mail says work is waiting and points at the portal, which is
+    where the supplier acts and where viewing produces D5's "seen" signal.
+    """
+    if len(items) == 1:
+        return _rfq_subject_and_body((items[0].get("detail") or {}))
+    subject = f"{len(items)} new quote requests"
+    lines = ["Hello,", "",
+             f"Arkim has sent you {len(items)} requests for quote:", ""]
+    lines += [f"  - {_rfq_line(i)}" for i in items]
+    lines += ["",
+              "You can review them and submit quotes in your supplier portal:",
+              _portal_url(), "", "Regards,", "Arkim Procurement",
+              "procurement@arkim.ai"]
+    return subject, "\n".join(lines)
+
+
+def run_coalesced_sends(now: Optional[datetime] = None) -> dict:
+    """Send every RFQ_NEW whose coalescing window has closed (S2).
+
+    The same scheduler shape as ``run_escalations``: a plain function over the
+    store's current state, taking ``now`` as an argument, idempotent for a
+    given ``now``, with no in-process timer. Cron runs it every few minutes.
+
+    Grouping is by RECIPIENT ADDRESS, not member id — the address is the
+    mailbox, and "one email" is a promise about a mailbox.
+
+    Within a batch ONE notification carries the mail and the provider message
+    id; the rest transition to the same state citing it. Each RFQ keeps its
+    own row, so the escalation ladder still judges each request separately,
+    which is what makes "this one was never looked at" answerable per request.
+
+    Returns ``{"batches": n, "notifications": n}``.
+    """
+    out = {"batches": 0, "notifications": 0}
+    if not notifications_active():
+        return out
+    try:
+        moment = now or _now()
+        pending = [n for n in store.list_notifications(
+                       kind=store.KIND_RFQ_NEW, state=store.STATE_QUEUED,
+                       deferred=False, cancelled=False)
+                   if _window_closed(n, moment)]
+        by_recipient: dict[str, list[dict]] = {}
+        for n in pending:
+            by_recipient.setdefault(n.get("recipient") or "", []).append(n)
+        for recipient, items in by_recipient.items():
+            if not recipient or store.is_email_suppressed(recipient):
+                continue
+            if not _claim_batch(items):
+                continue
+            subject, body = _batch_subject_and_body(items)
+            carrier = items[0]
+            _send_notification_mail(carrier, subject=subject, body=body,
+                                    recipient=recipient)
+            carried = store.get_notification(carrier["id"]) or carrier
+            reached = carried.get("state") or store.STATE_SENT
+            for item in items[1:]:
+                store.transition(item["id"], reached, event_type="Coalesced",
+                                 detail={"coalesced_into": carrier["id"]})
+            out["batches"] += 1
+            out["notifications"] += len(items)
+    except Exception as exc:
+        print(f"[Notifications] run_coalesced_sends failed: {exc}")
+    return out
+
+
+def _window_closed(notification: dict, now: datetime) -> bool:
+    """Has this notification's coalescing window closed at ``now``?
+
+    Pure over its arguments — no clock read — so the flush is deterministic
+    for a supplied instant. A row with no window (an older row, or a zero
+    window) is ready immediately.
+    """
+    until = _parse(notification.get("coalesce_until"))
+    return until is None or now >= until
+
+
+def _claim_batch(items: list[dict]) -> bool:
+    """Close every window in the batch BEFORE any mail is built.
+
+    The write is the claim, so two overlapping flushes cannot both send the
+    same batch. A crash between the claim and the send loses a notification
+    rather than sending it twice — the safe direction, because the row stays
+    QUEUED and unseen, so the escalation ladder still chases it.
+    """
+    return any([store.clear_coalesce(i["id"]) for i in items])
 
 
 def notify_rfq_sent(*, sent_message_id: Optional[str], run_id: Optional[str],
@@ -710,51 +881,130 @@ def run_escalations(now: Optional[datetime] = None) -> dict:
     try:
         moment = now or _now()
         remind_after, alert_after = remind_hours(), alert_hours()
+        due: dict[str, list[dict]] = {}
         for notification in store.list_notifications(kind=store.KIND_RFQ_NEW):
             out["considered"] += 1
             action = decide_escalation(notification, now=moment,
                                        remind_after=remind_after,
                                        alert_after=alert_after)
-            if action == "remind" and _send_reminder(notification):
-                out["reminded"] += 1
+            if action == "remind":
+                # S2: collected, not sent one at a time. The decision is still
+                # per RFQ; only the MAIL is consolidated.
+                due.setdefault(notification.get("recipient") or "", []) \
+                   .append(notification)
             elif action == "alert" and _raise_escalation(notification):
                 out["alerted"] += 1
+        for recipient, parents in due.items():
+            if _send_consolidated_reminder(recipient, parents, now=moment):
+                out["reminded"] += 1
     except Exception as exc:
         print(f"[Notifications] run_escalations failed: {exc}")
     return out
 
 
-def _send_reminder(parent: dict) -> bool:
-    """One reminder, to the same member, about the same RFQ (D6).
+def reminder_day(now: datetime, account_id: Optional[str] = None) -> str:
+    """The day a reminder is counted against, as ``'YYYY-MM-DD'``.
 
-    The ``mark_reminded`` guard is claimed BEFORE the mail is built: if two
-    schedulers overlap, the loser sends nothing. "At most one reminder per RFQ
-    per member" is enforced by a write, not by a check-then-act.
+    Its own function because S3 changes what "day" means — the account's local
+    business day rather than the UTC one — and every caller must move together
+    when it does. Pure over ``now``; no clock read.
     """
-    if not store.mark_reminded(parent["id"]):
+    return now.strftime("%Y-%m-%d")
+
+
+def _reminded_on(recipient: str, day: str) -> bool:
+    """Has this mailbox already had its reminder for ``day``?
+
+    Read off the reminder rows' stamped ``day`` rather than their
+    ``created_at``, so the gate answers to the scheduler's supplied instant
+    and a replay agrees with the original run.
+    """
+    for r in store.list_notifications(kind=store.KIND_RFQ_REMINDER,
+                                      recipient=recipient):
+        if ((r.get("detail") or {}).get("day")) == day:
+            return True
+    return False
+
+
+def _reminder_subject_and_body(parents: list[dict]) -> tuple[str, str]:
+    """ONE reminder covering every unseen request for this mailbox (S2).
+
+    A single-item reminder keeps arc 4's wording exactly. Chasing somebody
+    three times on one morning about three requests does not make them three
+    times more likely to answer; it makes the next one easier to ignore.
+    """
+    portal = _portal_url()
+    if len(parents) == 1:
+        detail = parents[0].get("detail") or {}
+        part = " ".join(str(x) for x in (detail.get("manufacturer"),
+                                         detail.get("part_number")) if x)
+        subject = f"Reminder: quote request waiting{f' — {part}' if part else ''}"
+        body = ("Hello,\n\n"
+                "A quote request from Arkim is still waiting for you in your "
+                "supplier portal. If it is not something you can quote, you can "
+                "simply reply and let us know.\n\n"
+                f"{portal}\n\n"
+                "Regards,\nArkim Procurement\nprocurement@arkim.ai")
+        return subject, body
+    subject = f"Reminder: {len(parents)} quote requests waiting"
+    lines = ["Hello,", "",
+             f"{len(parents)} quote requests from Arkim are still waiting for "
+             "you in your supplier portal:", ""]
+    lines += [f"  - {_rfq_line(p)}" for p in parents]
+    lines += ["", "If any of them are not something you can quote, you can "
+                  "simply reply and let us know.", "", portal, "",
+              "Regards,", "Arkim Procurement", "procurement@arkim.ai"]
+    return subject, "\n".join(lines)
+
+
+def _send_consolidated_reminder(recipient: str, parents: list[dict], *,
+                                now: datetime) -> bool:
+    """One reminder per mailbox per day, listing every unseen RFQ (S2).
+
+    TWO GUARANTEES, BOTH WRITE-ENFORCED:
+
+    *An RFQ never appears in two reminders.* ``mark_reminded`` is claimed on
+    every parent BEFORE the mail is built, and its ``reminded_at IS NULL``
+    predicate is the guard — so two overlapping schedulers cannot both claim a
+    request, and a request already covered is silently excluded from the next
+    batch rather than repeated.
+
+    *At most one reminder a day for a mailbox.* A second batch becoming due
+    later the same day is DEFERRED, never dropped: its parents keep
+    ``reminded_at`` NULL, so they are picked up by the next day's reminder.
+    Dropping them would be exactly the failure this arc exists to prevent.
+
+    Grouped by ADDRESS rather than member id because the address is the
+    mailbox, and "one email" is a promise about a mailbox.
+    """
+    if not recipient or store.is_email_suppressed(recipient):
         return False
+    carrier = parents[0]
+    day = reminder_day(now, carrier.get("account_id"))
+    if _reminded_on(recipient, day):
+        return False
+    claimed = [p for p in parents if store.mark_reminded(p["id"])]
+    if not claimed:
+        return False
+    carrier = claimed[0]
     reminder = store.create_notification(
-        kind=store.KIND_RFQ_REMINDER, account_id=parent.get("account_id"),
-        member_id=parent.get("member_id"), subject_ref=parent.get("subject_ref"),
-        run_id=parent.get("run_id"), supplier_domain=parent.get("supplier_domain"),
-        recipient=parent.get("recipient"),
-        configuration_set=parent.get("configuration_set"),
-        detail={"reminder_for": parent["id"]})
+        kind=store.KIND_RFQ_REMINDER, account_id=carrier.get("account_id"),
+        member_id=carrier.get("member_id"), subject_ref=carrier.get("subject_ref"),
+        run_id=carrier.get("run_id"), supplier_domain=carrier.get("supplier_domain"),
+        recipient=recipient,
+        configuration_set=carrier.get("configuration_set"),
+        detail={"reminder_for": carrier["id"],
+                "batched": [p["id"] for p in claimed],
+                # The day is stamped from the SUPPLIED instant, not read off
+                # the row's wall-clock created_at: the per-day gate has to be
+                # a function of the scheduler's ``now`` or a replay would see
+                # a different answer than the original run.
+                "day": day})
     if reminder is None:
         return False
-    detail = parent.get("detail") or {}
-    part = " ".join(str(x) for x in (detail.get("manufacturer"),
-                                     detail.get("part_number")) if x)
-    if parent.get("recipient"):
-        _send_notification_mail(
-            reminder,
-            subject=f"Reminder: quote request waiting{f' — {part}' if part else ''}",
-            body=("Hello,\n\n"
-                  "A quote request from Arkim is still waiting for you in your "
-                  "supplier portal. If it is not something you can quote, you can "
-                  "simply reply and let us know.\n\n"
-                  "Regards,\nArkim Procurement\nprocurement@arkim.ai"),
-            recipient=parent["recipient"])
+    subject, body = _reminder_subject_and_body(claimed)
+    _send_notification_mail(reminder, subject=subject, body=body,
+                            recipient=recipient)
     return True
 
 

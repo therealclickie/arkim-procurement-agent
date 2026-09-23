@@ -102,12 +102,22 @@ def test_notification_mail_is_counted_in_its_own_class_not_the_rfq_one(gov):
 
 def test_notification_mail_writes_a_ledger_row(gov):
     send(notification())
-    rows = supplier_registry.get_sent_messages(domain="dxpe.com")
+    rows = supplier_registry.get_sent_messages()
     assert len(rows) == 1
     assert rows[0]["message_class"] == supplier_registry.MESSAGE_CLASS_NOTIFICATION
     assert rows[0]["status"] == "sent"
     assert rows[0]["subject"] == "A quote request is waiting"
     assert rows[0]["run_id"] == "run-1"
+    assert rows[0]["recipients_to"] == ["sales@dxpe.com"]
+
+
+def test_a_notification_row_never_appears_in_the_rfq_ledger_for_a_domain(gov):
+    """``get_sent_messages(domain=...)`` IS the RFQ-ledger read the portal
+    inbox and the admin RFQ views are built on. A notification is not an RFQ,
+    so it must not show up there — the recipient address on the row is what
+    keeps the account recoverable."""
+    send(notification())
+    assert supplier_registry.get_sent_messages(domain="dxpe.com") == []
 
 
 def test_a_blocked_notification_records_the_block_honestly(gov, monkeypatch):
@@ -116,7 +126,7 @@ def test_a_blocked_notification_records_the_block_honestly(gov, monkeypatch):
     monkeypatch.setenv("NOTIFICATION_DAILY_CAP", "0")
     out = send(notification())
     assert out["state"] == ns.STATE_SUPPRESSED
-    row = supplier_registry.get_sent_messages(domain="dxpe.com")[0]
+    row = supplier_registry.get_sent_messages()[0]
     assert row["status"] == "cap_blocked"
     assert gov.outbox == []
 
@@ -177,5 +187,5 @@ def test_flag_off_writes_no_notification_ledger_row(tmp_path, monkeypatch):
     assert notifications.notify_rfq_new(
         {"run_id": "run-1", "supplier_domain": "dxpe.com",
          "sent_message_id": "sm-1"}, None) == []
-    assert supplier_registry.get_sent_messages(domain="dxpe.com") == []
+    assert supplier_registry.get_sent_messages() == []
     assert ns.list_alerts(status=None) == []

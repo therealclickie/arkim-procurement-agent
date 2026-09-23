@@ -194,6 +194,16 @@ CREATE TABLE IF NOT EXISTS notifications (
     configuration_set   TEXT,
     state               TEXT NOT NULL,
     deferred            INTEGER NOT NULL DEFAULT 0,
+    -- Arc 4b S2: the instant this notification's coalescing window closes.
+    -- Until then it waits so that RFQs arriving together become ONE email.
+    -- NULL means "no window" (a reminder, a digest, an auth send).
+    coalesce_until      TEXT,
+    -- Arc 4b S4: when the RFQ this describes was resolved, and by what. A
+    -- cancelled notification leaves the ladder and the consolidated reminder.
+    -- Recorded, never deleted: "we stopped chasing this, and here is why" has
+    -- to stay answerable later.
+    cancelled_at        TEXT,
+    cancel_reason       TEXT,
     reminded_at         TEXT,
     escalated_at        TEXT,
     created_at          TEXT NOT NULL,
@@ -346,6 +356,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     have = {r[1] for r in conn.execute("PRAGMA table_info(soft_bounce_counts)")}
     if have and "first_at" not in have:
         conn.execute("ALTER TABLE soft_bounce_counts ADD COLUMN first_at TEXT")
+    notif = {r[1] for r in conn.execute("PRAGMA table_info(notifications)")}
+    for column, ddl in (("coalesce_until", "coalesce_until TEXT"),
+                        ("cancelled_at", "cancelled_at TEXT"),
+                        ("cancel_reason", "cancel_reason TEXT")):
+        if notif and column not in notif:
+            conn.execute(f"ALTER TABLE notifications ADD COLUMN {ddl}")
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -408,6 +424,7 @@ def create_notification(
     provider: Optional[str] = None,
     configuration_set: Optional[str] = None,
     deferred: bool = False,
+    coalesce_until: Optional[str] = None,
     detail: Optional[dict] = None,
     is_test: bool = False,
 ) -> Optional[dict]:
@@ -432,13 +449,13 @@ def create_notification(
                 """INSERT INTO notifications
                    (id, account_id, member_id, kind, subject_ref, run_id,
                     supplier_domain, recipient, channel, provider,
-                    configuration_set, state, deferred, created_at, updated_at,
-                    queued_at, detail_json, is_test)
-                   VALUES (?,?,?,?,?,?,?,?, 'EMAIL', ?,?,?,?,?,?,?,?,?)""",
+                    configuration_set, state, deferred, coalesce_until,
+                    created_at, updated_at, queued_at, detail_json, is_test)
+                   VALUES (?,?,?,?,?,?,?,?, 'EMAIL', ?,?,?,?,?,?,?,?,?,?)""",
                 (nid, account_id, member_id, kind, subject_ref, run_id,
                  supplier_domain, recipient, provider, configuration_set,
-                 STATE_QUEUED, 1 if deferred else 0, now, now, now,
-                 _dumps(detail), 1 if is_test else 0),
+                 STATE_QUEUED, 1 if deferred else 0, coalesce_until, now, now,
+                 now, _dumps(detail), 1 if is_test else 0),
             )
             conn.commit()
     except Exception as exc:
@@ -489,7 +506,9 @@ def list_notifications(*, kind: Optional[str] = None,
                        kinds: Optional[Iterable[str]] = None,
                        state: Optional[str] = None,
                        member_id: Optional[str] = None,
+                       recipient: Optional[str] = None,
                        deferred: Optional[bool] = None,
+                       cancelled: Optional[bool] = None,
                        run_id: Optional[str] = None) -> list[dict]:
     """Notifications matching every supplied filter, oldest first (the
     scheduler wants the oldest unseen RFQ first). ``[]`` on fail-soft."""
@@ -510,6 +529,12 @@ def list_notifications(*, kind: Optional[str] = None,
     if member_id:
         where.append("member_id = ?")
         args.append(member_id)
+    if recipient:
+        where.append("recipient = ?")
+        args.append(recipient)
+    if cancelled is not None:
+        where.append("cancelled_at IS NOT NULL" if cancelled
+                     else "cancelled_at IS NULL")
     if run_id:
         where.append("run_id = ?")
         args.append(run_id)
@@ -531,7 +556,8 @@ def list_notifications(*, kind: Optional[str] = None,
 
 def count_notifications_on_day(*, kind: str, day: str,
                                account_id: Optional[str] = None,
-                               supplier_domain: Optional[str] = None) -> int:
+                               supplier_domain: Optional[str] = None,
+                               recipient: Optional[str] = None) -> int:
     """How many notifications of ``kind`` were created on one UTC day.
 
     The per-account invite cap (arc 4b R-F5) counts with this. ``day`` is
@@ -550,6 +576,9 @@ def count_notifications_on_day(*, kind: str, day: str,
     if supplier_domain:
         where.append("supplier_domain = ?")
         args.append(supplier_domain)
+    if recipient:
+        where.append("recipient = ?")
+        args.append(recipient)
     try:
         with closing(_get_conn()) as conn:
             r = conn.execute(
@@ -661,6 +690,50 @@ def mark_escalated(notification_id: str, *, at: Optional[str] = None) -> bool:
     except Exception as exc:
         print(f"[Notifications] mark_escalated failed: {exc}")
         return False
+
+
+def clear_coalesce(notification_id: str) -> bool:
+    """Close a notification's coalescing window (arc 4b S2) — called once the
+    batch carrying it has been handed to the transport, so it can never be
+    picked up by a second flush. Fail-soft ``False``."""
+    try:
+        with closing(_get_conn()) as conn:
+            cur = conn.execute(
+                "UPDATE notifications SET coalesce_until = NULL, updated_at = ? "
+                "WHERE id = ?", (_now(), notification_id))
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception as exc:
+        print(f"[Notifications] clear_coalesce failed: {exc}")
+        return False
+
+
+def mark_cancelled(notification_id: str, *, reason: str,
+                   at: Optional[str] = None) -> bool:
+    """Arc 4b S4: the RFQ this notification describes has been resolved, so
+    stop chasing it.
+
+    The ``cancelled_at IS NULL`` predicate makes the write its own guard, the
+    same shape as ``mark_reminded`` — a second cancellation changes no row.
+    An audit event is appended either way the caller can read back, because
+    "we stopped chasing this, and why" must not be a silent state change.
+    Fail-soft ``False``.
+    """
+    try:
+        with closing(_get_conn()) as conn:
+            cur = conn.execute(
+                "UPDATE notifications SET cancelled_at = ?, cancel_reason = ?, "
+                "updated_at = ? WHERE id = ? AND cancelled_at IS NULL",
+                (at or _now(), reason, _now(), notification_id))
+            conn.commit()
+            if cur.rowcount == 0:
+                return False
+    except Exception as exc:
+        print(f"[Notifications] mark_cancelled failed: {exc}")
+        return False
+    _record_event(notification_id, event_type="Cancelled",
+                  detail={"reason": reason})
+    return True
 
 
 def clear_deferred(notification_id: str) -> bool:
