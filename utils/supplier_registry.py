@@ -1095,6 +1095,13 @@ SEND_ATTEMPT_STATUSES: tuple = ("sent", "stubbed", "error")
 # burst of sign-in links cannot starve the RFQ cap (gate FINDING F2).
 MESSAGE_CLASS_RFQ = "rfq"
 MESSAGE_CLASS_AUTH = "auth"
+# "notification" is arc 4b R-F8: portal notification mail (RFQ_NEW, reminders,
+# digests). It goes to an allowlisted, opted-in member about a message ALREADY
+# sent to them — it is not cold outbound, so it must not be starved by the cold
+# outbound budget. Before this class existed it defaulted to "rfq", which meant
+# an exhausted RFQ cap silently stopped telling suppliers about RFQs already in
+# their inbox: the precise failure the notification surface exists to prevent.
+MESSAGE_CLASS_NOTIFICATION = "notification"
 # Statuses of an OPEN RFQ for the per-supplier-per-part cap: attempted and not yet
 # terminally resolved (T6's transitions — replied/bounced — free the slot).
 OPEN_RFQ_STATUSES: tuple = ("sent", "stubbed")

@@ -252,7 +252,9 @@ def _send_notification_mail(notification: dict, *, subject: str, body: str,
                              a message that does not exist);
       ``error``            → FAILED.
     """
+    from utils import supplier_registry
     from utils.email_sender import EmailMessage, GmailSender
+    from utils.mail_provider import notifications_configuration_set
     msg = EmailMessage(
         to=[recipient], subject=subject, body=body,
         metadata={
@@ -260,9 +262,31 @@ def _send_notification_mail(notification: dict, *, subject: str, body: str,
             "notification_id": notification["id"],
             "notification_kind": notification["kind"],
             "run_id": notification.get("run_id"),
+            # R-F8: notification mail is its OWN cap class. Absent, this
+            # defaulted to "rfq" and competed with cold outbound for the RFQ
+            # budget — so an exhausted RFQ day stopped telling suppliers about
+            # RFQs already in their inbox.
+            "message_class": supplier_registry.MESSAGE_CLASS_NOTIFICATION,
+            # Gate FINDING F9: the set the row RECORDS and the set the message
+            # is SENT on were resolved independently. Stamping it here makes
+            # the recorded value the authoritative one.
+            "configuration_set": (notification.get("configuration_set")
+                                  or notifications_configuration_set()),
         },
     )
+    # R-F8: record BEFORE the attempt, exactly as auth mail and rfq_send do, so
+    # notification volume is visible in the ledger and countable by the cap.
+    # The subject and recipient are enough; a notification body carries no
+    # credential, but it carries nothing worth storing twice either.
+    row_id = _record_notification_send(notification, subject=subject,
+                                       recipient=recipient)
     result = GmailSender().send(msg)
+    if row_id:
+        supplier_registry.update_sent_message_status(
+            row_id, result.status, message_id=result.message_id,
+            thread_id=result.thread_id)
+    if result.status == "cap_blocked":
+        _alert_notification_cap_blocked(notification, reason=result.error)
     if result.status == "sent":
         if result.message_id:
             store.set_provider_message_id(notification["id"], result.message_id)
@@ -278,6 +302,55 @@ def _send_notification_mail(notification: dict, *, subject: str, body: str,
                                 detail={"reason": result.error}) or notification
     # "stubbed": the delivery gate is off. Stay QUEUED — truthfully.
     return notification
+
+
+def _record_notification_send(notification: dict, *, subject: str,
+                              recipient: str) -> Optional[str]:
+    """The pre-attempt ``sent_messages`` row for notification mail (R-F8).
+
+    Before this existed the notification surface wrote nothing to the ledger,
+    so its volume was invisible to the governance digest and — because the cap
+    counts ledger rows — uncountable by its own cap. Fail-soft ``None``: a
+    ledger failure must degrade accounting, never stop the notification.
+    """
+    try:
+        from utils import supplier_registry
+        return supplier_registry.record_sent_message(
+            run_id=notification.get("run_id"),
+            supplier_domain=notification.get("supplier_domain"),
+            vendor_name=None, to=[recipient], cc=[], subject=subject,
+            body=None, status="released",
+            message_class=supplier_registry.MESSAGE_CLASS_NOTIFICATION,
+            with_history=True)
+    except Exception as exc:
+        print(f"[Notifications] record_notification_send failed: {exc}")
+        return None
+
+
+def _alert_notification_cap_blocked(notification: dict,
+                                    reason: Optional[str] = None,
+                                    now: Optional[datetime] = None) -> None:
+    """R-F8's DIGEST-tier alert: the notification cap suppressed a send.
+
+    Deduped on the UTC day, so a day that trips the cap raises ONE alert
+    however many notifications it suppresses, and the next day re-arms. It is
+    informational by construction — see ``ALERT_TIERS``; a cap-block is a
+    config problem, not a same-hour interruption.
+    """
+    day = (now or _now()).strftime("%Y-%m-%d")
+    try:
+        store.raise_alert(
+            kind=store.ALERT_NOTIFICATION_CAP_BLOCKED,
+            dedupe_key=f"notification_cap:{day}",
+            account_id=notification.get("account_id"),
+            member_id=notification.get("member_id"),
+            notification_id=notification.get("id"),
+            run_id=notification.get("run_id"),
+            supplier_domain=notification.get("supplier_domain"),
+            email=notification.get("recipient"),
+            detail={"reason": reason, "day": day})
+    except Exception as exc:
+        print(f"[Notifications] cap-blocked alert failed: {exc}")
 
 
 def notify_rfq_new(rfq: dict, account: Optional[dict]) -> list[dict]:

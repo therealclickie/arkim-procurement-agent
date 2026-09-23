@@ -138,6 +138,12 @@ ALERT_RFQ_ESCALATION = "RFQ_ESCALATION"
 ALERT_NO_NOTIFIABLE_MEMBERS = "NO_NOTIFIABLE_MEMBERS"
 ALERT_EMAIL_SUPPRESSED = "EMAIL_SUPPRESSED"
 ALERT_SOFT_BOUNCE_REPEATED = "SOFT_BOUNCE_REPEATED"
+# Arc 4b R-F8: the notification daily cap suppressed a send. Informational,
+# not an interruption — a sensibly sized cap should almost never fire, and the
+# fix when it does is a config change, not a same-hour response. Deduped per
+# UTC day by the caller's dedupe key, so a bad day raises one alert, not one
+# per suppressed notification.
+ALERT_NOTIFICATION_CAP_BLOCKED = "NOTIFICATION_CAP_BLOCKED"
 
 
 def can_transition(current: Optional[str], nxt: str) -> bool:

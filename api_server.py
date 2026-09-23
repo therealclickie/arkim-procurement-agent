@@ -6346,6 +6346,13 @@ def _supplier_open_requests(dom: str) -> list:
                 continue
             if m.get("status") not in supplier_registry.OPEN_RFQ_STATUSES:
                 continue
+            # Arc 4b R-F8: notification mail now writes ledger rows too, and a
+            # notification carries the run id of the RFQ it describes. Only an
+            # RFQ-class row is an inbox row — without this filter a reminder
+            # about run X would masquerade as a second (or a fabricated) open
+            # request for X. An absent class is the historical RFQ default.
+            if m.get("message_class") not in (None, supplier_registry.MESSAGE_CLASS_RFQ):
+                continue
             seen_runs.add(rid)
             specs = _run_specs_for_quote(rid)
             if specs is None:

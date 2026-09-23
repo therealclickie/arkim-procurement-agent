@@ -86,6 +86,17 @@ def test_a_notification_to_an_allowlisted_member_lands_SENT(gov):
 
 
 def test_the_daily_cap_is_respected_by_notification_mail(gov, monkeypatch):
+    """SUPERSEDED BY ARC 4b R-F8 (prime-directive exception).
+
+    This scenario used to assert that an exhausted RFQ cap SUPPRESSED
+    notification mail. R-F8 rules that wrong: a notification goes to an
+    allowlisted, opted-in member about a message already sent to them, so
+    starving it on the cold-outbound budget silences the product's one promise
+    exactly when it matters. Same setup, new pinned behaviour — the RFQ cap no
+    longer governs notification mail.
+
+    The cap invariant itself survives, in its new form, in the test below.
+    """
     allowlist("dxpe.com")
     monkeypatch.setenv("SEND_GOVERNANCE_DAILY_CAP", "1")
     supplier_registry.record_sent_message(
@@ -95,8 +106,25 @@ def test_the_daily_cap_is_respected_by_notification_mail(gov, monkeypatch):
                                supplier_domain="dxpe.com", is_test=True)
     out = notifications._send_notification_mail(
         n, subject="s", body="b", recipient="sales@dxpe.com")
+    assert out["state"] == ns.STATE_SENT
+    assert [m["to"] for m in gov.outbox] == [["sales@dxpe.com"]]
+
+
+def test_notification_mail_is_suppressed_by_its_OWN_cap_and_never_sent_past_it(
+        gov, monkeypatch):
+    """The invariant the superseded test carried, in its new form (R-F8): a
+    notification IS suppressed by a cap, and nothing goes out past it — the
+    cap is now ``NOTIFICATION_DAILY_CAP``, not the RFQ one."""
+    allowlist("dxpe.com")
+    monkeypatch.setenv("NOTIFICATION_DAILY_CAP", "1")
+    for _ in range(2):
+        n = ns.create_notification(kind=ns.KIND_RFQ_NEW,
+                                   recipient="sales@dxpe.com",
+                                   supplier_domain="dxpe.com", is_test=True)
+        out = notifications._send_notification_mail(
+            n, subject="s", body="b", recipient="sales@dxpe.com")
     assert out["state"] == ns.STATE_SUPPRESSED
-    assert gov.outbox == []
+    assert len(gov.outbox) == 1
 
 
 # ---------------------------------------------------------------------------

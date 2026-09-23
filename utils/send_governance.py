@@ -283,6 +283,18 @@ DEFAULT_OPEN_RFQ_CAP = 1
 _AUTH_DAILY_CAP_ENV = "SEND_GOVERNANCE_AUTH_DAILY_CAP"
 DEFAULT_AUTH_DAILY_CAP = 50
 
+# Notification-mail daily cap (arc 4b R-F8). Its own budget, generous on
+# purpose: a notification is sent to an allowlisted member who opted in, about
+# a message that has ALREADY been sent to them. Sharing the cold-outbound RFQ
+# budget meant that once the day's RFQ sends were spent, suppliers stopped
+# being told about the RFQs sitting in their inbox — a cap that silences the
+# product's core promise is a bug, not governance. A cap-block here is still a
+# real block (nothing is sent past it); it additionally raises a DIGEST-tier
+# concierge alert, because at pilot volume it should essentially never fire and
+# if it does the fix is a config change.
+_NOTIFICATION_DAILY_CAP_ENV = "NOTIFICATION_DAILY_CAP"
+DEFAULT_NOTIFICATION_DAILY_CAP = 200
+
 
 def _cap_from_env(var: str, default: int) -> int:
     """Read a cap limit. Unset ⇒ default; a set-but-unparseable value RAISES so
@@ -291,6 +303,24 @@ def _cap_from_env(var: str, default: int) -> int:
     if raw is None or raw.strip() == "":
         return default
     return int(raw)
+
+
+def _class_caps() -> dict:
+    """message_class -> (env var, default) for the daily cap.
+
+    A class that is not in this table falls back to the RFQ pair, which is also
+    what an ABSENT class resolves to — so a message built anywhere else in the
+    repo is capped exactly as it was before classes existed. Built lazily so
+    this module still does not import supplier_registry at import time.
+    """
+    from utils import supplier_registry
+    return {
+        supplier_registry.MESSAGE_CLASS_RFQ: (_DAILY_CAP_ENV, DEFAULT_DAILY_CAP),
+        supplier_registry.MESSAGE_CLASS_AUTH: (_AUTH_DAILY_CAP_ENV,
+                                               DEFAULT_AUTH_DAILY_CAP),
+        supplier_registry.MESSAGE_CLASS_NOTIFICATION: (
+            _NOTIFICATION_DAILY_CAP_ENV, DEFAULT_NOTIFICATION_DAILY_CAP),
+    }
 
 
 def _check_suppression(message) -> Optional[GovernanceVerdict]:
@@ -345,10 +375,9 @@ def _check_caps(message) -> Optional[GovernanceVerdict]:
         # Cap CLASS (arc 4 T3/D9). Absent ⇒ the historical "rfq" class, so a
         # message built anywhere else in the repo is capped exactly as before.
         message_class = meta.get("message_class") or supplier_registry.MESSAGE_CLASS_RFQ
-        if message_class == supplier_registry.MESSAGE_CLASS_AUTH:
-            daily_cap = _cap_from_env(_AUTH_DAILY_CAP_ENV, DEFAULT_AUTH_DAILY_CAP)
-        else:
-            daily_cap = _cap_from_env(_DAILY_CAP_ENV, DEFAULT_DAILY_CAP)
+        cap_env, cap_default = _class_caps().get(
+            message_class, (_DAILY_CAP_ENV, DEFAULT_DAILY_CAP))
+        daily_cap = _cap_from_env(cap_env, cap_default)
         used = supplier_registry.count_send_attempts_utc_day(
             message_class=message_class)
         if used >= daily_cap:
