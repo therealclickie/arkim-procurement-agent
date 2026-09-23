@@ -7522,6 +7522,83 @@ def _notifications_flag_off_404():
     raise HTTPException(status_code=404, detail="Not Found")
 
 
+# ---------------------------------------------------------------------------
+# Arc 4b R-F10 — the webhook throttles its REJECTION path only.
+#
+# Per-IP throttling of ALL webhook traffic would be wrong here. SNS delivers
+# from AWS ranges, so a shared bucket risks dropping a legitimate burst, and a
+# dropped verified event is PERMANENT DATA LOSS: the SNS retry policy is finite
+# and a missed Delivery/Bounce leaves a notification stuck in the wrong state
+# forever. So only requests that FAIL verification are counted, and a request
+# that passes verification is processed regardless of the bucket's state.
+#
+# THE LIMITER IS NOT AN ORACLE. The throttled answer is the SAME bare
+# HTTPException(403, "Forbidden") as every other rejection — no Retry-After, no
+# extra header, no distinguishing body — unlike every other limiter in this
+# file, which answers 429 with Retry-After. A prober must not be able to tell
+# "rate-limited" from "bad signature" from "foreign topic". The throttle is
+# therefore observable ONLY through this module's own seam
+# (``_webhook_reject_throttled``), which is exactly how it is tested.
+#
+# HONEST LIMITATION: because you cannot know an envelope is unverified without
+# verifying it, the limiter cannot short-circuit verification without risking
+# the data loss above. What it gives is a counted, per-IP abuse signal at the
+# seam an upstream WAF/ALB rule keys on — not a saving in RSA work. The cheap
+# checks already shed the bulk of a spray: ses_webhook runs the topic allowlist
+# (a local set lookup) BEFORE any certificate fetch or signature verification.
+_webhook_reject_lock = threading.Lock()
+_webhook_reject_buckets: Dict[str, list] = {}
+
+
+def _webhook_reject_window_sec() -> int:
+    return _env_int("WEBHOOK_REJECT_RATE_WINDOW_SEC", 60)
+
+
+def _webhook_reject_cap() -> int:
+    return _env_int("WEBHOOK_REJECT_RATE_LIMIT", 60)
+
+
+def _webhook_reject_bump(request: Request) -> bool:
+    """Count ONE rejected webhook request against its source IP's budget.
+
+    Returns True when this IP is now OVER budget. Called only after
+    ``handle_envelope`` has already refused the request, so a verified event
+    never touches (and is never judged by) the bucket. Inert when the cap is
+    <= 0, the house convention for "this limiter is switched off".
+    """
+    cap = _webhook_reject_cap()
+    if cap <= 0:
+        return False
+    import time
+    key = _client_ip(request)
+    window = _webhook_reject_window_sec()
+    now = time.monotonic()
+    with _webhook_reject_lock:
+        entry = _webhook_reject_buckets.get(key)
+        if not entry or (now - entry[1]) >= window:
+            entry = [0, now]
+            _webhook_reject_buckets[key] = entry
+        entry[0] += 1
+        return entry[0] > cap
+
+
+def _webhook_reject_throttled(ip: str) -> bool:
+    """Read-only: is ``ip`` currently over its rejection budget? Counts
+    nothing — this is the observation seam the tests use, because the HTTP
+    response deliberately reveals nothing."""
+    cap = _webhook_reject_cap()
+    if cap <= 0:
+        return False
+    import time
+    with _webhook_reject_lock:
+        entry = _webhook_reject_buckets.get(ip)
+        if not entry:
+            return False
+        if (time.monotonic() - entry[1]) >= _webhook_reject_window_sec():
+            return False
+        return entry[0] > cap
+
+
 @app.post("/api/webhooks/ses")
 async def ses_events_webhook(request: Request):
     """T6/D4: SNS → SES delivery events. PUBLIC and UNAUTHENTICATED.
@@ -7548,6 +7625,12 @@ async def ses_events_webhook(request: Request):
     raw = await request.body()
     outcome = ses_webhook.handle_envelope(raw)
     if outcome is None:
+        # R-F10: the rejection path — and ONLY it — is rate-limited, keyed on
+        # source IP. The bump happens after the refusal, so a verified event
+        # from a currently-throttled IP is processed normally (the branch below
+        # is never reached for it). The answer is the same bare 403 whether or
+        # not the bucket tripped: the limiter must not become an oracle.
+        _webhook_reject_bump(request)
         raise HTTPException(status_code=403, detail="Forbidden")
     return JSONResponse(content={"ok": True},
                         headers=_portal_response_headers({}))
