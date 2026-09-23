@@ -267,3 +267,362 @@ PROPOSED TEST EDIT: utils/procurement_agent/tests/test_notifications_coalescing.
 | R10 | F-04 | T10 | the 19 sites listed in J9 |
 
 **Gate complete. Nothing built; no test, source or config file modified this turn. Awaiting human approval of the J10 list in `loop/AUTHORISED_TEST_EDITS.txt` before any build begins.**
+
+---
+---
+
+# BUILD REPORT — Arc 5 (T1–T10 complete)
+
+**Status:** all ten tasks built and committed, one commit per task, in order.
+Nothing pushed. The gate above (J1–J10) is unchanged; this section is appended.
+
+## Final test counts (observed this turn, not quoted)
+
+```
+uv run pytest -q          → 3205 passed, 73 skipped, 1 warning in 310.50s
+cd frontend && npm test   → 25 files, 205 passed (vitest 4.1.10)
+```
+
+Baseline was `2966 / 200`. So: **2966 + 239 backend, 200 + 5 frontend.**
+
+The backend run is the flags-OFF run — `tests/conftest.py` pins every flag off,
+and it is green. The rulings are built unconditionally (gate finding F-F), with
+R1's quote read gated by the pre-existing `QUOTE_SUBMIT_V1`.
+
+## Commits
+
+```
+54b56e2 feat(arc5): T1 quote-priced orders (R1, F-07)
+43c42b9 feat(arc5): T2 badge integrity (R2, F-11)
+fa7f16b feat(arc5): T3 notation, clearance and seal designation (R3, F-12)
+230704e feat(arc5): T4 confirm sufficiency and a labelled override (R4, F-15)
+e316592 feat(arc5): T5 hygienic questions (R5, F-16)
+066c933 feat(arc5): T6 variant guard recognises what it was told (R6, F-08)
+7c97f2b feat(arc5): T7 loud failure without an enumeration oracle (R7, F-03)
+981d49f feat(arc5): T8 supplier mail says what the RFQ is and leaks nothing (R8, F-09, F-10)
+c185663 fix(arc5): T9 the frontend points at the backend by default (R9, F-02)
+ae9e771 feat(arc5): T10 configurable data directory (R10, F-04)
+```
+
+## Finding → task → the named tests that close it
+
+Every fixture below was copied from `eval/e2e-flags-on` evidence; no test in
+this arc is built on invented data where evidence exists.
+
+### F-07 → R1 → T1 — `utils/procurement_agent/tests/test_order_quote_pricing.py` (17 tests)
+
+Fixture `fixtures/eval_s1_quote_order.json` ← `s1_step9_buyer_view.json`,
+`s1_step10_accept_order.json`, `verify/verify_offline_checks.json`.
+
+`test_s1_accepted_quote_prices_the_order_and_records_the_quote_id` ·
+`test_the_quote_beats_a_listing_price_on_the_same_candidate` ·
+`test_the_quote_beats_a_price_db_entry_for_the_same_part` ·
+`test_withdrawn_quote_refuses_with_a_reason_and_places_nothing` ·
+`test_expired_quote_refuses_and_does_not_fall_back_to_the_listing_price` ·
+`test_a_quote_under_review_is_not_an_accepted_quote` ·
+`test_no_quote_no_price_shows_unpriced_needs_a_quote` ·
+`test_no_quote_with_a_listing_price_still_places_on_the_listing_price` ·
+`test_flag_off_is_a_no_op` ·
+`test_order_now_takes_the_quote_not_the_listing_price` ·
+`test_order_now_prices_a_quote_only_candidate_instead_of_422` ·
+`test_order_now_still_422s_a_priceless_candidate_with_no_quote` ·
+`test_order_now_refuses_on_a_withdrawn_quote_rather_than_falling_back` ·
+`test_a_quote_on_another_run_never_prices_this_one` ·
+`test_an_unreadable_quote_store_refuses_rather_than_reporting_absence`
+
+### F-11 → R2 → T2 — `test_badge_integrity.py` (27 tests)
+
+Fixture `fixtures/eval_s2_badge_candidates.json` ← all 23 analysed rows of
+`s2_step4_candidate_analysis.json` + the specs from `s2_step3_run_detail.json`.
+
+`test_a_c3_less_listing_is_never_badged_exact_for_a_c3_request` (×3: Rodavictoria,
+Intech, BDS) ·
+`test_the_extractors_exact_match_cannot_raise_the_deterministic_verdict` (×3) ·
+`test_every_bare_domain_row_in_the_evidence_is_denied_exact_grade` ·
+`test_every_gated_badge_in_the_whole_evidence_set_carries_a_reason` ·
+`test_the_classifier_is_the_ceiling` · `test_the_extractor_may_downgrade` ·
+`test_the_extractor_may_not_upgrade` ·
+`test_a_bare_domain_can_never_be_exact_even_on_a_perfect_string_match` ·
+`test_a_resolvable_listing_keeps_a_genuine_exact_badge` ·
+`test_is_exact_also_needs_the_extractors_own_exact_oem_claim` ·
+`test_transform_option_denies_the_s2_overclaim` ·
+`test_a_cache_replay_match_type_cannot_smuggle_a_badge_past_the_gate` (gate F-B)
+
+### F-12 → R3 → T3 — `test_pn_notation.py` (37 tests)
+
+Fixture `fixtures/eval_verify_s2_notation.json` ←
+`verify/s2_step4_candidate_analysis.json`.
+
+`test_every_separator_form_is_equal` (×5) ·
+`test_and_reaches_the_badge_as_an_exact_grade_match` (×3) ·
+`test_c3_requested_and_absent` ·
+`test_a_different_clearance_is_also_a_mismatch_and_names_both` ·
+`test_a_family_variant_needs_verification` (×4) ·
+`test_it_is_never_exact_and_never_none` (×2) ·
+`test_the_reason_names_both_designations` ·
+`test_cross_maker_seal_equivalence_is_not_decided_here` ·
+`test_a_correct_clearance_row_is_never_none` (JSB, 123Bearing, Motion) ·
+`test_a_clearance_less_row_is_distinguishable_from_them` (EIS, PGN) ·
+`test_the_two_cases_no_longer_collapse_to_the_same_verdict` ·
+`test_a_grease_code_suffix_is_verified_not_claimed_exact` ·
+`test_a_2rsh_row_previously_badged_normalized_is_lowered` ·
+`test_a_no_match_extractor_cannot_turn_needs_verification_into_none` ·
+`test_a_mechanical_seal_part_number_gets_no_notation_verdict`
+
+### F-15 → R4 → T4 — `test_intake_sufficiency.py` (23 tests)
+
+Fixture `fixtures/eval_s3_sufficiency.json` ← `s3_step2_confirm_attempt.json`,
+`s3_step2_sourced_anyway.json`, `s3_step1_chat.json`, `s1_step9_buyer_view.json`.
+
+`test_the_s3_specs_are_refused` · `test_the_s1_specs_clear_it` ·
+`test_a_manufacturer_part_number_clears_it_without_a_model` ·
+`test_a_half_identified_request_is_refused` (×6) ·
+`test_null_tokens_are_not_identity` ·
+`test_the_s3_specs_are_returned_to_clarification` ·
+`test_the_run_stays_in_intake_and_sources_nothing` ·
+`test_the_refusal_names_the_floor_not_the_family_guard` ·
+`test_it_starts_sourcing` · `test_it_records_the_acknowledgement_on_the_run` ·
+`test_the_run_is_marked_spec_incomplete` · `test_the_results_carry_the_banner` ·
+`test_no_candidate_in_such_a_run_may_be_badged_exact` ·
+`test_a_sufficient_request_is_never_marked_spec_incomplete` ·
+`test_the_s1_path_still_confirms` · `test_a_fully_specified_request_confirms` ·
+`test_the_floor_runs_after_the_family_guard_not_instead_of_it`
+
+### F-16 → R5 → T5 — `test_hygienic_context.py` (42 tests)
+
+Fixture: the same `eval_s3_sufficiency.json` (the S3 specs and the S3 user turn).
+
+`test_the_s3_gauge_is_hygienic` ·
+`test_the_same_gauge_without_the_context_is_not` ·
+`test_r5s_whole_trigger_vocabulary` (×11 — CIP, SIP, sanitary, washdown, food,
+dairy, beverage, pharma, 3-A, EHEDG, tri-clamp) ·
+`test_a_substring_is_not_a_hygienic_signal` (×3) ·
+`test_the_users_turn_text_counts_as_context` ·
+`test_instruments_are_in_scope` (×4) · `test_fittings_are_in_scope` (×4) ·
+`test_other_classes_are_not` (×3) · `test_a_hygienic_pump_gets_no_hygienic_block` ·
+`test_the_required_fields_are_r5s_four` ·
+`test_it_is_composed_from_the_labels_not_free_text` ·
+`test_the_certification_question_offers_3a_ehedg_or_none` ·
+`test_an_answered_field_is_not_re_asked` ·
+`test_a_null_token_does_not_count_as_answered` ·
+`test_the_cip_gauge_is_asked_all_four_before_confirm` ·
+`test_the_run_does_not_reach_sourcing` ·
+`test_the_same_gauge_with_no_hygienic_context_confirms` ·
+`test_answering_the_four_lets_it_confirm` ·
+`test_the_identity_floor_is_asked_first`
+
+### F-08 → R6 → T6 — `test_variant_guard_provenance.py` (28 tests)
+
+Fixture `fixtures/eval_s1_variant_guard.json` ← `s1_step9_buyer_view.json`
+(message thread + specs), `s1_step1c_inapp_fallback.json` (the re-ask),
+`s1_step1d_confirm_intake.json` (the 422).
+
+`test_the_observed_422_named_a_field_the_specs_held` ·
+`test_the_s1_turn_supplies_the_shaft_size` ·
+`test_an_extractor_filled_value_with_no_user_turn_behind_it_is_not_supplied` ·
+`test_notation_differences_in_the_users_wording_still_count` (×4) ·
+`test_the_ledger_accumulates_across_turns_and_is_internal` ·
+`test_a_supplied_attr_does_not_block_at_all` ·
+`test_a_filled_but_unconfirmed_attr_still_blocks` ·
+`test_but_it_is_no_longer_reported_as_missing` ·
+`test_it_says_what_it_actually_needs_instead` ·
+`test_a_genuinely_absent_attr_is_still_reported_missing` ·
+`test_a_supplied_shaft_size_is_not_re_asked` ·
+`test_an_extractor_invented_shaft_size_is_still_asked` ·
+`test_a_mechanical_seal_is_never_reclassified_a_bearing` ·
+`test_not_even_on_a_bore_diameter_alone` ·
+`test_shaft_size_now_outranks_a_lone_bore_diameter` ·
+`test_the_nema_frame_pump_to_motor_correction_is_untouched`
+
+### F-03 → R7 → T7 — `test_auth_mail_loud_failure.py` (20 tests)
+
+Fixture `fixtures/eval_f03_auth_mail.json` ← `verify/verify_offline_checks.json`
+(`F-03.message_configuration_set`).
+
+`test_ses_with_accounts_on_and_the_var_unset_refuses_to_boot` ·
+`test_the_same_config_with_the_var_set_boots` ·
+`test_the_fake_provider_does_not_require_it` ·
+`test_accounts_off_does_not_require_it` ·
+`test_notifications_off_does_not_require_it` ·
+`test_it_captures_auth_mail_with_no_auth_configuration_set` ·
+`test_the_provider_agnostic_helper_still_reports_the_refusal` ·
+`test_ses_still_refuses` ·
+`test_a_refused_auth_send_raises_one_action_now_alert` ·
+`test_the_alert_names_the_missing_variable` ·
+`test_it_is_deduped_across_a_burst` ·
+`test_a_successful_auth_send_raises_nothing` ·
+`test_an_alerting_failure_never_changes_the_send_result` ·
+`test_send_succeeded_vs_send_refused_are_byte_identical` ·
+`test_send_refused_vs_unknown_address_are_byte_identical` ·
+`test_all_three_cases_agree` ·
+`test_the_contrast_case_proves_the_comparison_has_teeth` ·
+`test_the_alert_is_raised_but_never_reflected_in_the_response`
+
+The equality is a true byte comparison of `(status_code, response.content,
+headers)` with `Date` / `Content-Length` / `Server` excluded, and the contrast
+case (a 422 on a malformed body) proves the three equalities are not vacuous.
+
+### F-09, F-10 → R8 → T8 — `test_supplier_mail_content.py` (26 tests)
+
+Fixture `fixtures/eval_s1_supplier_mail.json` ← `s1_outbox_final.json` (mail 5 =
+the RFQ_NEW, mail 3 = the Tier-1 FYI) + `s1_step9_buyer_view.json` (the specs).
+
+`test_the_observed_rfq_new_named_nothing` ·
+`test_the_observed_tier1_fyi_leaked_a_run_uuid_and_internal_vocabulary` ·
+`test_the_subject_names_the_part` ·
+`test_the_body_names_part_manufacturer_quantity_and_the_portal_link` ·
+`test_the_needed_by_date_rides_along_when_known` · `test_it_carries_no_price` ·
+`test_the_run_identity_helper_reads_the_specs` ·
+`test_it_only_ever_carries_the_allowed_keys` · `test_null_tokens_are_dropped` ·
+`test_an_unreadable_run_is_fail_soft` ·
+`test_a_multi_item_subject_gives_the_count` · `test_the_body_lists_every_item` ·
+`test_a_one_item_batch_keeps_the_single_request_wording` ·
+`test_the_subject_no_longer_carries_a_run_uuid` · `test_neither_does_the_body` ·
+`test_the_internal_classification_vocabulary_is_gone` ·
+`test_no_supplier_facing_template_renders_a_uuid` ·
+`test_no_supplier_facing_template_renders_internal_vocabulary` ·
+`test_the_uuid_matcher_would_catch_the_evidence`
+
+The scan is a RENDERED scan, not a source grep: every supplier-facing template
+(single RFQ, one-item batch, multi-item batch, single and consolidated reminder)
+is built with hostile inputs — a `run_id` and a `sent_message_id` in the dict —
+and the output is checked against a UUID pattern and the denylist.
+
+### F-02 → R9 → T9 — `frontend/src/lib/__tests__/backend-url-default.test.ts` (5 tests)
+
+`matches the port the backend actually serves on` (read out of `README.md`'s
+uvicorn command, so the test fails if they drift again) ·
+`is no longer the 8000 the evaluation observed` ·
+`is an absolute http origin with no trailing slash` ·
+`is documented in the frontend README` ·
+`leaves no stale 8000 reference in the frontend README`
+
+### F-04 → R10 → T10 — `test_data_dir.py` (19 tests)
+
+Source: the 15 modules in `verify/verify_offline_checks.json`
+(`F-04.modules_with_hardcoded_data_dir`) plus the 4 the gate's J9 added.
+
+`test_it_defaults_to_the_repo_data_directory` · `test_the_env_var_wins` ·
+`test_a_blank_value_is_not_an_override` ·
+`test_the_utils_json_stores_do_not_move_when_it_is_unset` ·
+`test_every_store_still_resolves_to_repo_data` ·
+`test_persistence_still_resolves_to_repo_data` ·
+`test_the_two_utils_json_stores_still_live_in_utils` ·
+`test_conftest_computes_the_same_path` ·
+`test_every_store_writes_under_it` · `test_including_persistence` ·
+`test_including_the_two_utils_json_stores` ·
+`test_nothing_is_left_pointing_at_the_repo` ·
+`test_no_module_builds_the_data_path_itself` ·
+`test_the_scan_would_catch_the_old_idiom`
+
+The "with it set" cases run in a SUBPROCESS with a clean import graph, since a
+process-level setting is read at import.
+
+**Total new tests: 239 backend (17+27+37+23+42+28+20+26+19) + 5 frontend.**
+
+## Test edits to pre-existing files
+
+`git diff --name-status 0c49371..HEAD` shows `M` on exactly four pre-existing
+test files, all four listed in `loop/AUTHORISED_TEST_EDITS.txt`:
+
+| File | What changed | Ruling |
+|---|---|---|
+| `test_api_server.py` | Four `TestConfirmIntake` fixtures seeded `{"manufacturer": "Goulds"}` only; a `model` is added so each still exercises its own subject — **every assertion byte-identical**. `test_spec_described_no_model_unaffected` pinned the 200 that IS F-15: REPLACED with `422` + `reason == "identity_insufficient"` + `override == "source_anyway"` + the override reaching 200, and renamed. | R4 |
+| `test_intake_variant_disambig.py` | `test_run_spec_described_then_confirm_200_unaffected` likewise REPLACED and renamed; the other invariant it carried (the refusal is the floor's, not the family guard's) is kept in its new form. | R4 |
+| `test_run_capture_live.py` | The zero-results fixture gains a `model`; **all assertions unchanged**. | R4 |
+| `test_tier1_runtime_live.py` | The shared `_run_sourcing` helper deliberately seeds a null PN token and no model — that IS the fixture — so it takes the explicit `source_anyway` override. **All 13 call sites' assertions unchanged.** | R4 |
+
+**Two files on the authorised list were NOT edited, and did not need to be:**
+
+- `test_scoring.py` — the gate marked `TestClassifyPnMatch` at-risk *"superseded
+  only if R3's verdicts are added to that function's return set instead of a new
+  badge-facing wrapper."* They were added to the wrapper. `_classify_pn_match`
+  and `PN_MATCH_POINTS` are byte-unchanged.
+- `test_notifications_coalescing.py` — the gate marked lines 137-143 at-risk
+  *"superseded only if R8 changes the subject FORMAT rather than only supplying
+  the part identity the caller currently drops."* Only the caller changed.
+
+The two at-risk R6 hallucination-guard items (`test_api_server.py:1192-1201`,
+`test_intake_variant_disambig.py:156-177`, `:523-540`) also survive unmodified,
+because R6 was implemented as turn-text provenance exactly as the gate
+recommended.
+
+Five assertions in this arc's OWN `test_badge_integrity.py` (written in T2)
+pinned `"none"` for the C3-less rows; T3 supersedes that with the more precise
+`"mismatch"`. Each was replaced, not deleted, and the not-exact-grade invariant
+kept alongside. That file is not pre-existing, so it is outside the fence.
+
+## New environment configuration
+
+| Variable | Default | Effect |
+|---|---|---|
+| `GOFER_DATA_DIR` | unset → `<repo>/data` | Relocates every store, `persistence.py`, and the two JSON stores under `utils/`. Unset, every path is byte-identical to today. Read at import, so set it before launching. |
+| `SES_CONFIGURATION_SET_AUTH` | unset | **Now load-bearing at boot:** with `SUPPLIER_ACCOUNTS_V1` on under `MAIL_PROVIDER=ses`, an unset value refuses to start, naming the variable. Unchanged under `MAIL_PROVIDER=fake`. |
+| `NEXT_PUBLIC_API_URL` | **changed:** `http://localhost:8000` → `http://localhost:8001` | The frontend now defaults to the port the backend serves on; a fresh clone needs no `.env.local`. |
+
+No new feature flag was introduced (gate finding F-F).
+
+New query parameter: `POST /api/runs/{id}/confirm-intake?source_anyway=true` —
+the explicit, recorded override of the R4 identity floor and the R5 hygienic
+question set.
+
+New response fields: `pnMatchReason` on every candidate; `specIncomplete` and
+`specIncompleteBanner` on a spec-incomplete run's `sourcing_results`;
+`quote_id` on an order; `unconfirmed_attrs` / `unconfirmed_labels` on a
+family-variant 422.
+
+## FINDINGS
+
+- **F-H (new, R6 scope).** The gate's recommended broad implementation of R6's
+  units-override clause — "the units may refine a stated type, never contradict
+  it" — **breaks a legitimate, pre-existing correction**: `test_intake_agent.py`
+  `test_motor_units_hp_frame_override_pump` requires `"centrifugal pump"` +
+  `hp` + NEMA `frame` → `Electric Motor`, which that rule forbids. That file is
+  NOT on the authorised list, and the override is correct on its merits (a NEMA
+  frame is decisive evidence the thing is a motor). The fix was therefore
+  narrowed to the actual defect: `shaft_size` now outranks a lone
+  `bore_diameter` (they were both priority 6, so list order decided), plus one
+  targeted rule — a bore diameter alone never reclassifies a part already named
+  a seal, because on a cartridge seal the shaft size and the bore are the same
+  dimension, which is why the extractor fills both. Both observed seal cases
+  are closed and every other override is untouched. **No blocked test edit —
+  the narrower fix needed none.**
+- **F-A (gate finding, still open).** `ranking_bands.classify_pn_evidence(
+  "6205-2RS C3", "6205-2RS")` returns `canonical`, and `assign_band`
+  (`ranking_bands.py:392`) lets a bare `pn_match_status in ("exact_match",
+  "partial_match")` lift a row to Band B. R2 and R3 correct the **badge**; a
+  C3-less bearing can still be **ranked** as a confirmed part. Band assignment
+  is outside R2/R3 as written and outside this arc's task list. Deliberately
+  left open, and worth an arc of its own.
+- **F-I (new, R4 scope boundary — gate F-G, restated as shipped state).** The
+  identity floor is applied at the `confirm_intake` call site only, not inside
+  `_commit_intake_to_sourcing`. The channel-agnostic email intake consumer
+  shares that helper and runs its own family pre-gate; adding the floor there
+  would deepen F-06 (email intake dead-ending on an under-specified request),
+  which the brief puts out of scope. So **an email-channel request can still
+  reach sourcing without clearing the R4 floor.**
+- **F-J (new, R1 residual).** `/review-items/{id}/place-order` (the email-quote
+  path, `api_server.py:5099-5117`) prices from `payload.unit_price` and was not
+  touched: it has no candidate and no `source_url`, so there is no
+  `(run_id, domain)` key for `order_quote.resolve_for_order` to join on. It
+  cannot substitute a *listing* price for a quote — its price IS a quote — so
+  R1's prohibition is not violated, but it is the one order path that does not
+  consult `quote_store` and therefore cannot notice a withdrawn or expired one.
+- **F-K (new, R2 residual).** The badge gate needs the run's specs, so
+  `_transform_option` called with `specs=None` (the default, kept for
+  back-compat) classifies everything as `none`. The single production caller
+  passes them. A future caller that forgets loses badges rather than
+  over-claiming — the safe direction, but worth knowing.
+- **Test-edit fence:** no blocked edit to record. Every edit this arc needed was
+  to a file on the authorised list.
+
+## Out of scope, as briefed
+
+Email intake statefulness (F-06), known-sender registration (F-05), clearance as
+a comparison-schema field and substitute-intent handling (F-13, F-14),
+cross-maker seal equivalence, hygienic equivalence logic, infra provisioning.
+
+`design/interactions.md` was updated on this branch with the buyer- and
+supplier-facing behaviour changes.
+
+**Not pushed. Ready for review.**
