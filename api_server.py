@@ -3142,6 +3142,17 @@ def confirm_intake(
             intake_sufficiency.record_override(specs_dict, sufficiency)
             run.asset_specs_json = json.dumps(specs_dict)
 
+        # Hygienic question set (R5, F-16) — a QUESTION-SET addition, nothing more.
+        # When intake context indicates hygienic service (CIP/SIP/sanitary/washdown/
+        # food/dairy/beverage/pharma/3-A/EHEDG/tri-clamp), an instrument or fitting
+        # must answer process connection type and size, wetted material and hygienic
+        # certification before confirm. The same explicit source_anyway override
+        # applies. No hygienic EQUIVALENCE logic anywhere in this arc.
+        from utils import hygienic_context
+        hygienic = hygienic_context.hygienic_block(specs_dict)
+        if hygienic is not None and not source_anyway:
+            raise HTTPException(status_code=422, detail=hygienic.as_detail())
+
         urgency_factor, warranty_status = _commit_intake_to_sourcing(
             session, run, specs_dict, exact_only=exact_only, open_family=open_family,
             background_tasks=background_tasks,
@@ -3151,7 +3162,7 @@ def confirm_intake(
     _run_capture.capture_user_action(
         run_id, "confirm_intake",
         detail={"exact_only": exact_only, "open_family": open_family,
-                "source_anyway": bool(sufficiency is not None)},
+                "source_anyway": bool(sufficiency is not None or hygienic is not None)},
     )
     return {"run_id": run_id, "phase": Phase.SOURCING.value}
 
