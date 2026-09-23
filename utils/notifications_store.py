@@ -1001,6 +1001,33 @@ def get_rfq_view(*, run_id: str, supplier_domain: str,
         return None
 
 
+def list_rfq_views(run_id: str, *, supplier_domain: Optional[str] = None
+                   ) -> list[dict]:
+    """Every view row for one run (optionally one supplier), oldest first.
+
+    T11 needs the FIRST view instant, not just "was it viewed", because the
+    actionability measure is "did they look within one business day" — a view
+    three weeks later is a real view and a failed notification. ``[]``
+    fail-soft.
+    """
+    if not run_id:
+        return []
+    where = ["run_id = ?"]
+    args: list[Any] = [run_id]
+    if supplier_domain:
+        where.append("supplier_domain = ?")
+        args.append(supplier_domain)
+    try:
+        with closing(_get_conn()) as conn:
+            conn.row_factory = sqlite3.Row
+            return [_row(r) for r in conn.execute(
+                f"SELECT * FROM rfq_views WHERE {' AND '.join(where)} "
+                f"ORDER BY first_viewed_at", tuple(args)).fetchall()]
+    except Exception as exc:
+        print(f"[Notifications] list_rfq_views failed: {exc}")
+        return []
+
+
 def rfq_viewed(run_id: str, *, member_id: Optional[str] = None,
                supplier_domain: Optional[str] = None) -> bool:
     """D5's "seen in the portal" predicate.

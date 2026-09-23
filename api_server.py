@@ -7783,6 +7783,27 @@ def admin_notification_digest(authorization: Optional[str] = Header(default=None
     return notifications.run_concierge_digest()
 
 
+@app.get("/api/admin/notification-actionability")
+def admin_notification_actionability(
+        days: int = 30, authorization: Optional[str] = Header(default=None)):
+    """Arc 4b S7: per-kind sent → delivered → viewed → quoted, and the rolling
+    actionability rate, with kinds below the floor flagged for review.
+
+    The only honest defence against over-alerting: you cannot reason your way
+    to the right volume in advance, you have to measure it. A flagged kind is
+    flagged FOR REVIEW — the measurement is evidence for a decision, not the
+    decision.
+
+    Flag gate BEFORE ``require_admin``, the arc 2 convention.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    require_admin(authorization)
+    from utils import notifications
+    report = notifications.notification_actionability(days=max(1, min(days, 365)))
+    return {"count": len(report.get("kinds") or []), **report}
+
+
 @app.post("/api/admin/notification-alerts/{alert_id}/acknowledge")
 def admin_acknowledge_notification_alert(
         alert_id: str, authorization: Optional[str] = Header(default=None)):

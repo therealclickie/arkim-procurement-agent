@@ -33,7 +33,7 @@ const TOKEN_KEY = "arkim_admin_token";
 type Tab =
   | "runs" | "suppliers" | "sent-messages" | "review-queue" | "orders" | "prices"
   | "unmatched-replies" | "fulfilment" | "labeling" | "onboarding"
-  | "portal-revisions" | "notification-alerts";
+  | "portal-revisions" | "notification-alerts" | "notification-actionability";
 
 // `labeling` (Night 2), `onboarding` (Night 4), and `portal-revisions` (Night 6)
 // have no `path`/`listKey` (they render their own dedicated views, not the
@@ -57,6 +57,12 @@ const TABS: { id: Tab; label: string; path: string; listKey: string }[] = [
   // surface would — no separate frontend flag, because this is an internal
   // debug surface, not customer-facing.
   { id: "notification-alerts", label: "Notification Alerts", path: "/notification-alerts", listKey: "alerts" },
+  // Arc 4b S7: per-kind actionability. The generic table renders it from the
+  // rows' scalar keys, so a kind flagged below the floor shows up as a column
+  // rather than needing a bespoke view. Same flag posture as the tab above:
+  // with NOTIFICATIONS_V1 off the endpoint 404s and the tab shows the standard
+  // error panel.
+  { id: "notification-actionability", label: "Notification Actionability", path: "/notification-actionability", listKey: "kinds" },
 ];
 
 type FetchResult = { ok: boolean; status: number; body: unknown };

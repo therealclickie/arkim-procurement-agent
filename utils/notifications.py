@@ -1432,6 +1432,16 @@ def run_concierge_digest(now: Optional[datetime] = None) -> dict:
     return out
 
 
+def notification_actionability(now: Optional[datetime] = None, *,
+                               days: int = 30) -> dict:
+    """S7's rolling-window actionability report (``{}``-shaped when the flag
+    is off). A thin pass-through so the API layer imports ONE module."""
+    if not notifications_active():
+        return {"window_days": days, "floor": 0.0, "as_of": None, "kinds": []}
+    from utils import notification_metrics
+    return notification_metrics.actionability(now or _now(), days=days)
+
+
 def acknowledge_alert(alert_id: str, *, acknowledged_by: str) -> Optional[dict]:
     """Acknowledge one open alert. ``None`` when unknown / already
     acknowledged / the flag is off."""
