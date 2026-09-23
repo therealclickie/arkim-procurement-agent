@@ -1222,3 +1222,70 @@ are absent.
   no-op. Every rejection is the same 403 with no detail, so a prober cannot tell
   a bad signature from a foreign topic from a malformed body, and nothing from
   the request body is logged or echoed.
+
+## Notification signal discipline (arc 4b, `NOTIFICATIONS_V1`)
+
+Every notification must be actionable by the person who receives it, and every
+signal has exactly one owner. Arc 4 shipped a notification surface that
+over-alerted in five identifiable ways; this is what it does now.
+
+- **One request, one owner.** New-RFQ mail goes to the account's DESIGNATED
+  contacts — the owner and admins by default — not to everyone who can see
+  requests. Any member can be opted in or out from the team screen by an owner
+  or admin; the server refuses anyone else, whether or not the control was
+  rendered. Everybody still SEES every request in the portal; the designation
+  only decides who is emailed. Before this, a five-person account got five
+  emails for one request, and each of the five could reasonably assume one of
+  the other four was handling it.
+- **Requests that arrive together become one email.** The first request to a
+  quiet mailbox is sent straight away — a line-down part must not wait for a
+  tidier email — and opens a 15-minute window; everything that lands inside it
+  is sent once, together, listing each request. Ten requests released in one
+  batch produce two emails, not ten.
+- **One reminder a day, listing everything unseen.** A supplier with three
+  requests they have not looked at gets one reminder naming all three, not
+  three reminders. A request already covered by a reminder is never put in
+  another one.
+- **Clocks run on the supplier's working time.** Each account has a timezone
+  (California by default). Reminders and escalations count business hours —
+  08:00–17:00 local, weekdays, US federal holidays excluded — and reminders are
+  only sent inside those hours. A request sent at 16:00 on a Friday does not
+  escalate over the weekend, and a four-hour reminder on a 22:00 send arrives
+  the next working morning instead of at 02:00.
+- **Chasing stops when the request is resolved.** When an RFQ is answered,
+  bounces, its quote window is closed, or its run is cancelled or completed, its
+  pending reminders and escalations are cancelled — recorded with a reason, not
+  silently. Escalating somebody's silence on a request the buyer no longer needs
+  is noise a human then has to work out and dismiss.
+- **A hard daily ceiling per person, which defers and never drops.** No mailbox
+  receives more than five notification emails in a working day. Beyond that,
+  requests roll into that member's next daily digest and reminders wait for the
+  next day — nothing is discarded. Sign-in links and invitations are exempt:
+  they were asked for, by the recipient or their colleague.
+- **Concierge alerts are tiered, and only the top tier interrupts.** The queue
+  shows work somebody has to do — an account with nobody to notify, an account
+  whose LAST contactable address just died, a supplier unresponsive past one
+  working day. Everything informational (repeated soft bounces, a notification
+  cap block, a bounce on somebody who was not the last contact) goes to a
+  once-daily digest instead. Escalations are one per supplier per day: three
+  silent requests from one company are one phone call.
+- **Whether a notification kind is worth sending is measured, not argued.** For
+  each kind the admin view shows sent → delivered → opened in the portal within
+  one working day → quoted, and the resulting rate over the last 30 days. A kind
+  below 20% is flagged for review. A kind nobody has been sent shows "no data",
+  never 0% — no evidence is not the same as bad evidence. An email open does not
+  count as looking: privacy features fire it for everyone.
+- **Notification mail has its own sending budget.** It is no longer judged by
+  the cold-outbound daily cap, so a busy sourcing day can never stop telling
+  suppliers about requests already in their inbox. If its own (generous) budget
+  is ever hit, mail stops and a human is told once that day.
+- **Signing in takes a click.** The emailed sign-in link now lands on a page
+  with a "Continue to sign in" button and exchanges the link only when you press
+  it. Corporate link scanners open emailed links before the recipient does, and
+  a page that signed in on load handed them the single-use link — so the real
+  person arrived to "this link is no longer valid" for a link nobody had used.
+- **Invitations say who invited you.** An invitation now names the colleague who
+  added you and their company, in the subject and the body, and one account can
+  send at most ten a day. Mail from an unfamiliar domain that names nobody is
+  indistinguishable from phishing, and the safe response to phishing is to
+  ignore it.

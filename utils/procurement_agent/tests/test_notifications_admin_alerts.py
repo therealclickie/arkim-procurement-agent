@@ -98,8 +98,18 @@ def test_an_empty_queue_is_an_empty_list_not_an_error(admin_api):
 
 
 def test_every_alert_kind_the_arc_raises_is_listed(admin_api):
-    """The three problems are different and all of them need a human: an
-    unanswered RFQ, an account with nobody to tell, and a dead address."""
+    """SUPERSEDED IN PART BY ARC 4b S6 (prime-directive exception).
+
+    This used to assert that all four kinds appear in the admin queue. S6
+    rules that wrong: a queue where every row is equally urgent has no urgency
+    in it, and the first thing a human does with one is stop reading it.
+    SOFT_BOUNCE_REPEATED is informational — a mailbox that failed temporarily
+    three times running is not something to act on this afternoon — so it
+    lands in the DIGEST tier, and the queue shows ACTION_NOW and QUEUE only.
+
+    Same setup, new pinned behaviour: three of the four, and the fourth is
+    proved to still EXIST (it is tiered away, not lost) below.
+    """
     ns.raise_alert(kind=ns.ALERT_RFQ_ESCALATION, dedupe_key="e1",
                    run_id="run-1", supplier_domain="dxpe.com", is_test=True)
     ns.raise_alert(kind=ns.ALERT_NO_NOTIFIABLE_MEMBERS, dedupe_key="n1",
@@ -110,10 +120,13 @@ def test_every_alert_kind_the_arc_raises_is_listed(admin_api):
                    email="buyer@dxpe.com", is_test=True)
 
     body = admin_api.get(ALERTS, headers=admin_headers()).json()
-    assert body["count"] == 4
+    assert body["count"] == 3
     assert {a["kind"] for a in body["alerts"]} == {
         ns.ALERT_RFQ_ESCALATION, ns.ALERT_NO_NOTIFIABLE_MEMBERS,
-        ns.ALERT_EMAIL_SUPPRESSED, ns.ALERT_SOFT_BOUNCE_REPEATED}
+        ns.ALERT_EMAIL_SUPPRESSED}
+    # ...and the fourth is deferred to the digest, not discarded.
+    assert [a["kind"] for a in ns.list_alerts(tiers=(ns.TIER_DIGEST,))] == [
+        ns.ALERT_SOFT_BOUNCE_REPEATED]
 
 
 def test_an_alert_carries_what_an_operator_needs_to_act(admin_api):

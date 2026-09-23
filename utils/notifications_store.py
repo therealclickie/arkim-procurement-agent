@@ -138,6 +138,52 @@ ALERT_RFQ_ESCALATION = "RFQ_ESCALATION"
 ALERT_NO_NOTIFIABLE_MEMBERS = "NO_NOTIFIABLE_MEMBERS"
 ALERT_EMAIL_SUPPRESSED = "EMAIL_SUPPRESSED"
 ALERT_SOFT_BOUNCE_REPEATED = "SOFT_BOUNCE_REPEATED"
+# Arc 4b R-F8: the notification daily cap suppressed a send. Informational,
+# not an interruption — a sensibly sized cap should almost never fire, and the
+# fix when it does is a config change, not a same-hour response. Deduped per
+# UTC day by the caller's dedupe key, so a bad day raises one alert, not one
+# per suppressed notification.
+ALERT_NOTIFICATION_CAP_BLOCKED = "NOTIFICATION_CAP_BLOCKED"
+
+# Arc 4b S6 — alert TIERS. Only the top tier interrupts. A queue where every
+# row is equally urgent is a queue with no urgency in it, and the first thing
+# a human does with one is stop reading it.
+#
+#   ACTION_NOW  a person has to act TODAY: an account whose ONLY notifiable
+#               contact just died (hard bounce / complaint), or an account
+#               with a live RFQ and nobody to tell.
+#   QUEUE       normal escalation work: a supplier unresponsive past one
+#               business day on a request that still needs quotes.
+#   DIGEST      informational, delivered once a day: soft-bounce streaks,
+#               notification-cap blocks, a hard bounce on a contact who is not
+#               the account's last one.
+TIER_ACTION_NOW = "ACTION_NOW"
+TIER_QUEUE = "QUEUE"
+TIER_DIGEST = "DIGEST"
+TIERS: tuple[str, ...] = (TIER_ACTION_NOW, TIER_QUEUE, TIER_DIGEST)
+
+# The tiers the admin QUEUE shows. DIGEST is deliberately absent: it is read
+# once a day in one place, not interleaved with work somebody has to do now.
+QUEUE_TIERS: tuple[str, ...] = (TIER_ACTION_NOW, TIER_QUEUE)
+
+# kind -> its DEFAULT tier. A caller may override per alert (a hard bounce is
+# ACTION_NOW on an account's last contact and DIGEST on any other), which is
+# why this is a default and not a lookup the raiser cannot argue with.
+ALERT_TIERS: dict = {
+    ALERT_RFQ_ESCALATION: TIER_QUEUE,
+    ALERT_NO_NOTIFIABLE_MEMBERS: TIER_ACTION_NOW,
+    ALERT_EMAIL_SUPPRESSED: TIER_ACTION_NOW,
+    ALERT_SOFT_BOUNCE_REPEATED: TIER_DIGEST,
+    ALERT_NOTIFICATION_CAP_BLOCKED: TIER_DIGEST,
+}
+
+
+def alert_tier(kind: str, tier: Optional[str] = None) -> str:
+    """The tier an alert lands in: the explicit one when it is a known tier,
+    otherwise the kind's default, otherwise QUEUE. Pure; table-tested."""
+    if tier in TIERS:
+        return tier
+    return ALERT_TIERS.get(kind, TIER_QUEUE)
 
 
 def can_transition(current: Optional[str], nxt: str) -> bool:
@@ -188,6 +234,21 @@ CREATE TABLE IF NOT EXISTS notifications (
     configuration_set   TEXT,
     state               TEXT NOT NULL,
     deferred            INTEGER NOT NULL DEFAULT 0,
+    -- Arc 4b S2: the instant this notification's coalescing window closes.
+    -- Until then it waits so that RFQs arriving together become ONE email.
+    -- NULL means "no window" (a reminder, a digest, an auth send).
+    coalesce_until      TEXT,
+    -- Arc 4b S5: the LOCAL business day on which this notification carried an
+    -- actual email. It is what the per-member daily ceiling counts, and it is
+    -- stamped from the scheduler's supplied instant, never from the wall
+    -- clock, so a replay counts the same day the original run did.
+    mailed_day          TEXT,
+    -- Arc 4b S4: when the RFQ this describes was resolved, and by what. A
+    -- cancelled notification leaves the ladder and the consolidated reminder.
+    -- Recorded, never deleted: "we stopped chasing this, and here is why" has
+    -- to stay answerable later.
+    cancelled_at        TEXT,
+    cancel_reason       TEXT,
     reminded_at         TEXT,
     escalated_at        TEXT,
     created_at          TEXT NOT NULL,
@@ -290,6 +351,7 @@ CREATE TABLE IF NOT EXISTS concierge_alerts (
     email           TEXT,
     detail_json     TEXT,
     status          TEXT NOT NULL DEFAULT 'open',
+    tier            TEXT NOT NULL DEFAULT 'QUEUE',
     created_at      TEXT NOT NULL,
     acknowledged_at TEXT,
     acknowledged_by TEXT,
@@ -340,6 +402,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
     have = {r[1] for r in conn.execute("PRAGMA table_info(soft_bounce_counts)")}
     if have and "first_at" not in have:
         conn.execute("ALTER TABLE soft_bounce_counts ADD COLUMN first_at TEXT")
+    alerts = {r[1] for r in conn.execute("PRAGMA table_info(concierge_alerts)")}
+    if alerts and "tier" not in alerts:
+        # Arc 4b S6. Legacy rows default to QUEUE — the tier the arc-4 queue
+        # behaved as — so an alert raised before tiers existed keeps appearing
+        # exactly where the person watching it expects.
+        conn.execute("ALTER TABLE concierge_alerts ADD COLUMN tier TEXT")
+        conn.execute("UPDATE concierge_alerts SET tier = ? WHERE tier IS NULL",
+                     (TIER_QUEUE,))
+    notif = {r[1] for r in conn.execute("PRAGMA table_info(notifications)")}
+    for column, ddl in (("coalesce_until", "coalesce_until TEXT"),
+                        ("cancelled_at", "cancelled_at TEXT"),
+                        ("cancel_reason", "cancel_reason TEXT"),
+                        ("mailed_day", "mailed_day TEXT")):
+        if notif and column not in notif:
+            conn.execute(f"ALTER TABLE notifications ADD COLUMN {ddl}")
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -402,6 +479,7 @@ def create_notification(
     provider: Optional[str] = None,
     configuration_set: Optional[str] = None,
     deferred: bool = False,
+    coalesce_until: Optional[str] = None,
     detail: Optional[dict] = None,
     is_test: bool = False,
 ) -> Optional[dict]:
@@ -426,13 +504,13 @@ def create_notification(
                 """INSERT INTO notifications
                    (id, account_id, member_id, kind, subject_ref, run_id,
                     supplier_domain, recipient, channel, provider,
-                    configuration_set, state, deferred, created_at, updated_at,
-                    queued_at, detail_json, is_test)
-                   VALUES (?,?,?,?,?,?,?,?, 'EMAIL', ?,?,?,?,?,?,?,?,?)""",
+                    configuration_set, state, deferred, coalesce_until,
+                    created_at, updated_at, queued_at, detail_json, is_test)
+                   VALUES (?,?,?,?,?,?,?,?, 'EMAIL', ?,?,?,?,?,?,?,?,?,?)""",
                 (nid, account_id, member_id, kind, subject_ref, run_id,
                  supplier_domain, recipient, provider, configuration_set,
-                 STATE_QUEUED, 1 if deferred else 0, now, now, now,
-                 _dumps(detail), 1 if is_test else 0),
+                 STATE_QUEUED, 1 if deferred else 0, coalesce_until, now, now,
+                 now, _dumps(detail), 1 if is_test else 0),
             )
             conn.commit()
     except Exception as exc:
@@ -483,7 +561,9 @@ def list_notifications(*, kind: Optional[str] = None,
                        kinds: Optional[Iterable[str]] = None,
                        state: Optional[str] = None,
                        member_id: Optional[str] = None,
+                       recipient: Optional[str] = None,
                        deferred: Optional[bool] = None,
+                       cancelled: Optional[bool] = None,
                        run_id: Optional[str] = None) -> list[dict]:
     """Notifications matching every supplied filter, oldest first (the
     scheduler wants the oldest unseen RFQ first). ``[]`` on fail-soft."""
@@ -504,6 +584,12 @@ def list_notifications(*, kind: Optional[str] = None,
     if member_id:
         where.append("member_id = ?")
         args.append(member_id)
+    if recipient:
+        where.append("recipient = ?")
+        args.append(recipient)
+    if cancelled is not None:
+        where.append("cancelled_at IS NOT NULL" if cancelled
+                     else "cancelled_at IS NULL")
     if run_id:
         where.append("run_id = ?")
         args.append(run_id)
@@ -521,6 +607,42 @@ def list_notifications(*, kind: Optional[str] = None,
     except Exception as exc:
         print(f"[Notifications] list_notifications failed: {exc}")
         return []
+
+
+def count_notifications_on_day(*, kind: str, day: str,
+                               account_id: Optional[str] = None,
+                               supplier_domain: Optional[str] = None,
+                               recipient: Optional[str] = None) -> int:
+    """How many notifications of ``kind`` were created on one UTC day.
+
+    The per-account invite cap (arc 4b R-F5) counts with this. ``day`` is
+    ``'YYYY-MM-DD'`` and is a PARAMETER: no wall-clock read happens here, so
+    the count a caller gets is a function of the instant it supplied.
+
+    Fail-soft ``0``. A store failure must not silently *block* invites (the
+    caller would refuse a legitimate one) — the cap fails OPEN here because
+    the ledger and the governance auth cap still stand behind it.
+    """
+    where = ["kind = ?", "substr(created_at, 1, 10) = ?"]
+    args: list[Any] = [kind, day]
+    if account_id:
+        where.append("account_id = ?")
+        args.append(account_id)
+    if supplier_domain:
+        where.append("supplier_domain = ?")
+        args.append(supplier_domain)
+    if recipient:
+        where.append("recipient = ?")
+        args.append(recipient)
+    try:
+        with closing(_get_conn()) as conn:
+            r = conn.execute(
+                f"SELECT COUNT(*) FROM notifications WHERE {' AND '.join(where)}",
+                tuple(args)).fetchone()
+            return int(r[0]) if r else 0
+    except Exception as exc:
+        print(f"[Notifications] count_notifications_on_day failed: {exc}")
+        return 0
 
 
 def set_provider_message_id(notification_id: str, provider_message_id: str,
@@ -623,6 +745,109 @@ def mark_escalated(notification_id: str, *, at: Optional[str] = None) -> bool:
     except Exception as exc:
         print(f"[Notifications] mark_escalated failed: {exc}")
         return False
+
+
+def clear_coalesce(notification_id: str) -> bool:
+    """Close a notification's coalescing window (arc 4b S2) — called once the
+    batch carrying it has been handed to the transport, so it can never be
+    picked up by a second flush. Fail-soft ``False``."""
+    try:
+        with closing(_get_conn()) as conn:
+            cur = conn.execute(
+                "UPDATE notifications SET coalesce_until = NULL, updated_at = ? "
+                "WHERE id = ?", (_now(), notification_id))
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception as exc:
+        print(f"[Notifications] clear_coalesce failed: {exc}")
+        return False
+
+
+def mark_mailed(notification_id: str, day: str) -> bool:
+    """Stamp the LOCAL business day on which this notification carried a real
+    email (arc 4b S5). The per-member daily ceiling counts these, so exactly
+    one row per email is stamped — the batch's carrier, not every notification
+    the batch covered, because the promise is about emails received.
+    Fail-soft ``False``."""
+    if not notification_id or not day:
+        return False
+    try:
+        with closing(_get_conn()) as conn:
+            cur = conn.execute(
+                "UPDATE notifications SET mailed_day = ?, updated_at = ? "
+                "WHERE id = ?", (day, _now(), notification_id))
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception as exc:
+        print(f"[Notifications] mark_mailed failed: {exc}")
+        return False
+
+
+def count_mailed_on_day(recipient: str, day: str) -> int:
+    """How many notification EMAILS this mailbox has been sent on ``day``.
+
+    ``day`` is a parameter (the account's local business day), so the ceiling
+    is a function of the scheduler's supplied instant and never of the wall
+    clock. Fail-soft ``0``: a store failure must not silently gag a member.
+    """
+    if not recipient or not day:
+        return 0
+    try:
+        with closing(_get_conn()) as conn:
+            r = conn.execute(
+                "SELECT COUNT(*) FROM notifications WHERE recipient = ? "
+                "AND mailed_day = ?", (recipient, day)).fetchone()
+            return int(r[0]) if r else 0
+    except Exception as exc:
+        print(f"[Notifications] count_mailed_on_day failed: {exc}")
+        return 0
+
+
+def set_deferred(notification_id: str) -> bool:
+    """Push a notification into the digest pool (arc 4b S5's overflow).
+
+    The counterpart of ``clear_deferred``. This is how the daily ceiling
+    DEFERS rather than discards: the row keeps its QUEUED state and its
+    unseen-ness, and the next digest carries it.
+    """
+    try:
+        with closing(_get_conn()) as conn:
+            cur = conn.execute(
+                "UPDATE notifications SET deferred = 1, coalesce_until = NULL, "
+                "updated_at = ? WHERE id = ?", (_now(), notification_id))
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception as exc:
+        print(f"[Notifications] set_deferred failed: {exc}")
+        return False
+
+
+def mark_cancelled(notification_id: str, *, reason: str,
+                   at: Optional[str] = None) -> bool:
+    """Arc 4b S4: the RFQ this notification describes has been resolved, so
+    stop chasing it.
+
+    The ``cancelled_at IS NULL`` predicate makes the write its own guard, the
+    same shape as ``mark_reminded`` — a second cancellation changes no row.
+    An audit event is appended either way the caller can read back, because
+    "we stopped chasing this, and why" must not be a silent state change.
+    Fail-soft ``False``.
+    """
+    try:
+        with closing(_get_conn()) as conn:
+            cur = conn.execute(
+                "UPDATE notifications SET cancelled_at = ?, cancel_reason = ?, "
+                "updated_at = ? WHERE id = ? AND cancelled_at IS NULL",
+                (at or _now(), reason, _now(), notification_id))
+            conn.commit()
+            if cur.rowcount == 0:
+                return False
+    except Exception as exc:
+        print(f"[Notifications] mark_cancelled failed: {exc}")
+        return False
+    _record_event(notification_id, event_type="Cancelled",
+                  detail={"reason": reason})
+    return True
 
 
 def clear_deferred(notification_id: str) -> bool:
@@ -776,6 +1001,33 @@ def get_rfq_view(*, run_id: str, supplier_domain: str,
         return None
 
 
+def list_rfq_views(run_id: str, *, supplier_domain: Optional[str] = None
+                   ) -> list[dict]:
+    """Every view row for one run (optionally one supplier), oldest first.
+
+    T11 needs the FIRST view instant, not just "was it viewed", because the
+    actionability measure is "did they look within one business day" — a view
+    three weeks later is a real view and a failed notification. ``[]``
+    fail-soft.
+    """
+    if not run_id:
+        return []
+    where = ["run_id = ?"]
+    args: list[Any] = [run_id]
+    if supplier_domain:
+        where.append("supplier_domain = ?")
+        args.append(supplier_domain)
+    try:
+        with closing(_get_conn()) as conn:
+            conn.row_factory = sqlite3.Row
+            return [_row(r) for r in conn.execute(
+                f"SELECT * FROM rfq_views WHERE {' AND '.join(where)} "
+                f"ORDER BY first_viewed_at", tuple(args)).fetchall()]
+    except Exception as exc:
+        print(f"[Notifications] list_rfq_views failed: {exc}")
+        return []
+
+
 def rfq_viewed(run_id: str, *, member_id: Optional[str] = None,
                supplier_domain: Optional[str] = None) -> bool:
     """D5's "seen in the portal" predicate.
@@ -882,6 +1134,7 @@ def set_preference(member_id: str, preference: str, *,
 # ---------------------------------------------------------------------------
 
 def raise_alert(*, kind: str, dedupe_key: Optional[str] = None,
+                tier: Optional[str] = None,
                 account_id: Optional[str] = None,
                 member_id: Optional[str] = None,
                 notification_id: Optional[str] = None,
@@ -903,12 +1156,12 @@ def raise_alert(*, kind: str, dedupe_key: Optional[str] = None,
             conn.execute(
                 """INSERT INTO concierge_alerts
                    (id, kind, dedupe_key, account_id, member_id, notification_id,
-                    run_id, supplier_domain, email, detail_json, status,
+                    run_id, supplier_domain, email, detail_json, status, tier,
                     created_at, is_test)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (aid, kind, dedupe_key, account_id, member_id, notification_id,
                  run_id, supplier_domain, email, _dumps(detail), ALERT_OPEN,
-                 _now(), 1 if is_test else 0))
+                 alert_tier(kind, tier), _now(), 1 if is_test else 0))
             conn.commit()
     except sqlite3.IntegrityError:
         return None          # already raised — the dedupe index did its job
@@ -932,9 +1185,12 @@ def get_alert(alert_id: str) -> Optional[dict]:
 
 
 def list_alerts(*, status: Optional[str] = ALERT_OPEN,
-                kind: Optional[str] = None) -> list[dict]:
-    """Alerts, newest first. ``status=None`` lists every status. ``[]``
-    fail-soft."""
+                kind: Optional[str] = None,
+                tiers: Optional[Iterable[str]] = None,
+                day: Optional[str] = None) -> list[dict]:
+    """Alerts, newest first. ``status=None`` lists every status; ``tiers``
+    restricts to a set of S6 tiers; ``day`` restricts to one UTC creation day
+    (the concierge digest's window). ``[]`` fail-soft."""
     where: list[str] = []
     args: list[Any] = []
     if status:
@@ -943,6 +1199,15 @@ def list_alerts(*, status: Optional[str] = ALERT_OPEN,
     if kind:
         where.append("kind = ?")
         args.append(kind)
+    if tiers is not None:
+        wanted = list(tiers)
+        if not wanted:
+            return []
+        where.append(f"tier IN ({','.join('?' for _ in wanted)})")
+        args.extend(wanted)
+    if day:
+        where.append("substr(created_at, 1, 10) = ?")
+        args.append(day)
     sql = "SELECT * FROM concierge_alerts"
     if where:
         sql += " WHERE " + " AND ".join(where)

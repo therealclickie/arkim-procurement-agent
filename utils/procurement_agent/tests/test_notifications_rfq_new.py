@@ -55,15 +55,25 @@ def rfq(sent_message_id="sm-1", run_id="run-1", domain="dxpe.com") -> dict:
 # ---------------------------------------------------------------------------
 
 def test_every_active_member_with_view_requests_gets_one_notification(fanout):
+    """SUPERSEDED BY ARC 4b S1 (prime-directive exception).
+
+    This used to assert that every ACTIVE member holding VIEW_REQUESTS
+    receives RFQ_NEW. S1 rules that wrong: broadcasting to every member sends
+    one email per member for one request and diffuses ownership, so each
+    recipient may reasonably assume a colleague has it. RFQ mail now goes to
+    the account's DESIGNATED contacts — OWNER and ADMIN by default — while
+    VIEW_REQUESTS keeps governing who may SEE a request in the portal.
+
+    Same setup, new pinned behaviour: the MEMBER is not a default contact.
+    """
     acct, _ = account_with(("owner@dxpe.com", supplier_accounts.ROLE_OWNER,
                             supplier_accounts.MEMBER_ACTIVE),
                            ("staff@dxpe.com", supplier_accounts.ROLE_MEMBER,
                             supplier_accounts.MEMBER_ACTIVE))
     created = notifications.notify_rfq_new(rfq(), acct)
-    assert sorted(n["recipient"] for n in created) == ["owner@dxpe.com",
-                                                       "staff@dxpe.com"]
+    assert sorted(n["recipient"] for n in created) == ["owner@dxpe.com"]
     assert all(n["state"] == ns.STATE_SENT for n in created)
-    assert len(fanout.outbox) == 2
+    assert len(fanout.outbox) == 1
 
 
 def test_pending_and_revoked_members_are_not_notified(fanout):

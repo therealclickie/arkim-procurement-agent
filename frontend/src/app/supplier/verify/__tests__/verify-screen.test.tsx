@@ -14,8 +14,8 @@
  *     swept after the COMPLETE cycle, success and failure alike.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import { VerifyScreen, INBOX_PATH } from "../verify-screen";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { CONTINUE_LABEL, VerifyScreen, INBOX_PATH } from "../verify-screen";
 import SupplierVerifyPage from "../page";
 import {
   consoleDump,
@@ -49,10 +49,18 @@ afterEach(() => {
   window.sessionStorage.clear();
 });
 
-/** Render with the current query string and return the rendered text once a
- *  terminal state is reached. */
+/** Click the R-F1 "Continue to sign in" control. The token is exchanged on a
+ *  gesture and never on load, so every test that wants an exchange makes one.
+ *  Corporate link scanners pre-fetch the URL; they cannot click. */
+function clickContinue(): void {
+  fireEvent.click(screen.getByRole("button", { name: CONTINUE_LABEL }));
+}
+
+/** Render with the current query string, make the gesture, and return the
+ *  rendered text once a terminal state is reached. */
 async function renderAndRead(): Promise<string> {
   const view = render(<VerifyScreen />);
+  clickContinue();
   await screen.findByText("This sign-in link is no longer valid");
   const text = view.container.textContent ?? "";
   view.unmount();
@@ -69,6 +77,7 @@ describe("verify — success", () => {
       jsonResponse(200, { token: "sess_raw", expires_at: "2026-09-21T00:00:00Z" }),
     );
     render(<VerifyScreen />);
+    clickContinue();
     await waitFor(() => expect(replace).toHaveBeenCalledWith(INBOX_PATH));
 
     expect(calls).toHaveLength(1);
@@ -82,6 +91,7 @@ describe("verify — success", () => {
     const push = vi.fn();
     stubFetch(() => jsonResponse(200, { token: "sess_raw" }));
     render(<VerifyScreen />);
+    clickContinue();
     await waitFor(() => expect(replace).toHaveBeenCalled());
     expect(push).not.toHaveBeenCalled();
   });
@@ -89,8 +99,64 @@ describe("verify — success", () => {
   it("exchanges the token exactly once (single-use links survive StrictMode)", async () => {
     const calls = stubFetch(() => jsonResponse(200, { token: "sess_raw" }));
     render(<VerifyScreen />);
+    clickContinue();
     await waitFor(() => expect(replace).toHaveBeenCalled());
     expect(calls).toHaveLength(1);
+    // The control is gone the moment it is used, so there is nothing left to
+    // press a second time — the single-use token cannot be double-spent.
+    expect(screen.queryByRole("button", { name: CONTINUE_LABEL })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Arc 4b R-F1 — the token is spent on a GESTURE, never on a page load
+// ---------------------------------------------------------------------------
+
+describe("verify — nothing is exchanged until the supplier acts", () => {
+  it("makes ZERO requests on render, and exchanges only after the click", async () => {
+    // SUCCESS CRITERION 6. This is the whole of R-F1: a corporate link scanner
+    // (Microsoft Safe Links and its equivalents) pre-fetches the URL at the
+    // RECIPIENT's mail gateway. A page that POSTs on load hands the scanner
+    // the single-use token, and the human then meets the uniform rejection for
+    // a link no person ever used. A scanner cannot click.
+    const calls = stubFetch(() =>
+      jsonResponse(200, { token: "sess_raw", expires_at: "2026-09-21T00:00:00Z" }),
+    );
+    render(<VerifyScreen />);
+
+    // Rendered, settled, and asked for nothing.
+    expect(calls).toHaveLength(0);
+    expect(replace).not.toHaveBeenCalled();
+    await screen.findByRole("button", { name: CONTINUE_LABEL });
+    expect(calls).toHaveLength(0);
+
+    clickContinue();
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(INBOX_PATH));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("/api/supplier/auth/verify");
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ token: TOKEN });
+  });
+
+  it("offers the same control whether or not the URL carried a token", async () => {
+    // The idle screen must not be an oracle either: if a token-less URL
+    // rejected immediately while a token-bearing one waited, the page would
+    // have told a prober which of the two they were holding.
+    stubFetch(() => unauthorized());
+    const withToken = render(<VerifyScreen />);
+    const withTokenText = withToken.container.textContent ?? "";
+    withToken.unmount();
+
+    search = new URLSearchParams();
+    const calls = stubFetch(() => unauthorized());
+    const withoutToken = render(<VerifyScreen />);
+    expect(withoutToken.container.textContent).toBe(withTokenText);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not render the token on the idle screen", () => {
+    stubFetch(() => unauthorized());
+    const { container } = render(<VerifyScreen />);
+    expect(container.textContent).not.toContain(TOKEN);
   });
 });
 
@@ -151,6 +217,7 @@ describe("verify — every failure mode is byte-identical", () => {
 
     stubFetch(() => jsonResponse(200, { token: "sess_raw" }));
     const view = render(<VerifyScreen />);
+    clickContinue();
     await waitFor(() => expect(replace).toHaveBeenCalled());
     const succeeded = view.container.textContent ?? "";
     view.unmount();
@@ -166,6 +233,7 @@ describe("verify — every failure mode is byte-identical", () => {
 
     stubFetch(() => unauthorized());
     render(<VerifyScreen />);
+    clickContinue();
     await screen.findByText("This sign-in link is no longer valid");
     const back = screen.getByRole("link", { name: "Request a new sign-in link" });
     expect(back.getAttribute("href")).toBe("/supplier/login");
@@ -183,6 +251,7 @@ describe("verify — the token is nowhere afterwards", () => {
       jsonResponse(200, { token: "sess_raw_abc", expires_at: "2026-09-21T00:00:00Z" }),
     );
     render(<VerifyScreen />);
+    clickContinue();
     await waitFor(() => expect(replace).toHaveBeenCalledWith(INBOX_PATH));
 
     expect(window.localStorage.length).toBe(0);
@@ -234,6 +303,7 @@ describe("/supplier/verify route — flag gating", () => {
     vi.stubEnv(FLAG, "1");
     stubFetch(() => jsonResponse(200, { token: "sess_raw" }));
     render(<SupplierVerifyPage />);
+    clickContinue();
     await waitFor(() => expect(replace).toHaveBeenCalledWith(INBOX_PATH));
   });
 });

@@ -210,6 +210,12 @@ CREATE TABLE IF NOT EXISTS supplier_members (
     registrable_domain  TEXT NOT NULL,
     role                TEXT NOT NULL DEFAULT 'MEMBER',
     status              TEXT NOT NULL DEFAULT 'PENDING',
+    -- Arc 4b S1. NULL means "use the role default" (see receives_rfq); an
+    -- explicit 0/1 is this member's own opt-out/opt-in and wins over the role.
+    -- Nullable on purpose: it keeps "nobody has chosen" distinguishable from
+    -- "somebody chose the same thing the role would have", so changing the
+    -- product default later does not silently overwrite real decisions.
+    receives_rfq        INTEGER,
     invited_by          TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT,
@@ -282,6 +288,24 @@ _INDEX_MEMBERS_ACCOUNT = (
 )
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """PRAGMA-driven idempotent column adds (convention B, the house pattern
+    from notifications_store._migrate / supplier_registry).
+
+    Only for tables whose shape changed after they first shipped — a fresh
+    database gets the column from the DDL above and this is a no-op. An
+    existing row gets NULL, which reads as "use the role default", so no
+    backfill is needed and no member's notification behaviour changes by
+    accident at deploy time.
+    """
+    have = {r[1] for r in conn.execute("PRAGMA table_info(supplier_members)")}
+    if have and "receives_rfq" not in have:
+        conn.execute("ALTER TABLE supplier_members ADD COLUMN receives_rfq INTEGER")
+    have_accounts = {r[1] for r in conn.execute("PRAGMA table_info(supplier_accounts)")}
+    if have_accounts and "timezone" not in have_accounts:
+        conn.execute("ALTER TABLE supplier_accounts ADD COLUMN timezone TEXT")
+
+
 def _get_conn() -> sqlite3.Connection:
     os.makedirs(_DATA_DIR, exist_ok=True)
     conn = sqlite3.connect(_DB_PATH)
@@ -293,6 +317,7 @@ def _get_conn() -> sqlite3.Connection:
     conn.execute(_DDL_SESSIONS)
     conn.execute(_INDEX_SESSION_HASH)
     conn.execute(_DDL_AUDIT)
+    _migrate(conn)
     conn.commit()
     return conn
 
@@ -497,6 +522,34 @@ def get_member_by_email(account_id: str, email: str) -> Optional[dict]:
         return None
 
 
+def set_account_timezone(account_id: str, timezone_name: Optional[str]
+                         ) -> Optional[dict]:
+    """Set (or clear, with ``None``) an account's IANA timezone — arc 4b S3.
+
+    ``None`` restores the configured default rather than writing the default's
+    current value, the same reasoning as ``set_member_receives_rfq``. The name
+    is NOT validated here: ``business_hours.zone`` is fail-soft and falls back
+    to the default, so a bad value degrades that account's scheduling instead
+    of raising inside a store write. Fail-soft ``None``.
+    """
+    if _dormant() or not account_id:
+        return None
+    value = (timezone_name or "").strip() or None
+    try:
+        with closing(_get_conn()) as conn:
+            cur = conn.execute(
+                "UPDATE supplier_accounts SET timezone = ?, updated_at = ? "
+                "WHERE id = ?", (value, _now(), account_id))
+            conn.commit()
+            if cur.rowcount == 0:
+                return None
+    except Exception as exc:
+        print(f"[SupplierAccounts] set_account_timezone failed for "
+              f"{account_id!r}: {exc}")
+        return None
+    return get_account(account_id)
+
+
 def list_members(account_id: str) -> list[dict]:
     """All members of an account (any status — the admin/owner views show
     pending + revoked honestly), newest last. [] on fail-soft."""
@@ -527,6 +580,69 @@ def list_pending_members() -> list[dict]:
     except Exception as exc:
         print(f"[SupplierAccounts] list_pending_members failed: {exc}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# Arc 4b S1 — designated RFQ contacts
+#
+# WHY A DESIGNATION AND NOT "everyone who can see requests". Arc 4 fanned
+# RFQ_NEW out to every ACTIVE member holding VIEW_REQUESTS. Five reps on an
+# account therefore received five emails for one RFQ, and — worse than the
+# volume — ownership diffused: each of the five could reasonably assume one of
+# the other four had it. One request, one owner.
+#
+# VIEW_REQUESTS still governs who may SEE a request in the portal. This flag
+# governs only who is MAILED about it, which is a different question: a member
+# who can see requests but is not the person who answers them is exactly the
+# case the default is built for.
+# ---------------------------------------------------------------------------
+
+# The product default, by role. Reversible later without a schema change,
+# because a member who has chosen carries an explicit value that wins.
+RFQ_CONTACT_DEFAULT_ROLES: frozenset[str] = frozenset({ROLE_OWNER, ROLE_ADMIN})
+
+
+def member_receives_rfq(member: Optional[dict]) -> bool:
+    """Is this member a designated RFQ contact (S1)?
+
+    An explicit stored value wins; ``NULL`` falls back to the role default
+    (OWNER and ADMIN yes, MEMBER no). A missing member is not a contact.
+
+    Pure over its argument — no store read — so the fan-out can decide from
+    the rows it already has, and the rule is table-testable.
+    """
+    if not member:
+        return False
+    raw = member.get("receives_rfq")
+    if raw is not None:
+        return bool(raw)
+    return (member.get("role") or "") in RFQ_CONTACT_DEFAULT_ROLES
+
+
+def set_member_receives_rfq(member_id: str, receives: Optional[bool]
+                            ) -> Optional[dict]:
+    """Set (or clear, with ``None``) a member's explicit RFQ-contact flag.
+
+    ``None`` restores "follow the role default" rather than writing the
+    default's current value — so a later change to the product default reaches
+    members who never chose, and only them. Fail-soft ``None``.
+    """
+    if _dormant() or not member_id:
+        return None
+    value = None if receives is None else (1 if receives else 0)
+    try:
+        with closing(_get_conn()) as conn:
+            cur = conn.execute(
+                "UPDATE supplier_members SET receives_rfq = ?, updated_at = ? "
+                "WHERE id = ?", (value, _now(), member_id))
+            conn.commit()
+            if cur.rowcount == 0:
+                return None
+    except Exception as exc:
+        print(f"[SupplierAccounts] set_member_receives_rfq failed for "
+              f"{member_id!r}: {exc}")
+        return None
+    return get_member(member_id)
 
 
 def update_member_status(member_id: str, status: str, *,
@@ -1029,9 +1145,55 @@ def send_magic_link_email(email: str, raw_token: str, *,
     return result.status
 
 
+ENV_INVITE_DAILY_CAP = "INVITE_DAILY_CAP_PER_ACCOUNT"
+DEFAULT_INVITE_DAILY_CAP = 10
+
+
+def invite_daily_cap() -> int:
+    """Arc 4b R-F5: how many invites ONE account may send in a UTC day.
+
+    Read LIVE. Unset or unparseable ⇒ the default — a typo in a cap must not
+    silently mean "no cap" on mail leaving our domain to strangers. ``<= 0``
+    switches the cap off, the house convention for an inert limiter.
+    """
+    raw = (os.environ.get(ENV_INVITE_DAILY_CAP) or "").strip()
+    if not raw:
+        return DEFAULT_INVITE_DAILY_CAP
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"[SupplierAccounts] {ENV_INVITE_DAILY_CAP}={raw!r} is not a "
+              f"number — using {DEFAULT_INVITE_DAILY_CAP}")
+        return DEFAULT_INVITE_DAILY_CAP
+
+
+def invite_cap_reached(supplier_domain: str, *, day: Optional[str] = None) -> bool:
+    """Has this ACCOUNT already spent its invite budget for ``day``?
+
+    Counted per account, never globally and never per recipient: invite mail
+    is outward mail from our domain to a person who has never heard of us, so
+    the blast radius that matters is one account's member list. A busy account
+    must not be able to shut the channel for every other account.
+
+    ``day`` is ``'YYYY-MM-DD'`` and defaults to today UTC; passing it makes the
+    decision a pure function of the caller's instant.
+    """
+    cap = invite_daily_cap()
+    if cap <= 0:
+        return False
+    from utils import notifications_store
+    dom = _normalize_domain(supplier_domain or "")
+    today = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    sent = notifications_store.count_notifications_on_day(
+        kind=notifications_store.KIND_MEMBER_INVITE, day=today,
+        supplier_domain=dom)
+    return sent >= cap
+
+
 def send_member_invite_email(email: str, *, account_domain: str,
                              invited_by_email: Optional[str] = None,
-                             member_id: Optional[str] = None) -> Optional[str]:
+                             member_id: Optional[str] = None,
+                             day: Optional[str] = None) -> Optional[str]:
     """Tell an invited person they have been added to a supplier account.
 
     NEW MAIL, NOT A MIGRATION — and worth saying plainly (gate FINDING F5):
@@ -1054,18 +1216,32 @@ def send_member_invite_email(email: str, *, account_domain: str,
     from utils.email_sender import EmailMessage, GmailSender
     from utils import supplier_registry
     dom = _normalize_domain(account_domain)
-    inviter = f" by {invited_by_email}" if invited_by_email else ""
+    # R-F5: one account cannot spray invites. Checked BEFORE the send, so a
+    # refused invite costs no mail and writes no ledger row; other accounts are
+    # unaffected because the count is keyed on THIS account's domain.
+    if invite_cap_reached(dom, day=day):
+        print(f"[SupplierAccounts] invite cap_blocked for {dom} -> {email}")
+        return "cap_blocked"
+    # R-F5: the copy must let the recipient tell this is not spam, which means
+    # naming a person they know AND the company that person works for. "You
+    # have been added", from a domain they have never heard of, is
+    # indistinguishable from phishing.
+    company = dom or "your company"
+    inviter = invited_by_email or f"A colleague at {company}"
     msg = EmailMessage(
         to=[email],
-        subject="You have been added to your Arkim supplier account",
+        subject=f"{inviter} added you to their Arkim supplier account",
         body=(
             "Hello,\n\n"
-            f"You have been added{inviter} to the Arkim supplier account for "
-            f"{dom or 'your company'}.\n\n"
+            f"{inviter} at {company} added you to the Arkim supplier account "
+            f"for {company}.\n\n"
+            "Arkim sends quote requests to your company; this is how you see "
+            "them and answer them.\n\n"
             "To sign in, request a link here — we will email you a single-use "
             "sign-in link:\n"
             f"{magic_link_url('').split('?token=')[0]}\n\n"
-            "If you were not expecting this, you can ignore this email.\n\n"
+            f"If you were not expecting this, check with {inviter} — or ignore "
+            "this email.\n\n"
             "Regards,\nArkim Procurement\nprocurement@arkim.ai"
         ),
         metadata={"supplier_domain": dom, "member_invite": True,

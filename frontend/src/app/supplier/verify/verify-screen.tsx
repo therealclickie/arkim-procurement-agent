@@ -1,11 +1,20 @@
 "use client";
 
 /**
- * VerifyScreen — the magic-link landing (arc 3 T5).
+ * VerifyScreen — the magic-link landing (arc 3 T5; arc 4b T3 / R-F1).
  *
  * The emailed link is `/supplier/verify?token=<raw>`. This screen reads the
- * token from the query string, exchanges it for a session, and sends the
- * supplier to their inbox.
+ * token from the query string, exchanges it for a session on an EXPLICIT user
+ * gesture, and sends the supplier to their inbox.
+ *
+ * WHY A CLICK, NOT A LOAD (R-F1). The page used to POST the token in an
+ * effect when it mounted. Corporate link scanners — Microsoft Safe Links and
+ * its equivalents — pre-fetch URLs on the RECIPIENT's side, at their mail
+ * gateway, before the human ever clicks. A scanner therefore consumed the
+ * single-use token, and the real person arrived to the uniform rejection for a
+ * link that had never been used by anyone. D2's tracking-off configuration set
+ * does not help: the scanning happens at the recipient's gateway, not at SES.
+ * A gesture is the only thing a scanner cannot produce.
  *
  * WHAT HAPPENS TO THE TOKEN. It is read from the URL into a local variable,
  * passed to `verifyMagicLink`, and dropped. It is never put in state that
@@ -21,14 +30,16 @@
  * failure kind available to branch on even if we wanted to — which is the
  * point: "this link was already used" would tell an attacker their guess was
  * a real token, and "your account is pending" would tell a pending member
- * something the backend deliberately withholds.
+ * something the backend deliberately withholds. The idle screen is shown for
+ * a MISSING token too, for the same reason: the page must not reveal, before
+ * the exchange, whether the URL carried anything worth exchanging.
  *
  * G1: a param-free client component reading `useSearchParams()`, not a server
  * component reading a `searchParams` Promise — so no `use()`, so no React 19
  * dependency, so this route is fully render-testable under React 18.3.1.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BRAND_NAME } from "@/lib/brand";
@@ -44,18 +55,24 @@ const REJECT_TITLE = "This sign-in link is no longer valid";
 const REJECT_BODY =
   "Sign-in links expire and can only be used once. Request a new one and we'll email it to you.";
 
-type Phase = "verifying" | "rejected";
+/** THE gesture. Exported so the test names the control, not a string copy. */
+export const CONTINUE_LABEL = "Continue to sign in";
+const IDLE_TITLE = "Finish signing in";
+const IDLE_BODY =
+  "Sign-in links can only be used once, so we wait for you before using this one.";
+
+type Phase = "idle" | "verifying" | "rejected";
 
 export function VerifyScreen() {
   const router = useRouter();
   const params = useSearchParams();
-  const [phase, setPhase] = useState<Phase>("verifying");
-  // Guards against React 18 StrictMode's double-invoked effect burning the
-  // single-use token twice — the second exchange would legitimately 401 and
-  // reject a link that had just worked.
+  const [phase, setPhase] = useState<Phase>("idle");
+  // Guards the single-use token against a double submit (an impatient second
+  // click, or a re-render racing the first exchange): the second press would
+  // legitimately 401 and reject a link that had just worked.
   const started = useRef(false);
 
-  useEffect(() => {
+  const onContinue = () => {
     if (started.current) return;
     started.current = true;
     // Read and drop. Nothing downstream of this line holds the token.
@@ -66,6 +83,7 @@ export function VerifyScreen() {
       setPhase("rejected");
       return;
     }
+    setPhase("verifying");
     void verifyMagicLink(token).then((ok) => {
       if (ok) {
         // replace, not push: the token-bearing URL leaves history.
@@ -74,7 +92,25 @@ export function VerifyScreen() {
         setPhase("rejected");
       }
     });
-  }, [params, router]);
+  };
+
+  if (phase === "idle") {
+    return (
+      <SupplierSurface>
+        <SupplierNotice title={IDLE_TITLE} body={<p>{IDLE_BODY}</p>}>
+          <p>
+            <button
+              type="button"
+              className="supplier-link-btn"
+              onClick={onContinue}
+            >
+              {CONTINUE_LABEL}
+            </button>
+          </p>
+        </SupplierNotice>
+      </SupplierSurface>
+    );
+  }
 
   if (phase === "verifying") {
     return (

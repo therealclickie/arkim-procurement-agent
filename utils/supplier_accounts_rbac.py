@@ -205,6 +205,32 @@ def revoke_member(actor: dict, target_member_id: str) -> dict:
     return out
 
 
+def set_rfq_contact(actor: dict, target_member_id: str,
+                    receives: Optional[bool]) -> dict:
+    """Designate (or un-designate) a member as an RFQ contact — arc 4b S1.
+
+    Policy: MANAGE_MEMBERS capability, i.e. OWNER and ADMIN, the same
+    capability that governs who may invite and revoke — deciding who is mailed
+    about the company's incoming work is member management, not a personal
+    preference (the personal preference is the member's own notification
+    preference, which is a different control on a different screen). The
+    target must belong to the ACTOR's account; a cross-account id is a
+    not-found, never an existence reveal.
+
+    ``receives=None`` clears the explicit flag, restoring the role default.
+    Returns the updated member; raises SupplierAccountsError on a violation.
+    """
+    if not has_permission(actor, MANAGE_MEMBERS):
+        raise SupplierAccountsError("forbidden", "manage_members required")
+    target = _target_in_actor_account(actor, target_member_id)
+    from utils.supplier_accounts import set_member_receives_rfq
+    out = set_member_receives_rfq(target["id"], receives)
+    if out is None:
+        raise SupplierAccountsError("store_error",
+                                    "rfq contact flag could not be set")
+    return out
+
+
 def _target_in_actor_account(actor: dict, target_member_id: str) -> dict:
     """The target member, verified to belong to the actor's account. Raises
     ``member_not_found`` otherwise (a cross-account id is indistinguishable

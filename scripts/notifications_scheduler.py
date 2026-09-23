@@ -25,11 +25,13 @@ USAGE
     uv run python scripts/notifications_scheduler.py escalations
     uv run python scripts/notifications_scheduler.py escalations --now 2026-09-21T09:00:00+00:00
     uv run python scripts/notifications_scheduler.py escalations --json
+    uv run python scripts/notifications_scheduler.py coalesce
     uv run python scripts/notifications_scheduler.py digest
 
     # Cron (UTC). Hourly for the ladder — its resolution is hours, so hourly is
     # plenty and a missed hour self-heals on the next run. Once a day for the
     # digest, because "daily" is the promise the member opted into:
+    #   */5 * * * * cd /srv/arkim && uv run python scripts/notifications_scheduler.py coalesce
     #   0 * * * * cd /srv/arkim && uv run python scripts/notifications_scheduler.py escalations
     #   0 7 * * * cd /srv/arkim && uv run python scripts/notifications_scheduler.py digest
 
@@ -79,6 +81,34 @@ def cmd_escalations(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_coalesce(args: argparse.Namespace) -> int:
+    """Arc 4b S2: send every RFQ_NEW whose coalescing window has closed.
+
+    Run it OFTEN — every few minutes. This is the step that actually delivers
+    RFQ mail now, so its cron entry is not optional: a box that runs the
+    ladder but not this one will chase suppliers about requests it never sent
+    them. The window (NOTIFY_COALESCE_MINUTES, default 15) sets the worst-case
+    delay; the cron interval adds to it, so keep the interval well under the
+    window.
+    """
+    result = notifications.run_coalesced_sends(parse_now(args.now))
+    _report("coalesce", result, as_json=args.json)
+    return 0
+
+
+def cmd_cancel(args: argparse.Namespace) -> int:
+    """Arc 4b S4: cancel pending reminders/escalations for resolved RFQs.
+
+    ``escalations`` already does this before it decides anything, so this
+    subcommand exists for the operator who wants the cancellation sweep on its
+    own cadence (or to see what it would do) — not because the ladder depends
+    on it being scheduled separately.
+    """
+    result = notifications.cancel_resolved(parse_now(args.now))
+    _report("cancel", result, as_json=args.json)
+    return 0
+
+
 def cmd_digest(args: argparse.Namespace) -> int:
     """D7's DAILY_DIGEST: every deferred RFQ_NEW for a member, batched into one
     mail. Run it ONCE a day — running it twice a day is not incorrect (the
@@ -86,6 +116,14 @@ def cmd_digest(args: argparse.Namespace) -> int:
     what the member asked for."""
     result = notifications.run_daily_digest(parse_now(args.now))
     _report("digest", result, as_json=args.json)
+    return 0
+
+
+def cmd_concierge_digest(args: argparse.Namespace) -> int:
+    """Arc 4b S6: the once-a-day read of the DIGEST tier — the alerts that are
+    worth knowing about and are not worth interrupting anybody for."""
+    result = notifications.run_concierge_digest(parse_now(args.now))
+    _report("concierge-digest", {"count": result["count"]}, as_json=args.json)
     return 0
 
 
@@ -115,6 +153,22 @@ def build_parser() -> argparse.ArgumentParser:
                      help="emit the result as one JSON line")
     esc.set_defaults(func=cmd_escalations)
 
+    coa = sub.add_parser("coalesce",
+                         help="send RFQ_NEW batches whose window has closed")
+    coa.add_argument("--now", default=None,
+                     help="ISO-8601 instant to evaluate against (default: now, UTC)")
+    coa.add_argument("--json", action="store_true",
+                     help="emit the result as one JSON line")
+    coa.set_defaults(func=cmd_coalesce)
+
+    can = sub.add_parser("cancel",
+                         help="cancel chasing for RFQs that are now resolved")
+    can.add_argument("--now", default=None,
+                     help="ISO-8601 instant to evaluate against (default: now, UTC)")
+    can.add_argument("--json", action="store_true",
+                     help="emit the result as one JSON line")
+    can.set_defaults(func=cmd_cancel)
+
     dig = sub.add_parser("digest",
                          help="send the D7 daily digest for DAILY_DIGEST members")
     dig.add_argument("--now", default=None,
@@ -122,6 +176,13 @@ def build_parser() -> argparse.ArgumentParser:
     dig.add_argument("--json", action="store_true",
                      help="emit the result as one JSON line")
     dig.set_defaults(func=cmd_digest)
+    con = sub.add_parser("concierge-digest",
+                         help="report today's DIGEST-tier concierge alerts")
+    con.add_argument("--now", default=None,
+                     help="ISO-8601 instant to evaluate against (default: now, UTC)")
+    con.add_argument("--json", action="store_true",
+                     help="emit the result as one JSON line")
+    con.set_defaults(func=cmd_concierge_digest)
     return parser
 
 

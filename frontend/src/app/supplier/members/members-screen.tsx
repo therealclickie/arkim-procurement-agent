@@ -27,6 +27,7 @@ import {
   getAccountMembers,
   inviteAccountMember,
   revokeAccountMember,
+  setAccountMemberRfqContact,
   type AccountMember,
   type SupplierRole,
 } from "@/lib/supplier-api";
@@ -127,7 +128,8 @@ export function MembersScreen({ session }: { session: SupplierSession }) {
           Who can sign in for {session.account?.supplier_domain}
         </h1>
         <p className="portal-form-sub">
-          Everyone here can see your buyer requests and quote them.
+          Everyone here can see your buyer requests and quote them. Only the
+          people ticked below are emailed when a new one arrives.
           {mayManage
             ? " Admins can also invite and remove colleagues."
             : " Ask an admin on your team to add or remove people."}
@@ -195,6 +197,27 @@ export function MembersScreen({ session }: { session: SupplierSession }) {
                       ? "Awaiting approval"
                       : "Removed"}
                 </span>
+                {/* Arc 4b S1. Separate from the role: everyone here can SEE
+                    requests, but only the designated contacts are emailed
+                    about them, so one request has one owner rather than five
+                    people each assuming another has it. Hidden without
+                    manage_members; the server 403s regardless. */}
+                {mayManage && m.status !== "REVOKED" && (
+                  <label className="supplier-member-rfq">
+                    <input
+                      type="checkbox"
+                      aria-label={`Email ${m.email} about new requests`}
+                      checked={m.receives_rfq ?? false}
+                      disabled={busy}
+                      onChange={(e) =>
+                        void run(() =>
+                          setAccountMemberRfqContact(m.id, e.target.checked),
+                        )
+                      }
+                    />
+                    <span>Email about new requests</span>
+                  </label>
+                )}
                 {mayManage && !isOwner && m.status !== "REVOKED" && (
                   <span className="supplier-member-actions">
                     <button

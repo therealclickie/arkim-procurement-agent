@@ -6346,6 +6346,13 @@ def _supplier_open_requests(dom: str) -> list:
                 continue
             if m.get("status") not in supplier_registry.OPEN_RFQ_STATUSES:
                 continue
+            # Arc 4b R-F8: notification mail now writes ledger rows too, and a
+            # notification carries the run id of the RFQ it describes. Only an
+            # RFQ-class row is an inbox row — without this filter a reminder
+            # about run X would masquerade as a second (or a fabricated) open
+            # request for X. An absent class is the historical RFQ default.
+            if m.get("message_class") not in (None, supplier_registry.MESSAGE_CLASS_RFQ):
+                continue
             seen_runs.add(rid)
             specs = _run_specs_for_quote(rid)
             if specs is None:
@@ -7246,6 +7253,10 @@ def _serialize_account_member(member: dict) -> dict:
         "role": member["role"],
         "status": member["status"],
         "created_at": member["created_at"],
+        # Arc 4b S1: the EFFECTIVE designation, not the raw column — the
+        # screen renders a checkbox, and "null means the role default" is a
+        # storage detail the client should not have to re-implement.
+        "receives_rfq": supplier_accounts.member_receives_rfq(member),
     }
 
 
@@ -7295,6 +7306,40 @@ def supplier_members_invite(body: SupplierInviteBody,
     except Exception as exc:  # pragma: no cover - the helper is itself fail-soft
         import logging
         logging.getLogger(__name__).warning("invite mail failed: %s", exc)
+    return JSONResponse(content={"ok": True,
+                                 "member": _serialize_account_member(member)},
+                        headers=_portal_response_headers({}))
+
+
+class SupplierRfqContactBody(BaseModel):
+    """``receives`` absent/null clears the explicit flag and restores the
+    role default — it is not the same as ``false``."""
+    receives: Optional[bool] = None
+
+
+@app.post("/api/supplier/members/{member_id}/rfq-contact")
+def supplier_member_rfq_contact(member_id: str, body: SupplierRfqContactBody,
+                                session: dict = Depends(
+                                    _supplier_require_capability(
+                                        supplier_accounts_rbac.MANAGE_MEMBERS))):
+    """Arc 4b S1: designate (or un-designate) a member as an RFQ contact.
+
+    Capability-gated at MANAGE_MEMBERS — OWNER and ADMIN — because deciding
+    who is mailed about the company's incoming work is member management, not
+    a personal setting. A MEMBER calling this directly gets 403 from the
+    server, not merely a hidden control. Audited; cross-account ids are 404.
+    """
+    try:
+        member = supplier_accounts_rbac.set_rfq_contact(
+            session["member"], member_id, body.receives)
+    except supplier_accounts.SupplierAccountsError as exc:
+        _supplier_rbac_error(exc)
+    supplier_accounts.audit(
+        "rfq_contact_changed", account_id=session["account_id"],
+        member_id=member["id"], email=member["email"],
+        actor=session["member"]["email"],
+        detail={"receives_rfq": supplier_accounts.member_receives_rfq(member),
+                "explicit": body.receives})
     return JSONResponse(content={"ok": True,
                                  "member": _serialize_account_member(member)},
                         headers=_portal_response_headers({}))
@@ -7515,6 +7560,83 @@ def _notifications_flag_off_404():
     raise HTTPException(status_code=404, detail="Not Found")
 
 
+# ---------------------------------------------------------------------------
+# Arc 4b R-F10 — the webhook throttles its REJECTION path only.
+#
+# Per-IP throttling of ALL webhook traffic would be wrong here. SNS delivers
+# from AWS ranges, so a shared bucket risks dropping a legitimate burst, and a
+# dropped verified event is PERMANENT DATA LOSS: the SNS retry policy is finite
+# and a missed Delivery/Bounce leaves a notification stuck in the wrong state
+# forever. So only requests that FAIL verification are counted, and a request
+# that passes verification is processed regardless of the bucket's state.
+#
+# THE LIMITER IS NOT AN ORACLE. The throttled answer is the SAME bare
+# HTTPException(403, "Forbidden") as every other rejection — no Retry-After, no
+# extra header, no distinguishing body — unlike every other limiter in this
+# file, which answers 429 with Retry-After. A prober must not be able to tell
+# "rate-limited" from "bad signature" from "foreign topic". The throttle is
+# therefore observable ONLY through this module's own seam
+# (``_webhook_reject_throttled``), which is exactly how it is tested.
+#
+# HONEST LIMITATION: because you cannot know an envelope is unverified without
+# verifying it, the limiter cannot short-circuit verification without risking
+# the data loss above. What it gives is a counted, per-IP abuse signal at the
+# seam an upstream WAF/ALB rule keys on — not a saving in RSA work. The cheap
+# checks already shed the bulk of a spray: ses_webhook runs the topic allowlist
+# (a local set lookup) BEFORE any certificate fetch or signature verification.
+_webhook_reject_lock = threading.Lock()
+_webhook_reject_buckets: Dict[str, list] = {}
+
+
+def _webhook_reject_window_sec() -> int:
+    return _env_int("WEBHOOK_REJECT_RATE_WINDOW_SEC", 60)
+
+
+def _webhook_reject_cap() -> int:
+    return _env_int("WEBHOOK_REJECT_RATE_LIMIT", 60)
+
+
+def _webhook_reject_bump(request: Request) -> bool:
+    """Count ONE rejected webhook request against its source IP's budget.
+
+    Returns True when this IP is now OVER budget. Called only after
+    ``handle_envelope`` has already refused the request, so a verified event
+    never touches (and is never judged by) the bucket. Inert when the cap is
+    <= 0, the house convention for "this limiter is switched off".
+    """
+    cap = _webhook_reject_cap()
+    if cap <= 0:
+        return False
+    import time
+    key = _client_ip(request)
+    window = _webhook_reject_window_sec()
+    now = time.monotonic()
+    with _webhook_reject_lock:
+        entry = _webhook_reject_buckets.get(key)
+        if not entry or (now - entry[1]) >= window:
+            entry = [0, now]
+            _webhook_reject_buckets[key] = entry
+        entry[0] += 1
+        return entry[0] > cap
+
+
+def _webhook_reject_throttled(ip: str) -> bool:
+    """Read-only: is ``ip`` currently over its rejection budget? Counts
+    nothing — this is the observation seam the tests use, because the HTTP
+    response deliberately reveals nothing."""
+    cap = _webhook_reject_cap()
+    if cap <= 0:
+        return False
+    import time
+    with _webhook_reject_lock:
+        entry = _webhook_reject_buckets.get(ip)
+        if not entry:
+            return False
+        if (time.monotonic() - entry[1]) >= _webhook_reject_window_sec():
+            return False
+        return entry[0] > cap
+
+
 @app.post("/api/webhooks/ses")
 async def ses_events_webhook(request: Request):
     """T6/D4: SNS → SES delivery events. PUBLIC and UNAUTHENTICATED.
@@ -7541,6 +7663,12 @@ async def ses_events_webhook(request: Request):
     raw = await request.body()
     outcome = ses_webhook.handle_envelope(raw)
     if outcome is None:
+        # R-F10: the rejection path — and ONLY it — is rate-limited, keyed on
+        # source IP. The bump happens after the refusal, so a verified event
+        # from a currently-throttled IP is processed normally (the branch below
+        # is never reached for it). The answer is the same bare 403 whether or
+        # not the bucket tripped: the limiter must not become an oracle.
+        _webhook_reject_bump(request)
         raise HTTPException(status_code=403, detail="Forbidden")
     return JSONResponse(content={"ok": True},
                         headers=_portal_response_headers({}))
@@ -7634,6 +7762,46 @@ def admin_notification_alerts(authorization: Optional[str] = Header(default=None
     from utils import notifications
     rows = notifications.list_open_alerts()
     return {"count": len(rows), "alerts": rows}
+
+
+@app.get("/api/admin/notification-digest")
+def admin_notification_digest(authorization: Optional[str] = Header(default=None)):
+    """Arc 4b S6: today's DIGEST-tier concierge alerts, in one place.
+
+    The tier that does NOT interrupt — soft-bounce streaks, notification-cap
+    blocks, a hard bounce on a contact who was not the account's last one.
+    Read once a day. It reports; it does not acknowledge, because "somebody
+    was told" and "somebody dealt with it" are different facts and collapsing
+    them loses the second one.
+
+    Flag gate BEFORE ``require_admin``, the arc 2 convention.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    require_admin(authorization)
+    from utils import notifications
+    return notifications.run_concierge_digest()
+
+
+@app.get("/api/admin/notification-actionability")
+def admin_notification_actionability(
+        days: int = 30, authorization: Optional[str] = Header(default=None)):
+    """Arc 4b S7: per-kind sent → delivered → viewed → quoted, and the rolling
+    actionability rate, with kinds below the floor flagged for review.
+
+    The only honest defence against over-alerting: you cannot reason your way
+    to the right volume in advance, you have to measure it. A flagged kind is
+    flagged FOR REVIEW — the measurement is evidence for a decision, not the
+    decision.
+
+    Flag gate BEFORE ``require_admin``, the arc 2 convention.
+    """
+    if not _notifications_enabled():
+        _notifications_flag_off_404()
+    require_admin(authorization)
+    from utils import notifications
+    report = notifications.notification_actionability(days=max(1, min(days, 365)))
+    return {"count": len(report.get("kinds") or []), **report}
 
 
 @app.post("/api/admin/notification-alerts/{alert_id}/acknowledge")

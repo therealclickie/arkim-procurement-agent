@@ -17,6 +17,16 @@ THE SCHEDULER IS A PLAIN FUNCTION
 a given ``now``. There is no timer, no thread and no scheduler library anywhere
 in the arc (GATE RULINGS / reviewer R8) — and the last test in this file asserts
 that structurally rather than trusting a comment.
+
+ARC 4b S3 (prime-directive exception, G-STOP-1): the ladder's unit is now
+BUSINESS hours in the account's timezone, not wall-clock hours. Every age in
+this file is therefore expressed with ``business_hours_before`` against a
+FIXED instant, and every scheduler call is given that instant explicitly. The
+rungs, the labels and the expected outcomes are unchanged — only the clock
+they are measured on is. This also removes arc 4's date-dependence: the file
+previously back-dated rows against the wall clock and ran the scheduler with
+no ``now``, so under business hours it would have been green on a Tuesday and
+red on a Sunday.
 """
 from __future__ import annotations
 
@@ -26,12 +36,15 @@ from pathlib import Path
 
 import pytest
 
-from utils import notifications, notifications_store as ns
+from utils import business_hours, notifications, notifications_store as ns
 from utils.procurement_agent.tests._arc4_notifications_fixtures import (  # noqa: F401
     allowlist, install_fake_provider, isolate_notification_stores,
 )
 
-NOW = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
+# Tuesday 13:00 America/Los_Angeles — inside the business window, so the
+# ladder can both decide AND send at this instant. Fixed, so every result
+# below is a function of the instants the test supplies and nothing else.
+NOW = datetime(2026, 9, 22, 20, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture
@@ -52,8 +65,13 @@ def notification_row(*, age_hours: float = 0.0, clicked: bool = False,
                      kind: str = ns.KIND_RFQ_NEW,
                      run_id: str = "run-1") -> dict:
     """A notification dict shaped exactly as the store returns one. Built by
-    hand so the decision function can be tested with no store and no clock."""
-    sent_at = (NOW - timedelta(hours=age_hours)).isoformat()
+    hand so the decision function can be tested with no store and no clock.
+
+    ``age_hours`` is BUSINESS hours (S3): the row is back-dated by walking the
+    business calendar backwards from ``NOW``, so "6 hours old" means six hours
+    of the supplier's working time however many weekends lie in between.
+    """
+    sent_at = business_hours.business_hours_before(NOW, age_hours).isoformat()
     return {
         "id": "n-1", "kind": kind, "state": state, "run_id": run_id,
         "member_id": "m-1", "supplier_domain": "dxpe.com",
@@ -137,19 +155,22 @@ def test_the_thresholds_are_configurable(ladder, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def aged_notification(*, hours: float, run_id: str = "run-1",
-                      recipient: str = "sales@dxpe.com") -> dict:
-    """A real stored RFQ_NEW whose ``sent_at`` is ``hours`` in the past.
+                      recipient: str = "sales@dxpe.com",
+                      at: datetime = NOW) -> dict:
+    """A real stored RFQ_NEW whose ``sent_at`` is ``hours`` BUSINESS hours
+    before ``at``.
 
     ``transition(..., at=)`` back-dates the send, which is what the ladder
-    measures age from — no sleeping, no clock patching.
+    measures age from — no sleeping, no clock patching, and (S3) no dependence
+    on the calendar date the suite happens to run on.
     """
     n = ns.create_notification(kind=ns.KIND_RFQ_NEW, account_id="acct-1",
                                member_id="m-1", run_id=run_id,
                                supplier_domain="dxpe.com", recipient=recipient,
                                subject_ref="sm-1", is_test=True)
     assert n is not None
-    at = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    ns.transition(n["id"], ns.STATE_SENT, event_type="Send", at=at)
+    sent_at = business_hours.business_hours_before(at, hours).isoformat()
+    ns.transition(n["id"], ns.STATE_SENT, event_type="Send", at=sent_at)
     return ns.get_notification(n["id"])
 
 
@@ -158,10 +179,10 @@ def test_a_reminder_is_sent_once_and_only_once(ladder):
     ``reminded_at IS NULL`` write, not a check-then-act, so two overlapping
     schedulers cannot both win."""
     parent = aged_notification(hours=5)
-    first = notifications.run_escalations()
+    first = notifications.run_escalations(NOW)
     assert first["reminded"] == 1
-    assert notifications.run_escalations()["reminded"] == 0
-    assert notifications.run_escalations()["reminded"] == 0
+    assert notifications.run_escalations(NOW)["reminded"] == 0
+    assert notifications.run_escalations(NOW)["reminded"] == 0
 
     reminders = ns.list_notifications(kind=ns.KIND_RFQ_REMINDER)
     assert len(reminders) == 1
@@ -176,7 +197,7 @@ def test_a_reminder_is_sent_once_and_only_once(ladder):
 def test_the_reminder_goes_to_the_same_member_about_the_same_rfq(ladder):
     a = aged_notification(hours=5, run_id="run-a", recipient="a@dxpe.com")
     b = aged_notification(hours=5, run_id="run-b", recipient="b@dxpe.com")
-    notifications.run_escalations()
+    notifications.run_escalations(NOW)
     pairs = {(r["run_id"], r["recipient"])
              for r in ns.list_notifications(kind=ns.KIND_RFQ_REMINDER)}
     assert pairs == {("run-a", "a@dxpe.com"), ("run-b", "b@dxpe.com")}
@@ -187,7 +208,7 @@ def test_the_alert_is_raised_once_and_sends_no_further_supplier_mail(ladder):
     """The 24h rung: a human takes over. Two unanswered mails is the point to
     hand off, not the point to send a third."""
     parent = aged_notification(hours=30)
-    result = notifications.run_escalations()
+    result = notifications.run_escalations(NOW)
     assert (result["alerted"], result["reminded"]) == (1, 0)
     assert ladder.outbox == [], "escalation must not email the supplier"
 
@@ -197,7 +218,7 @@ def test_the_alert_is_raised_once_and_sends_no_further_supplier_mail(ladder):
     assert alerts[0]["run_id"] == parent["run_id"]
     assert alerts[0]["status"] == ns.ALERT_OPEN
 
-    again = notifications.run_escalations()
+    again = notifications.run_escalations(NOW)
     assert (again["alerted"], again["reminded"]) == (0, 0)
     assert len(ns.list_alerts(kind=ns.ALERT_RFQ_ESCALATION)) == 1
     assert ladder.outbox == []
@@ -206,9 +227,9 @@ def test_the_alert_is_raised_once_and_sends_no_further_supplier_mail(ladder):
 def test_a_reminder_then_an_alert_walks_the_whole_ladder(ladder):
     """The intended sequence, driven by two runs at two different instants."""
     parent = aged_notification(hours=5)
-    now = datetime.now(timezone.utc)
-    assert notifications.run_escalations(now)["reminded"] == 1
-    assert notifications.run_escalations(now + timedelta(hours=20))["alerted"] == 1
+    assert notifications.run_escalations(NOW)["reminded"] == 1
+    later = business_hours.business_hours_after(NOW, 20)   # 20 BUSINESS hours
+    assert notifications.run_escalations(later)["alerted"] == 1
     after = ns.get_notification(parent["id"])
     assert after["reminded_at"] and after["escalated_at"]
     assert len(ns.list_alerts(kind=ns.ALERT_RFQ_ESCALATION)) == 1
@@ -218,16 +239,17 @@ def test_a_reminder_then_an_alert_walks_the_whole_ladder(ladder):
 def test_running_twice_with_the_same_now_changes_nothing(ladder):
     """Idempotency, stated the way the brief states it.
 
-    ``now`` is read from the real clock, not the module-level ``NOW``:
-    :func:`aged_notification` back-dates ``sent_at`` relative to the wall
-    clock, so pinning the run instant to a fixed calendar date would make
-    the rung a row lands on depend on the day the suite runs.
+    ``now`` is the module-level fixed instant, and :func:`aged_notification`
+    back-dates ``sent_at`` relative to THAT instant in business hours — so the
+    rung a row lands on is a function of the instants this test supplies, not
+    of the day the suite runs. (Arc 4 did the opposite for exactly the same
+    reason, and under S3's business-hour clock that would have made this file
+    green on a Tuesday and red on a Sunday.)
     """
     aged_notification(hours=5, run_id="run-remind")
     aged_notification(hours=30, run_id="run-alert")
-    now = datetime.now(timezone.utc)
-    first = notifications.run_escalations(now)
-    second = notifications.run_escalations(now)
+    first = notifications.run_escalations(NOW)
+    second = notifications.run_escalations(NOW)
     assert (first["reminded"], first["alerted"]) == (1, 1)
     assert (second["reminded"], second["alerted"]) == (0, 0)
     assert len(ns.list_notifications(kind=ns.KIND_RFQ_REMINDER)) == 1
@@ -239,7 +261,7 @@ def test_a_portal_view_between_runs_stops_the_ladder(ladder):
     parent = aged_notification(hours=30)
     ns.record_rfq_view(run_id=parent["run_id"], supplier_domain="dxpe.com",
                        member_id="m-1", is_test=True)
-    result = notifications.run_escalations()
+    result = notifications.run_escalations(NOW)
     assert (result["reminded"], result["alerted"]) == (0, 0)
     assert ns.list_alerts(status=None) == []
 
@@ -249,15 +271,15 @@ def test_a_suppressed_member_is_not_chased(ladder):
     ladder does not keep trying it."""
     parent = aged_notification(hours=30)
     ns.transition(parent["id"], ns.STATE_BOUNCED, event_type="Bounce")
-    result = notifications.run_escalations()
+    result = notifications.run_escalations(NOW)
     assert (result["reminded"], result["alerted"]) == (0, 0)
 
 
 def test_the_flag_off_scheduler_is_a_noop(ladder, monkeypatch):
     aged_notification(hours=30)
     monkeypatch.setenv("NOTIFICATIONS_V1", "")
-    assert notifications.run_escalations() == {"reminded": 0, "alerted": 0,
-                                               "considered": 0}
+    assert notifications.run_escalations(NOW) == {"reminded": 0, "alerted": 0,
+                                                  "considered": 0}
     assert ns.list_alerts(status=None) == []
 
 
@@ -268,7 +290,7 @@ def test_a_store_failure_degrades_rather_than_raising(ladder, monkeypatch):
         raise RuntimeError("store down")
 
     monkeypatch.setattr(ns, "list_notifications", boom)
-    assert notifications.run_escalations()["considered"] == 0
+    assert notifications.run_escalations(NOW)["considered"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +300,7 @@ def test_a_store_failure_degrades_rather_than_raising(ladder, monkeypatch):
 def test_the_cli_runs_the_ladder_and_reports(ladder, capsys):
     from scripts import notifications_scheduler as cli
     aged_notification(hours=5)
-    assert cli.main(["escalations"]) == 0
+    assert cli.main(["escalations", "--now", NOW.isoformat()]) == 0
     out = capsys.readouterr().out
     assert "reminded=1" in out
     assert len(ns.list_notifications(kind=ns.KIND_RFQ_REMINDER)) == 1
@@ -288,9 +310,12 @@ def test_the_cli_emits_json_and_accepts_an_explicit_now(ladder, capsys):
     import json
     from scripts import notifications_scheduler as cli
     aged_notification(hours=5)
-    future = (datetime.now(timezone.utc) + timedelta(hours=40)).isoformat()
+    future = business_hours.business_hours_after(NOW, 40).isoformat()
     assert cli.main(["escalations", "--now", future, "--json"]) == 0
-    payload = json.loads(capsys.readouterr().out.strip())
+    # S4's cancellation sweep runs first and touches the supplier registry,
+    # which prints as it creates its (tmp_path) database. The JSON line is the
+    # last thing the CLI writes, which is what the contract actually promises.
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert payload["command"] == "escalations"
     assert payload["alerted"] == 1, "an explicit --now drives the decision"
 
@@ -333,6 +358,7 @@ def test_no_in_process_timer_or_scheduler_library_was_introduced():
         root / "utils" / "notifications_store.py",
         root / "utils" / "mail_provider.py",
         root / "utils" / "ses_webhook.py",
+        root / "utils" / "business_hours.py",
         root / "scripts" / "notifications_scheduler.py",
     ]
     for path in arc4_sources:
