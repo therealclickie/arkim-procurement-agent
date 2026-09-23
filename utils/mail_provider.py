@@ -161,6 +161,34 @@ def message_configuration_set(message: Any) -> tuple[Optional[str], Optional[str
     return explicit or notifications_configuration_set(), None
 
 
+#: The concierge alert kind raised when an auth-mail send is refused (R7, F-03).
+ALERT_AUTH_MAIL_REFUSED = "AUTH_MAIL_REFUSED"
+
+
+def raise_auth_refusal_alert(message: Any, refusal: str) -> None:
+    """Raise one deduped ACTION_NOW alert for a refused auth-mail send.
+
+    Fail-soft by construction: an alerting failure must never change what the
+    caller returns, and must never surface to the supplier.
+    """
+    try:
+        from utils import notifications_store
+        meta = getattr(message, "metadata", None) or {}
+        domain = meta.get("supplier_domain") or ""
+        notifications_store.raise_alert(
+            kind=ALERT_AUTH_MAIL_REFUSED,
+            # Deduped on the CONFIGURATION fault, not the recipient: one
+            # misconfiguration is one thing to fix, however many sends it blocks.
+            dedupe_key=f"{ALERT_AUTH_MAIL_REFUSED}:{ENV_CONFIG_SET_AUTH}",
+            tier=notifications_store.TIER_ACTION_NOW,
+            supplier_domain=domain or None,
+            detail={"reason": refusal, "missing_env": ENV_CONFIG_SET_AUTH,
+                    "supplier_domain": domain},
+        )
+    except Exception as exc:
+        print(f"[MailProvider] auth-refusal alert failed: {exc}")
+
+
 def build_raw_message(message: Any, *, sender: str) -> bytes:
     """Build the RFC822 bytes SES sends as raw content.
 
@@ -242,10 +270,15 @@ class FakeProvider(MailProvider):
     def send(self, message: Any, *, sender: Optional[str] = None
              ) -> ProviderSendResult:
         config_set, refusal = message_configuration_set(message)
+        # R7 (arc 5, F-03): the tracking-off configuration set is an SES concept.
+        # Under the fake provider — dev, demo and the evaluation harness — there is
+        # no tracking domain to rewrite a magic link through, so requiring the set
+        # here only blocks auth mail in environments that cannot leak it. Auth mail
+        # is captured normally. `message_configuration_set` itself stays
+        # provider-agnostic, so every existing assertion on it is unchanged.
         if refusal:
-            print(f"[MailProvider/fake] REFUSED: {refusal}")
-            return ProviderSendResult(status="error", error=refusal,
-                                      provider=self.name)
+            refusal = None
+            config_set = None
         if self.fail_next:
             self.fail_next = False
             return ProviderSendResult(status="error", error="fake provider failure",
@@ -312,6 +345,11 @@ class SesProvider(MailProvider):
         if refusal:
             # D2, fail-closed: no tracking-off set ⇒ auth mail does not go.
             print(f"[MailProvider/ses] REFUSED: {refusal}")
+            # R7 (arc 5, F-03): fail LOUDLY — to the operator. A refused auth send
+            # is a misconfiguration nobody would otherwise see: the supplier just
+            # never receives a sign-in link. Deduped at the store (unique index),
+            # so a burst of refusals is one alert.
+            raise_auth_refusal_alert(message, refusal)
             return ProviderSendResult(status="error", error=refusal,
                                       provider=self.name)
         client = self._resolve_client()
@@ -355,6 +393,19 @@ class SesProvider(MailProvider):
 # ---------------------------------------------------------------------------
 # Selection (D1 / T2) — flag OFF ⇒ None ⇒ the Gmail path, untouched
 # ---------------------------------------------------------------------------
+
+def active_provider_name() -> Optional[str]:
+    """Which provider ``active_provider`` would return, without building one.
+
+    ``None`` when notifications are off (the Gmail path). Used by the R7 boot
+    guard, which must not construct an SES client just to ask a config question.
+    """
+    if _OVERRIDE_PROVIDER is not None:
+        return getattr(_OVERRIDE_PROVIDER, "name", None)
+    if not notifications_active():
+        return None
+    return (os.environ.get(ENV_PROVIDER) or PROVIDER_SES).strip().lower()
+
 
 def active_provider() -> Optional[MailProvider]:
     """The transport for this send, or ``None`` to mean "use Gmail".

@@ -140,6 +140,34 @@ if DEMO_MODE:
             "Remove it from the demo environment before launching."
         )
 
+# R7 (arc 5, F-03) — boot-refusal guard, same shape and position as the DEMO_MODE
+# guards above: fail at uvicorn boot, before a single request is served, rather
+# than discovering at runtime that every supplier sign-in link is being refused.
+#
+# Only under the SES provider. Under FakeProvider (dev, demo, evaluation) the
+# tracking-off configuration set is not required — there is no tracking domain
+# for a corporate link scanner to pre-fetch the single-use token through.
+def _assert_auth_mail_configured() -> None:
+    from utils import mail_provider, supplier_accounts
+
+    if not supplier_accounts.supplier_accounts_active():
+        return
+    if mail_provider.active_provider_name() != mail_provider.PROVIDER_SES:
+        return
+    if mail_provider.auth_configuration_set():
+        return
+    raise RuntimeError(
+        f"Refusing to start: supplier accounts are enabled "
+        f"(SUPPLIER_ACCOUNTS_V1) on the SES mail provider, but "
+        f"{mail_provider.ENV_CONFIG_SET_AUTH} is unset. Auth mail would be "
+        f"refused on every send and no supplier could sign in. Set "
+        f"{mail_provider.ENV_CONFIG_SET_AUTH} to the tracking-OFF SES "
+        f"configuration set, or run with MAIL_PROVIDER=fake."
+    )
+
+
+_assert_auth_mail_configured()
+
 from utils.procurement_agent.agents.intake_agent import IntakeAgent
 from utils.models import SourcingRun
 from utils.marketplace_registry import is_marketplace
