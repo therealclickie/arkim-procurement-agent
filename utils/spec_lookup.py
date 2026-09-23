@@ -22,12 +22,13 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import requests
+from utils import data_dir
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-_DATA_DIR   = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+_DATA_DIR   = data_dir.data_dir()  # R10: $GOFER_DATA_DIR, else <repo>/data (identical when unset)
 _DB_PATH    = os.path.join(_DATA_DIR, "spec_cache.sqlite")
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")

@@ -53,6 +53,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from utils import data_dir
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +75,7 @@ RUN_CAPTURE: bool = _env_truthy(os.environ.get("RUN_CAPTURE"))
 # Store path (mirrors run_capture.py:68 / orders.py / supplier_registry.py)
 # ---------------------------------------------------------------------------
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+_DATA_DIR = data_dir.data_dir()  # R10: $GOFER_DATA_DIR, else <repo>/data (identical when unset)
 _DB_PATH = os.path.join(_DATA_DIR, "run_labels.sqlite")
 
 

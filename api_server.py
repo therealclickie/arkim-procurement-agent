@@ -172,6 +172,7 @@ from utils.procurement_agent.agents.intake_agent import IntakeAgent
 from utils.models import SourcingRun
 from utils.marketplace_registry import is_marketplace
 from utils import run_capture as _run_capture  # Night 1 — RUN_CAPTURE flag-gated, inert when off
+from utils import data_dir as _data_dir  # Arc 5 / R10 — $GOFER_DATA_DIR (F-04)
 from utils import badge_integrity  # Arc 5 / R2 — the match-badge gate (F-11)
 
 import secrets
@@ -379,7 +380,8 @@ def _migrate_schema() -> None:
 _migrate_schema()
 
 
-_HANDOFFS_PATH = os.path.join(os.path.dirname(__file__), "data", "mock_maintenance_handoffs.json")
+# R10 (arc 5, F-04): resolved through the one helper, like every store.
+_HANDOFFS_PATH = _data_dir.data_path("mock_maintenance_handoffs.json")
 
 def _seed_demo_maintenance_run() -> None:
     """Seed pending_intake runs from data/mock_maintenance_handoffs.json (idempotent per submission_id)."""

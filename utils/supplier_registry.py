@@ -68,6 +68,7 @@ import uuid
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from utils import data_dir
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +85,7 @@ def _env_truthy(value: Optional[str]) -> bool:
 
 TIER1_V2: bool = _env_truthy(os.environ.get("TIER1_V2"))
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+_DATA_DIR = data_dir.data_dir()  # R10: $GOFER_DATA_DIR, else <repo>/data (identical when unset)
 _DB_PATH  = os.path.join(_DATA_DIR, "supplier_registry.sqlite")
 
 _DDL = """

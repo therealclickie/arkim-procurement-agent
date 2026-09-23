@@ -29,10 +29,11 @@ from utils.procurement_agent.state.phases import Phase
 # Database setup
 # ---------------------------------------------------------------------------
 
-_DATA_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-    "data",
-)
+from utils import data_dir as _data_dir
+
+# R10 (arc 5, F-04): $GOFER_DATA_DIR, else <repo>/data — the same path this
+# four-deep dirname chain produced, byte for byte, when the variable is unset.
+_DATA_DIR = _data_dir.data_dir()
 _DB_PATH = os.path.join(_DATA_DIR, "sourcing_runs.sqlite")
 
 

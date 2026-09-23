@@ -66,6 +66,7 @@ import uuid
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from utils import data_dir
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +80,7 @@ def _env_truthy(value: Optional[str]) -> bool:
 
 CLAIM_TOKENS_ENABLED: bool = _env_truthy(os.environ.get("SUPPLIER_PORTAL_V1"))
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+_DATA_DIR = data_dir.data_dir()  # R10: $GOFER_DATA_DIR, else <repo>/data (identical when unset)
 _DB_PATH = os.path.join(_DATA_DIR, "claim_tokens.sqlite")
 
 # Token entropy + expiry. token_urlsafe(32) -> ~43-char URL-safe string, ~256 bits.

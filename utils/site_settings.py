@@ -14,8 +14,9 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
+from utils import data_dir
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+_DATA_DIR = data_dir.data_dir()  # R10: $GOFER_DATA_DIR, else <repo>/data (identical when unset)
 _DB_PATH = os.path.join(_DATA_DIR, "site_settings.sqlite")
 
 # The fields a caller may write (matches the customer form + order-review ship-to block).

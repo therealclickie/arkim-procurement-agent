@@ -26,8 +26,11 @@ import json
 import os
 from datetime import datetime, timedelta
 from typing import Optional
+from utils import data_dir
 
-_DB_PATH = os.path.join(os.path.dirname(__file__), "price_db.json")
+# R10 (arc 5, F-04): $GOFER_DATA_DIR collects this with the other
+# stores; unset, it stays in utils/ exactly where it has always been.
+_DB_PATH = data_dir.utils_store_path("price_db.json")
 
 
 # Manufacturer values that mean "no real manufacturer was identified" — the
