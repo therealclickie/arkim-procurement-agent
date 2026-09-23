@@ -80,8 +80,15 @@ UNIT_CLASSIFICATION_RULES: list[tuple] = [
     # hp+voltage alone is too ambiguous (pumps, compressors also carry both) — omitted.
     (frozenset({"gpm", "psi"}),         "Centrifugal Pump",       "Equipment",  8),
     (frozenset({"gpm", "head"}),        "Centrifugal Pump",       "Equipment",  7),
-    (frozenset({"bore_diameter"}),      "Bearing",                "Part",       6),
+    # R6 (arc 5, F-08): these two were BOTH priority 6, and the loop's
+    # `priority <= best_priority: continue` let whichever appeared first in this
+    # list win. A mechanical-seal request carrying any extracted bore diameter was
+    # therefore reclassified "Bearing" — which then misrouted the variant-selecting
+    # attrs to the bearing fallback and the downstream noun-class gate. Shaft size
+    # is the more specific seal signal, so it outranks a lone bore diameter; the
+    # equal-priority ambiguity is removed rather than left to list order.
     (frozenset({"shaft_size"}),         "Mechanical Seal",        "Part",       6),
+    (frozenset({"bore_diameter"}),      "Bearing",                "Part",       5),
 ]
 
 
@@ -110,6 +117,14 @@ def classify_by_units(specs: dict) -> tuple:
     # Skip if the key equipment word (last word of best_type) is already in the current type.
     best_base = best_type.split()[-1].lower()
     if best_base in current_type:
+        return None, None, False
+    # R6 (arc 5, F-08): a bore diameter alone never reclassifies a SEAL. On a
+    # cartridge seal the shaft size and the bore are the same dimension, which is
+    # exactly why the extractor fills both — so "bore_diameter is present"
+    # is not evidence the part is a bearing when the request already says seal.
+    # Narrow by design: every other override (notably the NEMA-frame
+    # "centrifugal pump" -> "Electric Motor" correction) is untouched.
+    if best_type == "Bearing" and "seal" in current_type:
         return None, None, False
 
     return best_type, best_cat, True
@@ -333,6 +348,77 @@ def _variant_disambiguation_question(specs: dict, vs_attrs: list) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# R6 (arc 5, F-08) - attribute PROVENANCE: supplied vs merely filled
+# ---------------------------------------------------------------------------
+#
+# The variant guard is "block-regardless-of-extracted" by design: with no
+# provenance, an extractor-invented rating is indistinguishable from one the user
+# gave, so the ask fires either way. That protection must stay - but it must not
+# re-ask something the user literally just said, which is what the evaluation saw
+# (S1 supplied "1.875 inch shaft" and was asked for the shaft size anyway).
+#
+# The provenance signal that DOES exist is the user's own turn text. "Supplied"
+# means the extracted value appears in the message; "filled" means it appears only
+# in the extraction. Matching is deliberately conservative - an under-match keeps
+# the hallucination guard live, an over-match would disable it.
+
+#: Ledger key holding the variant attrs the user has supplied in their own words,
+#: accumulated across turns. `_`-prefixed, so it rides asset_specs_json and is
+#: stripped from the context summary and the frontend specs display.
+USER_SUPPLIED_ATTRS_KEY = "_user_supplied_attrs"
+
+
+def _squash(value: object) -> str:
+    """Lowercase and drop every non-alphanumeric, so "1.875 inch" matches
+    "1.875-inch" and "1.875 in. shaft"."""
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _value_in_text(value: object, text: str) -> bool:
+    """True iff an extracted value is literally present in the user's message."""
+    squashed_value = _squash(value)
+    if len(squashed_value) < 2:
+        return False
+    return squashed_value in _squash(text)
+
+
+def user_supplied_variant_attrs(specs: dict, text: str,
+                                vs_attrs: Optional[list] = None) -> list:
+    """Which variant-selecting attrs the user's message itself supplies."""
+    if not text:
+        return []
+    from utils.procurement_agent.part_type_registry import VARIANT_ATTR_TO_SPEC_FIELDS
+    attrs = vs_attrs if vs_attrs is not None else _variant_selecting_attrs_for(specs)
+    supplied = []
+    for attr in attrs:
+        fields = VARIANT_ATTR_TO_SPEC_FIELDS.get(attr) or (attr,)
+        for field in fields:
+            value = specs.get(field)
+            if value in _NULL_VALUES:
+                continue
+            if _value_in_text(value, text):
+                supplied.append(attr)
+                break
+    return supplied
+
+
+def record_user_supplied_attrs(specs: dict, text: str) -> list:
+    """Accumulate this turn's user-supplied variant attrs onto the specs ledger."""
+    known = list(specs.get(USER_SUPPLIED_ATTRS_KEY) or [])
+    for attr in user_supplied_variant_attrs(specs, text):
+        if attr not in known:
+            known.append(attr)
+    if known:
+        specs[USER_SUPPLIED_ATTRS_KEY] = known
+    return known
+
+
+def _attr_confirmed_by_user(specs: dict, attr: str) -> bool:
+    """True iff the user supplied this attr themselves (not merely the extractor)."""
+    return attr in (specs.get(USER_SUPPLIED_ATTRS_KEY) or [])
+
+
 def family_disambig_block(specs: dict) -> Optional[dict]:
     """The confirm_intake binding guard's verdict (T3). Returns None when the
     confirm may proceed normally; otherwise a stable, frontend-consumable dict
@@ -379,21 +465,35 @@ def family_disambig_block(specs: dict) -> Optional[dict]:
     from utils.procurement_agent.part_type_registry import variant_attr_answered
     missing = [a for a in vs_attrs if not variant_attr_answered(specs, a)]
     pending = bool(specs.get("_variant_disambig_pending"))
+    # R6 (arc 5): an attr the USER supplied in their own words is confirmed — the
+    # ask exists to catch an extractor-invented rating, and there is nothing to
+    # catch here. An attr merely FILLED by the extractor still blocks on pending.
+    unconfirmed = [a for a in vs_attrs if not _attr_confirmed_by_user(specs, a)]
+    if pending and not unconfirmed:
+        pending = False
     # Block when the ask is in flight (pending — anti-hallucination) OR a
     # variant-selecting attr is unanswered (missing — typing-bypass guard).
     # open_family is checked at the call site.
     if not missing and not pending:
         return None
-    # Surface the unanswered attrs; when blocking purely on pending (attrs
-    # filled but unconfirmed), surface ALL variant-selecting attrs — they need
-    # confirmation, not filling.
-    surface = missing if missing else list(vs_attrs)
+    # R6 (arc 5, F-08): report as MISSING only what is actually absent. The
+    # evaluation's S1 confirm returned missing_attrs: ["shaft_size"] against an
+    # asset_specs carrying shaft_size "1.875 inch" — the attrs were filled but
+    # UNCONFIRMED, which is a different thing and now says so. The 422 and the
+    # anti-hallucination block are unchanged; only the label is honest.
     return {
-        "reason": "family_variant_unconfirmed",
+        "reason": ("family_variant_unconfirmed" if missing
+                   else "family_variant_pending_confirmation"),
         "model": specs.get("model"),
-        "missing_attrs": surface,
+        "missing_attrs": missing,
         "missing_labels": [
-            _VARIANT_ATTR_LABELS.get(a, a.replace("_", " ")) for a in surface
+            _VARIANT_ATTR_LABELS.get(a, a.replace("_", " ")) for a in missing
+        ],
+        # The attrs that need CONFIRMING rather than filling (empty when the
+        # block is a plain missing-attr block).
+        "unconfirmed_attrs": [] if missing else unconfirmed,
+        "unconfirmed_labels": [] if missing else [
+            _VARIANT_ATTR_LABELS.get(a, a.replace("_", " ")) for a in unconfirmed
         ],
         "pending": pending,
     }
@@ -710,6 +810,11 @@ class IntakeAgent:
         if _intake_type_aware() and not prior_specs and not images:
             self._maybe_classify(merged, text)
 
+        # R6 (arc 5, F-08) — record which variant-selecting attrs the USER supplied
+        # in this turn's own words, before any guard reads them. Accumulated on the
+        # `_`-prefixed ledger, so it survives turns and never reaches the frontend.
+        supplied_attrs = record_user_supplied_attrs(merged, text)
+
         # Fix 1: units-based classification override (runs after VLM merge)
         new_type, new_cat, override_applied = classify_by_units(merged)
         if override_applied:
@@ -773,6 +878,12 @@ class IntakeAgent:
             merged["_variant_disambig_pending"] = False
         elif "_q2_variant" not in (prior_specs.get("_asked_fields") or []):
             vs_attrs = _variant_selecting_attrs_for(merged)
+            # R6 (arc 5, F-08): the ask is block-regardless-of-EXTRACTED, not
+            # block-regardless-of-SUPPLIED. When the user's own message supplies
+            # every variant-selecting attr there is no hallucination to catch, and
+            # re-asking is what the evaluation saw on S1.
+            if vs_attrs and all(a in supplied_attrs for a in vs_attrs):
+                vs_attrs = []
             if vs_attrs and _is_family_level(merged):
                 # Override to needs_clarification — the variant ask is due, even
                 # if the base assessment said proceed (a hallucinated rating

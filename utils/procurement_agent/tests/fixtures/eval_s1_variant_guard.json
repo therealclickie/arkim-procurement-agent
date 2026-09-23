@@ -1,0 +1,46 @@
+{
+  "_source": [
+    "eval/e2e-flags-on:eval/e2e/evidence/s1_step1d_confirm_intake.json",
+    "eval/e2e-flags-on:eval/e2e/evidence/s1_step1c_inapp_fallback.json",
+    "eval/e2e-flags-on:eval/e2e/evidence/s1_step9_buyer_view.json"
+  ],
+  "_finding": "F-08 - the S1 user's second turn said '1.875 inch shaft' in their own words; the agent's next turn re-asked for the shaft size, and confirm-intake then returned 422 with missing_attrs ['shaft_size'] against an asset_specs whose shaft_size was '1.875 inch'.",
+  "observed_confirm_422": {
+    "status": 422,
+    "body": {
+      "detail": {
+        "message": "155 is a product family, not a specific variant — confirm the rating (shaft size) in the chat, or source the family as-is if you don't know it.",
+        "reason": "family_variant_unconfirmed",
+        "model": "155",
+        "missing_attrs": [
+          "shaft_size"
+        ],
+        "missing_labels": [
+          "shaft size"
+        ],
+        "pending": true
+      }
+    }
+  },
+  "observed_reask": "155 is a product family, not a specific variant — for your unit: What pump make/model is it on, and any old-part code? If visible: shaft size, and is it a cartridge or component seal, single or double? (Confirm or correct the rating so we source the right unit, or say you don't know and we'll source the family as-is.)",
+  "user_turns": [
+    "Line 2's Goulds 3196 pump is leaking at the mechanical seal. We need a replacement seal today.",
+    "Goulds 3196 MTX, 1.875 inch shaft, single cartridge seal — old one is a Chesterton 155 cartridge, 1.875 inch. Like-for-like replacement."
+  ],
+  "user_turn_supplying_the_shaft_size": "Goulds 3196 MTX, 1.875 inch shaft, single cartridge seal — old one is a Chesterton 155 cartridge, 1.875 inch. Like-for-like replacement.",
+  "s1_asset_specs": {
+    "category": "Part",
+    "description": "Chesterton 155 single cartridge mechanical seal, 1.875 inch shaft, like-for-like replacement",
+    "detected_type": "mechanical seal",
+    "use_case": "for Goulds 3196 MTX centrifugal pump, Line 2",
+    "manufacturer_confidence": 95.0,
+    "part_id_confidence": 82.0,
+    "confidence_reasoning": "User explicitly named the existing seal as a Chesterton 155 cartridge in 1.875 inch shaft size, requesting a like-for-like replacement. Manufacturer and model are confirmed at high confidence. Part_id confidence is strong — Chesterton 155 is a well-known cartridge seal line and shaft size is specified — but no face/material code or full part number is given, which would be needed to pin the exact configuration (elastomer, face material, gland style). Sourcing can proceed with manufacturer and model; confirming materials/fluid contact conditions before ordering is advisable.",
+    "quantity": 1,
+    "manufacturer": "Chesterton",
+    "model": "155",
+    "shaft_size": "1.875 inch",
+    "spec_based_sourcing": true,
+    "family_open_commit": true
+  }
+}
