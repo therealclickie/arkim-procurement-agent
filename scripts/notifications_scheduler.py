@@ -96,6 +96,19 @@ def cmd_coalesce(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cancel(args: argparse.Namespace) -> int:
+    """Arc 4b S4: cancel pending reminders/escalations for resolved RFQs.
+
+    ``escalations`` already does this before it decides anything, so this
+    subcommand exists for the operator who wants the cancellation sweep on its
+    own cadence (or to see what it would do) — not because the ladder depends
+    on it being scheduled separately.
+    """
+    result = notifications.cancel_resolved(parse_now(args.now))
+    _report("cancel", result, as_json=args.json)
+    return 0
+
+
 def cmd_digest(args: argparse.Namespace) -> int:
     """D7's DAILY_DIGEST: every deferred RFQ_NEW for a member, batched into one
     mail. Run it ONCE a day — running it twice a day is not incorrect (the
@@ -139,6 +152,14 @@ def build_parser() -> argparse.ArgumentParser:
     coa.add_argument("--json", action="store_true",
                      help="emit the result as one JSON line")
     coa.set_defaults(func=cmd_coalesce)
+
+    can = sub.add_parser("cancel",
+                         help="cancel chasing for RFQs that are now resolved")
+    can.add_argument("--now", default=None,
+                     help="ISO-8601 instant to evaluate against (default: now, UTC)")
+    can.add_argument("--json", action="store_true",
+                     help="emit the result as one JSON line")
+    can.set_defaults(func=cmd_cancel)
 
     dig = sub.add_parser("digest",
                          help="send the D7 daily digest for DAILY_DIGEST members")

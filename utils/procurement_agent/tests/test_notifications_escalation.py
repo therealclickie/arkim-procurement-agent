@@ -312,7 +312,10 @@ def test_the_cli_emits_json_and_accepts_an_explicit_now(ladder, capsys):
     aged_notification(hours=5)
     future = business_hours.business_hours_after(NOW, 40).isoformat()
     assert cli.main(["escalations", "--now", future, "--json"]) == 0
-    payload = json.loads(capsys.readouterr().out.strip())
+    # S4's cancellation sweep runs first and touches the supplier registry,
+    # which prints as it creates its (tmp_path) database. The JSON line is the
+    # last thing the CLI writes, which is what the contract actually promises.
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert payload["command"] == "escalations"
     assert payload["alerted"] == 1, "an explicit --now drives the decision"
 

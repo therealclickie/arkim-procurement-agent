@@ -854,6 +854,11 @@ def decide_escalation(notification: dict, *, now: datetime,
         return None
     if notification.get("state") in store.TERMINAL_STATES:
         return None                       # bounced/complained: mail is not the channel
+    if notification.get("cancelled_at"):
+        # S4: the request itself is resolved. Chasing a supplier's silence on
+        # something the buyer no longer needs is pure noise — and the kind of
+        # noise that teaches people the whole channel is not worth reading.
+        return None
     if notification.get("deferred"):
         return None                       # the digest owns it until it goes out
     if notification.get("escalated_at"):
@@ -879,6 +884,111 @@ def decide_escalation(notification: dict, *, now: datetime,
     return None
 
 
+# ---------------------------------------------------------------------------
+# T9 / S4 — stop when the request is resolved
+# ---------------------------------------------------------------------------
+
+def rfq_resolution(notification: dict) -> Optional[str]:
+    """Why this notification's RFQ is resolved, or ``None`` if it is not (S4).
+
+    THE STATES THAT ACTUALLY EXIST are checked, and no model is invented for
+    the ones that do not. The gate (H9) established that this repo has no
+    "awarded" state and no quote-target concept anywhere, so the three real
+    signals are:
+
+      1. the RFQ's own ``sent_messages`` row has left ``OPEN_RFQ_STATUSES`` —
+         it was replied to, it bounced, or the send errored. This is the
+         primary signal, because it is the same predicate the supplier portal
+         uses to decide whether the request is still in their inbox: if it is
+         not there, nobody can view it, and a ladder measuring "unseen" on
+         something unviewable can only ever escalate;
+      2. every quote token for the run is revoked or expired (the closest
+         thing the repo has to "the buyer withdrew this");
+      3. the run reached a terminal phase (CANCELLED / COMPLETED).
+
+    Each lookup is independently fail-soft: a store that cannot answer leaves
+    the notification un-cancelled, which keeps the supplier being chased
+    rather than silently dropping a live request.
+    """
+    run_id = notification.get("run_id")
+    subject_ref = notification.get("subject_ref")
+    if not run_id:
+        return None
+    if subject_ref:
+        try:
+            from utils import supplier_registry
+            row = next((r for r in supplier_registry.get_sent_messages(run_id=run_id)
+                        if r.get("id") == subject_ref), None)
+            if row is not None and row.get("status") not in \
+                    supplier_registry.OPEN_RFQ_STATUSES:
+                return f"rfq_{row.get('status')}"
+        except Exception as exc:
+            print(f"[Notifications] resolution ledger read failed: {exc}")
+    try:
+        from utils import quote_tokens
+        tokens = quote_tokens.list_for_run(run_id)
+        # Only conclusive when tokens EXIST and all of them are shut. An empty
+        # list means QUOTE_SUBMIT_V1 is off or none were minted — the absence
+        # of a quote window is not the closing of one.
+        if tokens and all(t.get("revoked_at") or _expired(t.get("expires_at"))
+                          for t in tokens):
+            return "quote_window_closed"
+    except Exception as exc:
+        print(f"[Notifications] resolution token read failed: {exc}")
+    try:
+        from utils.procurement_agent.state import persistence
+        from utils.procurement_agent.state.phases import Phase
+        run = persistence.get_run(run_id)
+        phase = (run or {}).get("phase")
+        if phase in (Phase.CANCELLED.value, Phase.COMPLETED.value):
+            return f"run_{phase}"
+    except Exception:
+        # Deliberately silent, and the only silent branch here. The
+        # orchestrator's run store is NOT on the shipping path (CLAUDE.md §8),
+        # so an unreadable or absent run is the normal case, not a fault — and
+        # this runs once per notification per scheduler pass, so a log line
+        # would be per-row spam that buries the ledger and token failures
+        # above, which ARE worth shouting about.
+        pass
+    return None
+
+
+def _expired(expires_at: Optional[str]) -> bool:
+    """A quote token whose window has passed. Compared against the stored
+    instant only — no clock read is needed because the store stamps a real
+    expiry and ``quote_tokens`` owns that judgement; this is the cheap
+    fallback for the metadata list, which carries no ``state``."""
+    parsed = _parse(expires_at)
+    return parsed is not None and parsed <= _now()
+
+
+def cancel_resolved(now: Optional[datetime] = None) -> dict:
+    """Cancel every pending notification whose RFQ has been resolved (S4).
+
+    Run before the ladder decides anything, so a request closed between two
+    scheduler passes is out of the next reminder and can never produce an
+    escalation. Cancellation is RECORDED — ``cancelled_at`` plus a reason plus
+    an audit event — never a silent state change: "we stopped chasing this,
+    and here is why" has to stay answerable later.
+
+    Returns ``{"cancelled": n}``.
+    """
+    out = {"cancelled": 0}
+    if not notifications_active():
+        return out
+    try:
+        moment = now or _now()
+        for notification in store.list_notifications(kind=store.KIND_RFQ_NEW,
+                                                     cancelled=False):
+            reason = rfq_resolution(notification)
+            if reason and store.mark_cancelled(notification["id"], reason=reason,
+                                               at=moment.isoformat()):
+                out["cancelled"] += 1
+    except Exception as exc:
+        print(f"[Notifications] cancel_resolved failed: {exc}")
+    return out
+
+
 def run_escalations(now: Optional[datetime] = None) -> dict:
     """The D6 scheduler entry point. Callable from cron / an ECS scheduled
     task — a plain function, NOT a timer: no thread, no APScheduler, nothing
@@ -895,6 +1005,9 @@ def run_escalations(now: Optional[datetime] = None) -> dict:
         return out
     try:
         moment = now or _now()
+        # S4 FIRST: a request resolved since the last pass must not produce a
+        # reminder or an escalation on this one.
+        cancel_resolved(moment)
         remind_after, alert_after = remind_hours(), alert_hours()
         due: dict[str, list[dict]] = {}
         zones: dict[str, str] = {}
