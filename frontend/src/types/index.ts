@@ -80,6 +80,11 @@ export interface AssetSpecs {
   impeller_size?: string;
   mech_seal?: string;
   material_spec?: string;
+  connection_size?: string;
+  // Hygienic-service fitment (backend AssetSpecs). Present once the buyer answers
+  // the hygienic confirm gate in chat; absent on every non-hygienic run.
+  process_connection?: string;
+  hygienic_certification?: string;
   gpm?: string;
   psi?: string;
   phase?: string;

@@ -91,6 +91,14 @@ class AssetSpecs:
     seal_face_size: Optional[str] = None   # for mechanical seals
     connection_size: Optional[str] = None  # for fittings, valves, flanged connections
     material_spec: Optional[str] = None    # e.g. "Viton", "EPDM", "Carbon/Silicon"
+    # Hygienic-service fitment. `connection_size` above carries the SIZE ("1.5 inch");
+    # these two carry the connection TYPE and the sanitary certification, which have no
+    # other home on this model. Both are read by utils/hygienic_context._FIELD_SOURCES:
+    # the hygienic confirm gate can only be cleared through the intake chat if the
+    # extractor has somewhere to put the answer (evaluation finding PH-01 — the gate
+    # required fields that did not exist here, so answering it changed nothing).
+    process_connection: Optional[str] = None     # connection TYPE: "Tri-Clamp", "NPT", "flanged"
+    hygienic_certification: Optional[str] = None # "3-A" | "EHEDG" | "not required"
     # Manufacturer identification confidence: 0-100.
     # 90+: name explicitly visible in image or stated by user.
     # 60-79: inferred from recognizable PN prefix/pattern.

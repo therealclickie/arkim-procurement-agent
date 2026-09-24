@@ -566,6 +566,8 @@ Return ONLY valid JSON with exactly these keys — no additional keys, no markdo
   "seal_face_size": string or null,
   "connection_size": string or null,
   "material_spec": string or null,
+  "process_connection": string or null,
+  "hygienic_certification": string or null,
   "use_case": string or null,
   "manufacturer_confidence": integer 0-100,
   "part_id_confidence": integer 0-100,
@@ -595,6 +597,17 @@ Rules:
   - Set fields to null if not determinable — never invent or estimate values
   - description: one line summarizing what the item is, from the input
   - If prior specs are provided, merge carefully: only update fields with new information
+
+HYGIENIC / SANITARY SERVICE (CIP, SIP, washdown, food, dairy, beverage, pharma):
+  A sanitary instrument or fitting has to match the skid, so these answers get their own
+  fields — never leave them only inside `description`:
+  - process_connection: the connection TYPE alone — "Tri-Clamp", "NPT", "flanged",
+    "DIN 11851", "butt weld". The SIZE stays in connection_size. "1.5 inch Tri-Clamp"
+    therefore fills BOTH: connection_size "1.5 inch", process_connection "Tri-Clamp".
+  - material_spec: the WETTED material on a sanitary item — e.g. "316L stainless".
+  - hygienic_certification: the sanitary certification the part must carry — "3-A",
+    "EHEDG", or "3-A, EHEDG". When the user says none is needed, write "not required";
+    never the bare word "none", which reads as "not answered". null if not stated.
 
 COMPONENT-OF A PART (critical — do not attribute the parent's OEM to the component):
   When the input describes a COMPONENT of a named parent machine — a replacement

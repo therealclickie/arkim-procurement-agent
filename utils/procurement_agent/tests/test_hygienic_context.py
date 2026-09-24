@@ -240,3 +240,104 @@ class TestConfirmAsksBeforeSourcing:
         rid = _seed(api, S3_GAUGE)
         assert api.post(
             f"/api/runs/{rid}/confirm-intake?source_anyway=true").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# PH-01 — the gate has to be answerable in the chat
+# ---------------------------------------------------------------------------
+
+#: The post-hardening evaluation's own step-3 reply, which answered all four fields
+#: and still left the run blocked (``eval/e2e-post-hardening``,
+#: ``eval/e2e/evidence/s3b_step3_answered.json``).
+_ANSWER_TEXT = ("It's on a 1.5 inch Tri-Clamp connection, 316L stainless wetted "
+                "parts, 3-A certified sanitary gauge.")
+
+#: What a schema-compliant extractor returns for that reply: the connection TYPE and
+#: the certification land in their own fields, the SIZE stays in connection_size.
+_ANSWER_EXTRACTION = {
+    "manufacturer":            "Ashcroft",
+    "model":                   "1032",
+    "part_number":             None,
+    "category":                "Part",
+    "detected_type":           "pressure gauge",
+    "description":             ("Ashcroft 1032 sanitary pressure gauge, 1.5\" Tri-Clamp, "
+                                "316L wetted parts, 3-A certified, CIP return line"),
+    "connection_size":         "1.5 inch",
+    "process_connection":      "Tri-Clamp",
+    "material_spec":           "316L stainless steel",
+    "hygienic_certification":  "3-A",
+    "manufacturer_confidence": 95,
+    "part_id_confidence":      85,
+    "confidence_reasoning":    "Manufacturer and model stated; sanitary fitment answered.",
+}
+
+
+class TestTheGateIsAnswerableInChat:
+    """PH-01 — a required field the extractor cannot fill is an un-clearable gate.
+
+    The evaluation answered all four in chat and stayed blocked: the gate named
+    ``process_connection`` and ``hygienic_certification``, which existed neither on
+    ``AssetSpecs`` nor in the extractor's JSON schema, so the answers landed in
+    ``connection_size`` / ``material_spec`` / ``description`` and those two could
+    never clear — ``source_anyway`` was the only exit. These tests hold the
+    three-way contract (gate field <-> model field <-> extractor key) that broke.
+    """
+
+    def test_every_required_field_has_a_real_assetspecs_field(self):
+        import dataclasses
+        from utils.models import AssetSpecs
+
+        model_fields = {f.name for f in dataclasses.fields(AssetSpecs)}
+        for field in hygienic_context.REQUIRED_FIELDS:
+            sources = set(hygienic_context._FIELD_SOURCES[field])
+            assert sources & model_fields, (
+                f"{field} is required by the hygienic gate but no source key "
+                f"{sorted(sources)} exists on AssetSpecs — intake cannot store the "
+                f"answer, so the gate can only be exited by source_anyway (PH-01)")
+
+    def test_every_required_field_is_an_extractor_key(self):
+        from utils.procurement_agent.agents.intake_agent import _EXTRACTION_SYSTEM
+
+        for field in hygienic_context.REQUIRED_FIELDS:
+            sources = hygienic_context._FIELD_SOURCES[field]
+            assert any(f'"{key}"' in _EXTRACTION_SYSTEM for key in sources), (
+                f"{field} is required by the hygienic gate but none of {list(sources)} "
+                f"is a key in the intake extractor's JSON schema — the extractor has "
+                f"nowhere to put the user's answer (PH-01)")
+
+    def test_answering_all_four_in_chat_clears_the_gate(self, api):
+        """The evaluation's step 3, end to end: reply -> extraction -> confirm 200."""
+        from unittest.mock import MagicMock, patch
+
+        from utils.models import SourcingRun
+        from utils.procurement_agent.agents.intake_agent import IntakeAgent
+
+        prior = dict(S3_GAUGE, model="1032")
+        blocked = _seed(api, prior)
+        assert api.post(f"/api/runs/{blocked}/confirm-intake").status_code == 422
+
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = {"content": [{"text": json.dumps(_ANSWER_EXTRACTION)}]}
+        with patch("utils.procurement_agent.agents.intake_agent.requests.post",
+                   return_value=resp):
+            result = IntakeAgent(anthropic_api_key="test-key").run(
+                SourcingRun(asset_specs_json=prior),
+                {"text": _ANSWER_TEXT, "images": []})
+
+        specs = result["asset_specs"]
+        assert specs["process_connection"] == "Tri-Clamp"
+        assert specs["hygienic_certification"] == "3-A"
+        assert hygienic_context.missing_fields(specs) == ()
+
+        rid = _seed(api, specs)
+        answered = api.post(f"/api/runs/{rid}/confirm-intake")
+        assert answered.status_code == 200, answered.json()
+        assert answered.json()["phase"] == "sourcing"
+
+    def test_an_explicit_not_required_answers_the_certification(self):
+        """The one required field whose honest answer can be a negative."""
+        answered = dict(S3_GAUGE, process_connection="Tri-Clamp",
+                        connection_size='1.5"', wetted_material="316L",
+                        hygienic_certification="not required")
+        assert hygienic_context.hygienic_block(answered) is None

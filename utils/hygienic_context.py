@@ -74,6 +74,20 @@ FIELD_LABELS: dict[str, str] = {
 }
 
 #: Spec keys that already answer each required field, in preference order.
+#:
+#: EVERY required field must be reachable from the intake extractor — at least one of
+#: its source keys has to be a real ``AssetSpecs`` field AND a key in the extractor's
+#: JSON schema (``intake_agent._EXTRACTION_SYSTEM``), or the gate asks a question the
+#: chat can never answer and only ``source_anyway`` can exit it. That is exactly what
+#: evaluation finding PH-01 measured: ``process_connection`` and
+#: ``hygienic_certification`` were named here but existed nowhere else, so a user who
+#: answered all four verbatim stayed blocked. Both are now AssetSpecs fields and
+#: extractor keys; ``test_hygienic_context.TestTheGateIsAnswerableInChat`` holds the
+#: contract. Extending REQUIRED_FIELDS means extending both of those too.
+#:
+#: ``hygienic_certification`` is the one field whose honest answer can be a negative;
+#: the extractor is instructed to write ``"not required"`` rather than "none", because
+#: the shared ``_NULL_VALUES`` set reads a bare "none" as *unanswered*.
 _FIELD_SOURCES: dict[str, tuple[str, ...]] = {
     "process_connection":      ("process_connection", "connection", "connection_type"),
     "process_connection_size": ("process_connection_size", "connection_size"),

@@ -1343,6 +1343,17 @@ designation"*. Cross-maker seal equivalence is **not** decided here.
   hygienic certification (3-A / EHEDG / none) before confirm. The same gauge
   with no hygienic context is unaffected. Question-set only — no hygienic
   equivalence logic.
+- **Answering the hygienic questions in the chat clears the gate.** The reply
+  *“1.5 inch Tri-Clamp, 316L stainless wetted parts, 3-A certified”* fills all
+  four: the connection SIZE into `connection_size`, the connection TYPE into
+  `process_connection`, the wetted material into `material_spec`, the
+  certification into `hygienic_certification` — and the next confirm proceeds.
+  The last two are their own spec fields, extracted and shown in the asset panel
+  (**Process conn.**, **Hygienic cert.**). When the buyer states no certification
+  is needed it is recorded as *“not required”* — an answer, not a blank. (Before
+  this, the gate named two fields the extractor had nowhere to store, so answering
+  it changed nothing and `source_anyway` was the only exit — evaluation finding
+  PH-01.)
 - **The variant guard stops re-asking.** An attribute the user supplied in their
   own words is not asked again, and the hard guard no longer reports a present
   field as missing: it returns `missing_attrs: []` with reason

@@ -35,6 +35,12 @@ const EXPANDABLE: FieldDef[] = [
   { label: "Mech seal", key: "mech_seal" },
   { label: "Material", key: "material_spec" },
   { label: "Bore", key: "bore_diameter", mono: true },
+  // Hygienic fitment — the answers the confirm gate asks for on a sanitary
+  // instrument or fitting. Shown so "review in the panel and confirm" is true:
+  // the buyer can see the connection type and certification the gate recorded.
+  { label: "Connection", key: "connection_size", mono: true },
+  { label: "Process conn.", key: "process_connection" },
+  { label: "Hygienic cert.", key: "hygienic_certification" },
   { label: "Protocol", key: "protocol" },
   { label: "Warranty", key: "warranty_status" },
   { label: "Failure mode", key: "failure_mode" },
