@@ -1,0 +1,14 @@
+{
+  "adjudication": "Step 10 recorded BREAK by a harness parsing bug: the orders endpoint returns an envelope {run_id, count, orders:[...]} and the step script iterated the envelope dict. The captured evidence shows the arc-5 T1 acceptance IS met.",
+  "order_facts": {
+    "unit_price": 189.0,
+    "source": "quote",
+    "status": "placed",
+    "quote_id": "d1f5921a-a652-40c5-9f5c-6777911b9479",
+    "placed": true,
+    "lead_time": "2 days",
+    "vendor": "DXP Enterprises"
+  },
+  "quote_id_matches_step8_quote": true,
+  "corrected_verdict": "PASS"
+}

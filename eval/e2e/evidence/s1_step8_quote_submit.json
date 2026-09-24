@@ -1,0 +1,22 @@
+{
+  "status": 200,
+  "payload": {
+    "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+    "quote_number": "DXP-EVAL-0091",
+    "unit_price": 189.0,
+    "quantity": 1,
+    "lead_time": "2 days",
+    "part_number": null,
+    "freight": null,
+    "valid_until": null,
+    "notes": "In stock at Sacramento branch"
+  },
+  "response": {
+    "ok": true,
+    "quote_id": "d1f5921a-a652-40c5-9f5c-6777911b9479",
+    "status": "active",
+    "review_reasons": [],
+    "pn_differs": false,
+    "valid_until": "2026-10-08T10:53:01.993525+00:00"
+  }
+}

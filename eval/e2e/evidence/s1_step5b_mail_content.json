@@ -1,0 +1,42 @@
+{
+  "supplier_mails": [
+    {
+      "to": [
+        "sales@dxpe.com"
+      ],
+      "subject": "Arkim matched a request to your profile",
+      "kind": null,
+      "body": "Arkim matched an active procurement request to your onboarded profile.\n\nSupplier: DXP Enterprises (dxpe.com)\n\nThis is an automated FYI from the Arkim procurement platform. No action is required unless Arkim follows up with a formal RFQ.\n"
+    },
+    {
+      "to": [
+        "sales@dxpe.com"
+      ],
+      "subject": "Quote Request \u2014 Chesterton 155",
+      "kind": null,
+      "body": "Subject: Quote Request \u2014 Chesterton 155\n\nHello DXP Enterprises,\n\nWe are seeking pricing and availability for the following:\n\n  Manufacturer : Chesterton\n  Model        : 155\n  Part Number  : \u2014\n\nPlease reply with unit price, lead time, and stock availability.\n\nRegards,\nArkim Procurement\nprocurement@arkim.ai\n\nPrefer a form? Submit your quote in five fields: http://localhost:3000/quote/FF6wo6-L10yPesvjhjBeHFebHok50tE6xh8HnMq7FaI"
+    },
+    {
+      "to": [
+        "owner@dxpe.com"
+      ],
+      "subject": "New quote request \u2014 Chesterton 155",
+      "kind": "RFQ_NEW",
+      "body": "Hello,\n\nArkim has sent you a request for quote for Chesterton 155.\nChesterton 155 single cartridge mechanical seal, 1.875 inch shaft, like-for-like replacement for Goulds 3196 MTX centrifugal pump (Line 2)\nQuantity: 1\n\nYou can review it and submit a quote in your supplier portal:\nhttp://localhost:3000/supplier/requests\n\nRegards,\nArkim Procurement\nprocurement@arkim.ai"
+    },
+    {
+      "to": [
+        "admin@dxpe.com"
+      ],
+      "subject": "New quote request \u2014 Chesterton 155",
+      "kind": "RFQ_NEW",
+      "body": "Hello,\n\nArkim has sent you a request for quote for Chesterton 155.\nChesterton 155 single cartridge mechanical seal, 1.875 inch shaft, like-for-like replacement for Goulds 3196 MTX centrifugal pump (Line 2)\nQuantity: 1\n\nYou can review it and submit a quote in your supplier portal:\nhttp://localhost:3000/supplier/requests\n\nRegards,\nArkim Procurement\nprocurement@arkim.ai"
+    }
+  ],
+  "identity_tokens": [
+    "Chesterton",
+    "155"
+  ],
+  "rfq_new_named_part": 2,
+  "leaks": []
+}

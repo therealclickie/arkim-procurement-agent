@@ -1,0 +1,141 @@
+[
+  {
+    "to": [
+      "maintenance@bayfoods.com"
+    ],
+    "cc": [],
+    "subject": "Re: your parts request \u2014 a few more details",
+    "body": "We need a few more details before we can source this part. For the Goulds 3196: What's the shaft size, and is it a cartridge or component seal, single or double? An old-part code helps too, if visible.",
+    "metadata": {
+      "intake_kind": "clarify"
+    },
+    "configuration_set": "eval-notify-set",
+    "tags": [],
+    "provider_message_id": "fake-cc6e9a74-121d-477e-af8e-38e547db60c1",
+    "sender": "procurement@arkim.ai"
+  },
+  {
+    "to": [
+      "maintenance@bayfoods.com"
+    ],
+    "cc": [],
+    "subject": "Re: your parts request \u2014 a few more details",
+    "body": "We need a few more details before we can source this part. What are the face and seal ring materials specified for the Chesterton 155 cartridge seal (for example, carbon vs. ceramic faces, or elastomer vs. PTFE secondary seals)?",
+    "metadata": {
+      "intake_kind": "clarify"
+    },
+    "configuration_set": "eval-notify-set",
+    "tags": [],
+    "provider_message_id": "fake-eefb9c4e-835a-4cca-9867-2a05d8bd78c4",
+    "sender": "procurement@arkim.ai"
+  },
+  {
+    "to": [
+      "maintenance@bayfoods.com"
+    ],
+    "cc": [],
+    "subject": "Re: your parts request \u2014 a few more details",
+    "body": "We need a few more details before we can source this part. What is the elastomer or seal face material specification for this Chesterton 155 seal (for example: carbon/ceramic, tungsten carbide, Viton, EPDM, etc.)?",
+    "metadata": {
+      "intake_kind": "clarify"
+    },
+    "configuration_set": "eval-notify-set",
+    "tags": [],
+    "provider_message_id": "fake-1c76a1b9-85f3-4b68-bd37-e4ba16d204ab",
+    "sender": "procurement@arkim.ai"
+  },
+  {
+    "to": [
+      "sales@dxpe.com"
+    ],
+    "cc": [],
+    "subject": "Arkim matched a request to your profile",
+    "body": "Arkim matched an active procurement request to your onboarded profile.\n\nSupplier: DXP Enterprises (dxpe.com)\n\nThis is an automated FYI from the Arkim procurement platform. No action is required unless Arkim follows up with a formal RFQ.\n",
+    "metadata": {
+      "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+      "supplier_domain": "dxpe.com",
+      "notify": true,
+      "noun_class": "SEAL"
+    },
+    "configuration_set": "eval-notify-set",
+    "tags": [],
+    "provider_message_id": "fake-ba16a6c3-7fc0-440b-9b04-d20975820f1d",
+    "sender": "procurement@arkim.ai"
+  },
+  {
+    "to": [
+      "sales@dxpe.com"
+    ],
+    "cc": [],
+    "subject": "Quote Request \u2014 Chesterton 155",
+    "body": "Subject: Quote Request \u2014 Chesterton 155\n\nHello DXP Enterprises,\n\nWe are seeking pricing and availability for the following:\n\n  Manufacturer : Chesterton\n  Model        : 155\n  Part Number  : \u2014\n\nPlease reply with unit price, lead time, and stock availability.\n\nRegards,\nArkim Procurement\nprocurement@arkim.ai\n\nPrefer a form? Submit your quote in five fields: http://localhost:3000/quote/FF6wo6-L10yPesvjhjBeHFebHok50tE6xh8HnMq7FaI",
+    "metadata": {
+      "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+      "supplier_domain": "dxpe.com",
+      "rfq_id": "73ac8a65-957b-4ed8-b829-b4a13149b22a",
+      "part_key": null
+    },
+    "configuration_set": "eval-notify-set",
+    "tags": [],
+    "provider_message_id": "fake-875844d8-494f-4162-aa33-71c7684d8ad4",
+    "sender": "procurement@arkim.ai"
+  },
+  {
+    "to": [
+      "owner@dxpe.com"
+    ],
+    "cc": [],
+    "subject": "New quote request \u2014 Chesterton 155",
+    "body": "Hello,\n\nArkim has sent you a request for quote for Chesterton 155.\nChesterton 155 single cartridge mechanical seal, 1.875 inch shaft, like-for-like replacement for Goulds 3196 MTX centrifugal pump (Line 2)\nQuantity: 1\n\nYou can review it and submit a quote in your supplier portal:\nhttp://localhost:3000/supplier/requests\n\nRegards,\nArkim Procurement\nprocurement@arkim.ai",
+    "metadata": {
+      "supplier_domain": "dxpe.com",
+      "notification_id": "6c0a0edd-d082-4218-b2fb-1bc640e77929",
+      "notification_kind": "RFQ_NEW",
+      "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+      "message_class": "notification",
+      "configuration_set": "eval-notify-set"
+    },
+    "configuration_set": "eval-notify-set",
+    "tags": [
+      {
+        "Name": "notification_id",
+        "Value": "6c0a0edd-d082-4218-b2fb-1bc640e77929"
+      },
+      {
+        "Name": "notification_kind",
+        "Value": "RFQ_NEW"
+      }
+    ],
+    "provider_message_id": "fake-b60f8fd4-60c6-41ac-aa8e-8f83dd8d2ecc",
+    "sender": "procurement@arkim.ai"
+  },
+  {
+    "to": [
+      "admin@dxpe.com"
+    ],
+    "cc": [],
+    "subject": "New quote request \u2014 Chesterton 155",
+    "body": "Hello,\n\nArkim has sent you a request for quote for Chesterton 155.\nChesterton 155 single cartridge mechanical seal, 1.875 inch shaft, like-for-like replacement for Goulds 3196 MTX centrifugal pump (Line 2)\nQuantity: 1\n\nYou can review it and submit a quote in your supplier portal:\nhttp://localhost:3000/supplier/requests\n\nRegards,\nArkim Procurement\nprocurement@arkim.ai",
+    "metadata": {
+      "supplier_domain": "dxpe.com",
+      "notification_id": "4222d254-5c1b-4ec2-be46-12dd9eb44d95",
+      "notification_kind": "RFQ_NEW",
+      "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+      "message_class": "notification",
+      "configuration_set": "eval-notify-set"
+    },
+    "configuration_set": "eval-notify-set",
+    "tags": [
+      {
+        "Name": "notification_id",
+        "Value": "4222d254-5c1b-4ec2-be46-12dd9eb44d95"
+      },
+      {
+        "Name": "notification_kind",
+        "Value": "RFQ_NEW"
+      }
+    ],
+    "provider_message_id": "fake-2b268d7d-0c68-47f4-ac6a-d48ba48deb40",
+    "sender": "procurement@arkim.ai"
+  }
+]

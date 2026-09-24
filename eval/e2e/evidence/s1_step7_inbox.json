@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "requests": [
+    {
+      "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+      "manufacturer": "Chesterton",
+      "part_number": null,
+      "quantity": 1,
+      "sent_at": "2026-09-24T10:53:01.613426+00:00",
+      "quoted": null,
+      "seen": false
+    }
+  ],
+  "rfq_viewed": true
+}

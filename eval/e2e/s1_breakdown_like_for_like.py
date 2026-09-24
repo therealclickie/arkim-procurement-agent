@@ -449,8 +449,11 @@ if accept_target:
     step10_ev["execute"] = {"status": rex.status_code,
                             "body": rex.json() if rex.status_code < 500 else rex.text}
     rorders = client.get(f"/api/runs/{run_id}/orders")
-    orders = rorders.json() if rorders.status_code == 200 else []
-    step10_ev["orders"] = orders
+    orders_resp = rorders.json() if rorders.status_code == 200 else {}
+    # the endpoint returns an envelope {run_id, count, orders: [...]}
+    orders = orders_resp.get("orders", orders_resp) \
+        if isinstance(orders_resp, dict) else orders_resp
+    step10_ev["orders"] = orders_resp
     rd2 = client.get(f"/api/runs/{run_id}").json()
     step10_ev["final_phase"] = rd2.get("phase")
     order_prices = [(o.get("status"), o.get("unit_price") or o.get("price"),

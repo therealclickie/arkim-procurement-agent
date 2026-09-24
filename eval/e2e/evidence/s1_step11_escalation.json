@@ -1,0 +1,11 @@
+{
+  "scheduler_now": "2026-09-25T16:00:00+00:00",
+  "result": {
+    "reminded": 0,
+    "alerted": 0,
+    "considered": 2
+  },
+  "rfq_escalation_alerts": [],
+  "dxp_reminders": [],
+  "outbox_grew": 0
+}

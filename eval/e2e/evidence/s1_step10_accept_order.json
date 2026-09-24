@@ -1,0 +1,73 @@
+{
+  "select": {
+    "status": 200,
+    "body": {
+      "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+      "phase": "pending_first_approval"
+    }
+  },
+  "approve": {
+    "status": 200,
+    "body": {
+      "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+      "phase": "approved"
+    }
+  },
+  "execute": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "action": "execute",
+      "order": {
+        "id": "c1f5e60d-fd7e-45d1-9402-d6945d74c013",
+        "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+        "company_id": null,
+        "manufacturer": "Chesterton",
+        "part_number": null,
+        "vendor_name": "DXP Enterprises",
+        "supplier_domain": "dxpe.com",
+        "unit_price": 189.0,
+        "currency": "USD",
+        "quantity": 1,
+        "lead_time": "2 days",
+        "source": "quote",
+        "status": "placed",
+        "created_at": "2026-09-24T10:53:02.138574+00:00",
+        "updated_at": "2026-09-24T10:53:02.147582+00:00",
+        "placed_by": "Dana Plant-Manager",
+        "notes": null,
+        "quote_id": "d1f5921a-a652-40c5-9f5c-6777911b9479"
+      },
+      "placed": true,
+      "message": "Order c1f5e60d-fd7e-45d1-9402-d6945d74c013 placed.",
+      "next_phase": null
+    }
+  },
+  "orders": {
+    "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+    "count": 1,
+    "orders": [
+      {
+        "id": "c1f5e60d-fd7e-45d1-9402-d6945d74c013",
+        "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+        "company_id": null,
+        "manufacturer": "Chesterton",
+        "part_number": null,
+        "vendor_name": "DXP Enterprises",
+        "supplier_domain": "dxpe.com",
+        "unit_price": 189.0,
+        "currency": "USD",
+        "quantity": 1,
+        "lead_time": "2 days",
+        "source": "quote",
+        "status": "placed",
+        "created_at": "2026-09-24T10:53:02.138574+00:00",
+        "updated_at": "2026-09-24T10:53:02.147582+00:00",
+        "placed_by": "Dana Plant-Manager",
+        "notes": null,
+        "quote_id": "d1f5921a-a652-40c5-9f5c-6777911b9479"
+      }
+    ]
+  },
+  "final_phase": "approved"
+}

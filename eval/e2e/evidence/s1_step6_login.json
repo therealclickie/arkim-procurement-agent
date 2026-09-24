@@ -1,0 +1,16 @@
+{
+  "request_link_status": 200,
+  "auth_mails": 1,
+  "auth_mail_to": [
+    [
+      "owner@dxpe.com"
+    ]
+  ],
+  "auth_config_set": [
+    "eval-auth-set"
+  ],
+  "verify_status": 200,
+  "cookie_set": true,
+  "token_found": true,
+  "session_established": true
+}

@@ -1,0 +1,1222 @@
+{
+  "id": "eed47011-8276-4b4e-9536-7435efec742f",
+  "phase": "comparison",
+  "urgency": "Emergency",
+  "warranty": "Unknown",
+  "facility_id": "fac-stockton",
+  "facility_state": "CA",
+  "group_id": null,
+  "asset_specs": {
+    "category": "Part",
+    "description": "Chesterton 155 single cartridge mechanical seal, 1.875 inch shaft, like-for-like replacement for Goulds 3196 MTX centrifugal pump (Line 2)",
+    "detected_type": "mechanical seal",
+    "use_case": "for Goulds 3196 MTX centrifugal pump (Line 2)",
+    "manufacturer_confidence": 95.0,
+    "part_id_confidence": 82.0,
+    "confidence_reasoning": "User explicitly named Chesterton 155 as the existing seal \u2014 a well-known cartridge seal product line \u2014 giving high manufacturer confidence. Shaft size of 1.875 inch is confirmed. Part type (single cartridge mechanical seal) is confirmed. Part_id confidence is 82 rather than 90+ because no specific part number (e.g. suffix for face material or elastomer) was provided; the Chesterton 155 comes in multiple material configurations, so sourcing should confirm face/elastomer spec before ordering.",
+    "quantity": 1,
+    "manufacturer": "Chesterton",
+    "model": "155",
+    "shaft_size": "1.875 inch"
+  },
+  "inventory_result": {
+    "status": "no_data",
+    "message": "Inventory agent not yet connected (Phase 5)."
+  },
+  "sourcing_results": {
+    "tier1": [
+      {
+        "id": "DXP Enterprises-t1-0",
+        "vendorName": "DXP Enterprises",
+        "vendorType": "NationalDistributor",
+        "tier": 1,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": null,
+        "leadTimeSource": "placeholder",
+        "url": "https://dxpe.com",
+        "foundPartNumber": null,
+        "suitability": 92.0,
+        "confidence": 0.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": null,
+        "confirmationPending": true,
+        "aftermarketDisclosure": null,
+        "registryBacked": true,
+        "tier1MatchExplanation": {
+          "class_gate": "SEAL",
+          "is_core": true,
+          "brand_relationship": null,
+          "territory_rank": 3,
+          "local_service": false,
+          "buyer_state": null,
+          "buyer_zip": null,
+          "onboarded": true,
+          "self_declared_scope": false
+        }
+      }
+    ],
+    "tier2": [
+      {
+        "id": "Chesterton-t2-1",
+        "vendorName": "Chesterton",
+        "vendorType": "NationalDistributor",
+        "tier": 2,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "5 days",
+        "leadTimeSource": "defaulted",
+        "url": "https://chesterton.com/mechanical-seals/cartridge-seals/155",
+        "foundPartNumber": "155",
+        "suitability": 80.0,
+        "confidence": 20.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": true,
+        "isOemDirect": true,
+        "isAuthorizedDistributor": false,
+        "priceVerified": false,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": "Silver",
+        "comparisonArtifact": {
+          "fidelity": "medium",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not visible in listing \u2014 verify with vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not visible in listing \u2014 verify with vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "Some fields could not be verified from the vendor's listing. Confirm the following with the vendor before approval: shaft_size, detected_type."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null
+      },
+      {
+        "id": "Pump World-t2-2",
+        "vendorName": "Pump World",
+        "vendorType": "NationalDistributor",
+        "tier": 2,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://www.pumpworld.com/products/813464/chesterton-155-standard-single-cartridge-mechanical-seal?129833=735150&129834=735153&129835=735196&129836=736461&129839=736274",
+        "foundPartNumber": "155",
+        "suitability": 55.0,
+        "confidence": 17.5,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": true,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": false,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "medium",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not visible in listing \u2014 verify with vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not visible in listing \u2014 verify with vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "Some fields could not be verified from the vendor's listing. Confirm the following with the vendor before approval: shaft_size, detected_type."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null
+      }
+    ],
+    "tier3": [
+      {
+        "id": "Mesco Corporation-t3-0",
+        "vendorName": "Mesco Corporation",
+        "vendorType": "NationalDistributor",
+        "tier": 3,
+        "price": 580.0,
+        "evidenceState": "priced",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://www.mescocorp.com",
+        "foundPartNumber": null,
+        "suitability": 24.5,
+        "confidence": 32.5,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": true,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.mescocorp.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null
+      },
+      {
+        "id": "Phoenix Pumps, Inc.-t3-1",
+        "vendorName": "Phoenix Pumps, Inc.",
+        "vendorType": "RegionalSpecialist",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://www.phoenixpumps.com",
+        "foundPartNumber": null,
+        "suitability": 50.0,
+        "confidence": 17.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.phoenixpumps.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null
+      },
+      {
+        "id": "Edelmann & Associates, Inc. (PPC Mechanical Seals Distributor)-t3-2",
+        "vendorName": "Edelmann & Associates, Inc. (PPC Mechanical Seals Distributor)",
+        "vendorType": "RegionalSpecialist",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://cogentcompanies.com",
+        "foundPartNumber": null,
+        "suitability": 50.0,
+        "confidence": 17.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://cogentcompanies.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null
+      },
+      {
+        "id": "Siewert Equipment (Flowserve Distributor)-t3-3",
+        "vendorName": "Siewert Equipment (Flowserve Distributor)",
+        "vendorType": "RegionalSpecialist",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://www.cummins-wagner.com",
+        "foundPartNumber": null,
+        "suitability": 50.0,
+        "confidence": 17.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.cummins-wagner.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null
+      },
+      {
+        "id": "Seal House USA-t3-4",
+        "vendorName": "Seal House USA",
+        "vendorType": "NationalDistributor",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://www.sealhouseusa.com",
+        "foundPartNumber": null,
+        "suitability": 28.0,
+        "confidence": 14.8,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.sealhouseusa.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null
+      },
+      {
+        "id": "Platinum Performance Products (3P Pumps)-t3-6",
+        "vendorName": "Platinum Performance Products (3P Pumps)",
+        "vendorType": "RegionalSpecialist",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://3ppumps.com",
+        "foundPartNumber": "PPSE222603AX",
+        "suitability": 1.0,
+        "confidence": 12.1,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://3ppumps.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null
+      },
+      {
+        "id": "Flowserve-t3-8",
+        "vendorName": "Flowserve",
+        "vendorType": "NationalDistributor",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": null,
+        "leadTimeSource": "placeholder",
+        "url": "",
+        "foundPartNumber": null,
+        "suitability": 0.0,
+        "confidence": 0.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": true,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at [URL not available] \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null
+      },
+      {
+        "id": "Apex Seals-t3-9",
+        "vendorName": "Apex Seals",
+        "vendorType": "NationalDistributor",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": null,
+        "leadTimeSource": "placeholder",
+        "url": "",
+        "foundPartNumber": null,
+        "suitability": 0.0,
+        "confidence": 0.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": true,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at [URL not available] \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null
+      }
+    ],
+    "warrantyBanner": null,
+    "tier3CapabilityPivot": false,
+    "findings": [
+      {
+        "id": "Mesco Corporation-t3-0",
+        "vendorName": "Mesco Corporation",
+        "vendorType": "NationalDistributor",
+        "tier": 3,
+        "price": 580.0,
+        "evidenceState": "priced",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://www.mescocorp.com",
+        "foundPartNumber": null,
+        "suitability": 24.5,
+        "confidence": 32.5,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": true,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.mescocorp.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null,
+        "band": "B",
+        "evidenceQuality": 32.5,
+        "isMock": false
+      },
+      {
+        "id": "Chesterton-t2-1",
+        "vendorName": "Chesterton",
+        "vendorType": "NationalDistributor",
+        "tier": 2,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "5 days",
+        "leadTimeSource": "defaulted",
+        "url": "https://chesterton.com/mechanical-seals/cartridge-seals/155",
+        "foundPartNumber": "155",
+        "suitability": 80.0,
+        "confidence": 20.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": true,
+        "isOemDirect": true,
+        "isAuthorizedDistributor": false,
+        "priceVerified": false,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": "Silver",
+        "comparisonArtifact": {
+          "fidelity": "medium",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not visible in listing \u2014 verify with vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not visible in listing \u2014 verify with vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "Some fields could not be verified from the vendor's listing. Confirm the following with the vendor before approval: shaft_size, detected_type."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null,
+        "band": "B",
+        "evidenceQuality": 20.0,
+        "isMock": false
+      },
+      {
+        "id": "Pump World-t2-2",
+        "vendorName": "Pump World",
+        "vendorType": "NationalDistributor",
+        "tier": 2,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://www.pumpworld.com/products/813464/chesterton-155-standard-single-cartridge-mechanical-seal?129833=735150&129834=735153&129835=735196&129836=736461&129839=736274",
+        "foundPartNumber": "155",
+        "suitability": 55.0,
+        "confidence": 17.5,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": true,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": false,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "medium",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not visible in listing \u2014 verify with vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not visible in listing \u2014 verify with vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "Some fields could not be verified from the vendor's listing. Confirm the following with the vendor before approval: shaft_size, detected_type."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null,
+        "band": "B",
+        "evidenceQuality": 17.5,
+        "isMock": false
+      },
+      {
+        "id": "Phoenix Pumps, Inc.-t3-1",
+        "vendorName": "Phoenix Pumps, Inc.",
+        "vendorType": "RegionalSpecialist",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://www.phoenixpumps.com",
+        "foundPartNumber": null,
+        "suitability": 50.0,
+        "confidence": 17.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.phoenixpumps.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null,
+        "band": "B",
+        "evidenceQuality": 17.0,
+        "isMock": false
+      },
+      {
+        "id": "Edelmann & Associates, Inc. (PPC Mechanical Seals Distributor)-t3-2",
+        "vendorName": "Edelmann & Associates, Inc. (PPC Mechanical Seals Distributor)",
+        "vendorType": "RegionalSpecialist",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://cogentcompanies.com",
+        "foundPartNumber": null,
+        "suitability": 50.0,
+        "confidence": 17.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://cogentcompanies.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null,
+        "band": "B",
+        "evidenceQuality": 17.0,
+        "isMock": false
+      },
+      {
+        "id": "Siewert Equipment (Flowserve Distributor)-t3-3",
+        "vendorName": "Siewert Equipment (Flowserve Distributor)",
+        "vendorType": "RegionalSpecialist",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://www.cummins-wagner.com",
+        "foundPartNumber": null,
+        "suitability": 50.0,
+        "confidence": 17.0,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.cummins-wagner.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null,
+        "band": "B",
+        "evidenceQuality": 17.0,
+        "isMock": false
+      },
+      {
+        "id": "Seal House USA-t3-4",
+        "vendorName": "Seal House USA",
+        "vendorType": "NationalDistributor",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://www.sealhouseusa.com",
+        "foundPartNumber": null,
+        "suitability": 28.0,
+        "confidence": 14.8,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://www.sealhouseusa.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null,
+        "band": "B",
+        "evidenceQuality": 14.8,
+        "isMock": false
+      },
+      {
+        "id": "Platinum Performance Products (3P Pumps)-t3-6",
+        "vendorName": "Platinum Performance Products (3P Pumps)",
+        "vendorType": "RegionalSpecialist",
+        "tier": 3,
+        "price": null,
+        "evidenceState": "uncontacted",
+        "purchaseChannel": "reference",
+        "leadTime": "1\u20132 weeks",
+        "leadTimeSource": "defaulted",
+        "url": "https://3ppumps.com",
+        "foundPartNumber": "PPSE222603AX",
+        "suitability": 1.0,
+        "confidence": 12.1,
+        "pnMatchLevel": "none",
+        "pnMatchReason": "no part number was requested, so no part-number match can be claimed",
+        "loc": "",
+        "isExactMatch": false,
+        "isAftermarket": false,
+        "isOemDirect": false,
+        "isAuthorizedDistributor": false,
+        "priceVerified": true,
+        "priceUnverified": false,
+        "stock": null,
+        "shipFrom": null,
+        "contact": null,
+        "relationship": null,
+        "comparisonArtifact": {
+          "fidelity": "low",
+          "compatibilitySummary": "verification_required",
+          "comparison": [
+            {
+              "field": "shaft_size",
+              "fieldLabel": "Shaft Size",
+              "assetValue": "1.875 inch",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            },
+            {
+              "field": "detected_type",
+              "fieldLabel": "Equipment Type",
+              "assetValue": "mechanical seal",
+              "candidateValue": null,
+              "match": "unknown",
+              "notes": "not available \u2014 request from vendor"
+            }
+          ],
+          "verificationRequiredFields": [
+            "shaft_size",
+            "detected_type"
+          ],
+          "engineerNotes": "This is a low-fidelity comparison \u2014 spec sheet required from vendor before approval. The vendor's catalog page is at https://3ppumps.com \u2014 contact them via Arkim's quote request workflow to obtain detailed specs."
+        },
+        "confirmationPending": false,
+        "aftermarketDisclosure": null,
+        "registryBacked": false,
+        "tier1MatchExplanation": null,
+        "band": "B",
+        "evidenceQuality": 12.1,
+        "isMock": false
+      }
+    ],
+    "outreachTargets": {
+      "suppliers": [
+        {
+          "vendorName": "DXP Enterprises",
+          "onboarded": true,
+          "provenance": "Onboarded supplier \u2014 class match"
+        },
+        {
+          "vendorName": "Flowserve",
+          "onboarded": false,
+          "provenance": "Authorized distributor per brand intelligence"
+        },
+        {
+          "vendorName": "Apex Seals",
+          "onboarded": false,
+          "provenance": "Authorized distributor per brand intelligence"
+        }
+      ],
+      "requestedCount": 3
+    }
+  },
+  "selected_candidate": null,
+  "approval_history": [],
+  "messages": [
+    {
+      "id": "83529d7c-f7c8-4a73-a27a-c45c1edcb43c",
+      "role": "user",
+      "content": "Line 2's Goulds 3196 pump is leaking at the mechanical seal. We need a replacement seal today.",
+      "created_at": "2026-09-24T10:52:06.452870+00:00"
+    },
+    {
+      "id": "20510441-fc32-4872-8126-f2494c31953d",
+      "role": "agent",
+      "content": "For the Goulds 3196: What's the shaft size, and is it a cartridge or component seal, single or double? An old-part code helps too, if visible.",
+      "created_at": "2026-09-24T10:52:06.452870+00:00"
+    },
+    {
+      "id": "cab714ca-4f1b-4f1b-851c-2c1ef8cd4dd4",
+      "role": "user",
+      "content": "Goulds 3196 MTX, 1.875 inch shaft, single cartridge seal \u2014 old one is a Chesterton 155 cartridge, 1.875 inch. Like-for-like replacement.",
+      "created_at": "2026-09-24T10:52:15.032321+00:00"
+    },
+    {
+      "id": "9c6bfd10-09fb-4641-81e3-1cfe00f98d87",
+      "role": "agent",
+      "content": "What are the seal face and elastomer materials specified for the Chesterton 155 seal (e.g., carbon vs. ceramic faces, and Viton vs. EPDM elastomers)?",
+      "created_at": "2026-09-24T10:52:15.032321+00:00"
+    }
+  ],
+  "tier3_selection": null,
+  "tier3_outreach_sent": null,
+  "rfq_draft_status": {},
+  "maintenance_handoff": null,
+  "no_exact_match": false,
+  "created_at": "2026-09-24T10:52:06.433190",
+  "updated_at": "2026-09-24T10:53:01.249788"
+}

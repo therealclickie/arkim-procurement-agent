@@ -1,0 +1,10 @@
+{
+  "status_code": 200,
+  "body": {
+    "status": "NEEDS_CLARIFICATION",
+    "run_id": null,
+    "reason": "insufficient specs",
+    "clarify_attrs": null
+  },
+  "external_calls_after": 2
+}

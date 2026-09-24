@@ -1,0 +1,130 @@
+{
+  "scenario": "S1 breakdown like-for-like",
+  "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+  "duration_s": 87.1,
+  "network": {
+    "external_call_count": 27,
+    "budget": 150,
+    "by_host": {
+      "api.anthropic.com": 21,
+      "api.tavily.com": 6
+    },
+    "blocked_dns_lookups": [],
+    "recorded_at": "2026-09-24T10:53:02.230209+00:00"
+  },
+  "steps": [
+    {
+      "step": "1. email intake",
+      "expected": "RUN_CREATED with a run_id (or an honest clarification request)",
+      "observed": "HTTP 200, status='NEEDS_CLARIFICATION', run_id=None, reason='insufficient specs', clarify=None",
+      "verdict": "DEGRADED",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step1_intake_response.json"
+    },
+    {
+      "step": "1b. intake clarification reply (self-contained)",
+      "expected": "RUN_CREATED after answering the seal questions",
+      "observed": "status='NEEDS_CLARIFICATION', run_id=None, reason='insufficient specs'",
+      "verdict": "BREAK",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step1b_intake_retry.json"
+    },
+    {
+      "step": "1b2. intake third turn ('source family as-is')",
+      "expected": "RUN_CREATED via the family-as-is exit the question offers",
+      "observed": "status='NEEDS_CLARIFICATION', run_id=None, reason='insufficient specs'",
+      "verdict": "BREAK",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step1b2_intake_third_turn.json"
+    },
+    {
+      "step": "1c. in-app chat intake fallback",
+      "expected": "run created; chat intake extracts specs over two turns",
+      "observed": "run_id='eed47011-8276-4b4e-9536-7435efec742f', last reply={\"status\": 200, \"body\": {\"run_id\": \"eed47011-8276-4b4e-9536-7435efec742f\", \"message\": {\"id\": \"9c6bfd10-09fb-4641-81e3-1cfe00f98d87\", \"role\": \"agent\", \"content\": \"What are the seal face and elastomer materials specified for the Chesterton 155 seal (e.g., carbon vs. ceramic faces, and Viton vs. EPDM e",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step1c_inapp_fallback.json"
+    },
+    {
+      "step": "1d. confirm-intake (fallback path)",
+      "expected": "phase -> sourcing (honest open-family commit if the variant guard fires)",
+      "observed": "open_family_used=False, HTTP 200: {\"run_id\": \"eed47011-8276-4b4e-9536-7435efec742f\", \"phase\": \"sourcing\"}",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step1d_confirm_intake.json"
+    },
+    {
+      "step": "2. identification",
+      "expected": "phase=comparison; specs identify a Goulds 3196 mechanical seal, presented like-for-like (no fabricated part number)",
+      "observed": "phase='comparison', manufacturer='Chesterton', model='155', part_number=None, detected_type='mechanical seal', description='Chesterton 155 single cartridge mechanical seal, 1.875 inch shaft, like-for-like replacement for Goulds 3196 MTX centrif', no_exact_match=False",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step2_run_detail.json"
+    },
+    {
+      "step": "3. Tier-1 + banding",
+      "expected": "DXP surfaces as a Tier-1/registry-backed candidate with a band and provenance; bands carried on findings",
+      "observed": "tier1 n=1, findings n=0, DXP present=True, summary=[{\"vendor\": \"DXP Enterprises\", \"band\": null, \"tier\": 1, \"evidenceState\": \"uncontacted\", \"evidenceQuality\": null, \"registryBacked\": true, \"explanation\": {\"class_gate\": \"SEAL\", \"is_core\": true, \"brand_relationship\": null, \"territory_rank\": 3, \"local_service\": false, \"buyer_state\": null, \"buyer_zip\": null, \"onboarded\": true, \"self_declared_scope\": false}, \"price\": null, \"url\": \"https://dxpe.com\", \"fo",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step3_bands.json"
+    },
+    {
+      "step": "4. RFQ via governance, captured not sent",
+      "expected": "draft created+approved; direct /send 409s; release queue delivers; RFQ captured in FakeProvider to DXP's contact",
+      "observed": "draft_id='32324c3c-aec9-41b7-91b9-4c2fa05204cb', direct_send=409, release={\"released_by\": \"tom@arkim.ai\", \"results\": [{\"draft_id\": \"32324c3c-aec9-41b7-91b9-4c2fa05204cb\", \"released\": true, \"released_by\": \"tom@arkim.ai\", \"send_status\": \"sent\", \"sent\": true, \"draft_status\": \", rfq_mails_to_dxp=3, to=[['sales@dxpe.com'], ['owner@dxpe.com'], ['admin@dxpe.com']]",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step4_rfq.json"
+    },
+    {
+      "step": "5. RFQ_NEW routing (S1: OWNER+ADMIN only)",
+      "expected": "RFQ_NEW rows + delivered mail to exactly ['admin@dxpe.com', 'owner@dxpe.com']; MEMBERs excluded",
+      "observed": "store recipients=['admin@dxpe.com', 'owner@dxpe.com'], delivered=[['owner@dxpe.com'], ['admin@dxpe.com']]",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step5_rfq_new_routing.json"
+    },
+    {
+      "step": "5b. supplier mail content (arc5 T8)",
+      "expected": "RFQ_NEW mail names the part identity; NO supplier-facing mail carries a run UUID or internal vocabulary (class-matched / noun_class / ...)",
+      "observed": "rfq_new mails=2, naming the part=2, leaking mails=[]",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step5b_mail_content.json"
+    },
+    {
+      "step": "6. magic-link login",
+      "expected": "auth mail captured (tracking-OFF config set); verify returns 200, session cookie + bearer issued",
+      "observed": "auth mails=1 to=[['owner@dxpe.com']], config_set=['eval-auth-set'], session=yes",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step6_login.json"
+    },
+    {
+      "step": "7. session inbox + RfqView",
+      "expected": "the RFQ for this run appears in /api/supplier/requests; an RfqView row is recorded for dxpe.com",
+      "observed": "inbox n=1, this run present=True, entry={\"run_id\": \"eed47011-8276-4b4e-9536-7435efec742f\", \"manufacturer\": \"Chesterton\", \"part_number\": null, \"quantity\": 1, \"sent_at\": \"2026-09-24T10:53:01.613426+00:00\", \"quoted\": null, \"seen\": false}, rfq_viewed=True",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step7_inbox.json"
+    },
+    {
+      "step": "8. structured quote via session",
+      "expected": "quote accepted (ok, status active) and attributed to the member/domain",
+      "observed": "HTTP 200, response={\"ok\": true, \"quote_id\": \"d1f5921a-a652-40c5-9f5c-6777911b9479\", \"status\": \"active\", \"review_reasons\": [], \"pn_differs\": false, \"valid_until\": \"2026-10-08T10:53:01.993525+00:00\"}",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step8_quote_submit.json"
+    },
+    {
+      "step": "9. buyer sees the quote",
+      "expected": "a DXP candidate shows evidenceState='quoted' with price 189.0 and quote provenance (quoteId), not a fabricated price",
+      "observed": "quoted candidates=[('DXP Enterprises', 189.0, 'd1f5921a-a652-40c5-9f5c-6777911b9479', '2 days')]",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step9_buyer_view.json"
+    },
+    {
+      "step": "10. accept -> order (arc5 T1: quote-priced)",
+      "expected": "approval path completes; an order exists AT THE QUOTED PRICE (189.0) and records the quote id it came from",
+      "observed": "select=200, approve=200, execute=200, final_phase='approved', orders(status,price,vendor,quote_id)={\"run_id\": \"eed47011-8276-4b4e-9536-7435efec742f\", \"count\": 1, \"orders\": [{\"id\": \"c1f5e60d-fd7e-45d1-9402-d6945d74c013\", \"run_id\": \"eed47011-8276-4b4e-9536-7435efec742f\", \"company_id\": null, \"manufacturer\": \"Chesterton\", \"part_number\": null, \"vendor_name\": \"DXP Enterprises\", \"supplier_domain\": \"dxpe, quote_id_recorded=False | ADJUDICATED: order unit_price=189.0 source=quote status=placed quote_id recorded",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step10_accept_order.json",
+      "adjudication_note": "corrected from BREAK (harness parsing bug); see s1_step10_adjudication.json"
+    },
+    {
+      "step": "11. no escalation for viewed RFQ",
+      "expected": "run_escalations at +10 business hours: no reminder, no escalation alert for dxpe.com (RfqView suppresses)",
+      "observed": "result={'reminded': 0, 'alerted': 0, 'considered': 2}, dxp reminders=0, escalation alerts=0, outbox grew=0",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s1_step11_escalation.json"
+    }
+  ]
+}

@@ -115,7 +115,46 @@ Evidence: `eval/e2e/evidence/phase0_results.json` (all 30 checks PASS).
 
 ## 6. Scenario step tables
 
-*(pending)*
+### S1 — Breakdown, like-for-like (the anchor demo) — COMPLETE
+
+Run: `uv run python eval/e2e/s1_breakdown_like_for_like.py` (after `phase0_pilot_config.py`).
+Run id `eed47011-8276-4b4e-9536-7435efec742f`. **27 external calls** (21 Anthropic, 6 Tavily), 87s.
+Evidence: `eval/e2e/evidence/s1_*.json`.
+
+| # | Step | Expected | Observed | Verdict | vs previous eval |
+|---|---|---|---|---|---|
+| 1 | Email intake | run or honest clarification | `NEEDS_CLARIFICATION`, good question | DEGRADED | same |
+| 1b | Self-contained reply answering everything | `RUN_CREATED` | `NEEDS_CLARIFICATION` again | **BREAK** | **F-06 still open** (out of arc-5 scope, as briefed) |
+| 1b2 | Third mail taking the family-as-is exit | `RUN_CREATED` | `NEEDS_CLARIFICATION` — email loop never terminates | **BREAK** → PH-01 | F-06 unchanged |
+| 1c | In-app chat fallback | run + specs | run created; specs correct (Chesterton 155, 1.875″ shaft); chat asked a NEW question (face/elastomer materials) instead of re-asking the supplied shaft size | PASS | **F-08 FIXED** (T6) — no re-ask of a supplied attr |
+| 1d | Confirm intake | phase → sourcing | **200 on the FIRST plain confirm** — no 422, no `open_family` needed | PASS | **F-08's 422-names-supplied-field FIXED** (T6); previous run needed the `open_family` affordance |
+| 2 | Identification | honest like-for-like, no invented PN | Chesterton 155 for Goulds 3196 MTX, `part_number=null`, phase `comparison` | PASS | same (good) |
+| 3 | Tier-1 + bands | DXP + provenance + bands | DXP Tier-1 `registryBacked` `{class_gate: SEAL, is_core, onboarded}`; `sourcing_results.findings` = 8 × Band B; every candidate honestly `pnMatchLevel=none` with a **reason** (“no part number was requested…”) — the new `pnMatchReason` field (T2) is live | PASS | badge honesty now explained per row |
+| 4 | RFQ via governance | 409 direct; release delivers; captured | draft `32324c3c`, direct send **409**, release → `sent`, captured to `sales@dxpe.com` | PASS | same |
+| 5 | RFQ_NEW routing | exactly OWNER+ADMIN | store + delivered = exactly `{owner,admin}@dxpe.com`, MEMBERs excluded | PASS | same |
+| 5b | **(new)** supplier-mail content | names the part; no UUID/internal vocab | both RFQ_NEW mails name Chesterton/155; **zero** mails carry a run UUID or internal vocabulary | PASS | **F-09 + F-10 FIXED** (T8) |
+| 6 | Magic-link login | token works, HttpOnly cookie | auth mail on `eval-auth-set`, verify 200, session established | PASS | same |
+| 7 | Session inbox + RfqView | visible; view recorded | inbox shows the run; `rfq_viewed=True` | PASS | same |
+| 8 | Structured quote | accepted + attributed | 200 `{ok, quote_id d1f5921a, status active}` via account | PASS | same |
+| 9 | Buyer sees quote | DXP `quoted` @189 | `evidenceState=quoted`, price 189.0, quoteId, “2 days” | PASS | same |
+| 10 | Buyer accepts; order advances | order AT the quoted price, quote id recorded | **order `unit_price=189.0`, `source="quote"`, `status="placed"`, `quote_id` = the step-8 quote, `placed: true`** | PASS* | **F-07 FIXED** (T1) — previously an unpriced draft |
+| 11 | No escalation for viewed RFQ | silence at +10 bh | reminded 0, alerted 0, outbox unchanged | PASS | same |
+
+\* Step 10 was first recorded BREAK by a harness parsing bug (the orders endpoint
+returns an `{run_id, count, orders:[...]}` envelope; the old script iterated the dict).
+Adjudicated PASS from the captured evidence — `s1_step10_adjudication.json`; the script
+is fixed for future runs. Nothing about the product broke.
+
+**Bottom line S1:** the anchor demo now completes **all the way through the order** —
+the one demo avoidance the previous report imposed on the buy-flow (“stop at the quoted
+card”) is gone. Email intake remains the single dead channel (PH-01/F-06, known,
+deliberately out of arc-5 scope). Side observation, unchanged from the previous run: the
+Apollo **cache**-rescue lifted two sub-floor Tier-3 candidates (Platinum Performance
+Products, suitability 1%) into the visible list (`apollo_confirmed` rescue) — annotate-
+don't-remove is by design, but a 1%-suitability rescue riding a cached verdict is worth
+a human eyeball (recorded as PH-08).
+
+*(S2–S4 pending)*
 
 ---
 

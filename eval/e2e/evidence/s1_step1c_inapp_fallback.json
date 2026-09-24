@@ -1,0 +1,36 @@
+{
+  "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+  "messages": [
+    {
+      "status": 200,
+      "body": {
+        "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+        "message": {
+          "id": "20510441-fc32-4872-8126-f2494c31953d",
+          "role": "agent",
+          "content": "For the Goulds 3196: What's the shaft size, and is it a cartridge or component seal, single or double? An old-part code helps too, if visible.",
+          "created_at": "2026-09-24T10:52:06.452870+00:00"
+        },
+        "updated_phase": "intake",
+        "proceed_state": "blocked_need_either",
+        "parts": null
+      }
+    },
+    {
+      "status": 200,
+      "body": {
+        "run_id": "eed47011-8276-4b4e-9536-7435efec742f",
+        "message": {
+          "id": "9c6bfd10-09fb-4641-81e3-1cfe00f98d87",
+          "role": "agent",
+          "content": "What are the seal face and elastomer materials specified for the Chesterton 155 seal (e.g., carbon vs. ceramic faces, and Viton vs. EPDM elastomers)?",
+          "created_at": "2026-09-24T10:52:15.032321+00:00"
+        },
+        "updated_phase": "intake",
+        "proceed_state": "needs_clarification",
+        "parts": null
+      }
+    }
+  ],
+  "external_calls_after": 12
+}
