@@ -1,0 +1,497 @@
+{
+  "goulds|UNKNOWN-PN": {
+    "Pumpman": {
+      "price": 2871.0,
+      "lead_days": 2,
+      "date_fetched": "2026-07-03T10:40:18.917927",
+      "source": "live",
+      "url": "https://www.shoppumps.com/category-s/355.htm"
+    },
+    "mbglick.com": {
+      "price": 700.0,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:31:59.877553",
+      "source": "live",
+      "url": "https://mbglick.com/shop/goulds-pumps-3196-mt-centrifugal-pump-85-1750rpm-250gpm-2x3-13-cast-iron"
+    }
+  },
+  "skf|6205-2RS1": {
+    "VXB Bearings": {
+      "price": 229.62,
+      "lead_days": 7,
+      "date_fetched": "2026-07-04T09:17:51.206758",
+      "source": "live",
+      "url": "https://vxb.com/products/skf-w-6205-2rs1-deep-groove-ball-bearing-sealed-on"
+    },
+    "Motion Industries": {
+      "price": 237.78,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T09:17:51.354921",
+      "source": "live",
+      "url": "https://www.motion.com/products/sku/07673145"
+    }
+  },
+  "allen-bradley|22B-D010N104": {
+    "ISP Equipment": {
+      "price": 750.0,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T09:18:39.813599",
+      "source": "live",
+      "url": "https://ispequipment.net/product/allen-bradley-22b-d017n104-powerflex-vfd"
+    }
+  },
+  "baldor|EM3546T": {
+    "Dealers Electric": {
+      "price": 699.19,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T09:19:28.118945",
+      "source": "live",
+      "url": "https://dealerselectric.com/EM3546T-5.asp"
+    },
+    "Global Industrial": {
+      "price": 855.0,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T09:19:28.222823",
+      "source": "live",
+      "url": "https://www.globalindustrial.com/p/3-phase-motor-em3546t-5-1-hp-1800-rpm-143t-frame-c-face-mount-575-volts"
+    },
+    "Galesburg Electric": {
+      "price": 775.44,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T09:19:28.316157",
+      "source": "live",
+      "url": "https://www.galesburgelectric.com/baldor-em3546t-5-1hp-3ph-1760rpm-frame-143t-tefc"
+    },
+    "MROSupply.com": {
+      "price": 1032.01,
+      "lead_days": 1,
+      "date_fetched": "2026-07-04T09:19:28.460303",
+      "source": "live",
+      "url": "https://www.mrosupply.com/electric-motors/2211003_em3546t-5g_baldor"
+    }
+  },
+  "endress+hauser|UNKNOWN-PN": {
+    "Instrumart": {
+      "price": 422.78,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:07:22.191453",
+      "source": "live",
+      "url": "https://www.instrumart.com/products/45736/eh-cerabar-pmc21-pressure-transducer"
+    },
+    "MMCI": {
+      "price": 4330.0,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T11:06:35.319109",
+      "source": "live",
+      "url": "https://www.gommci.com/ehw400magpricing"
+    },
+    "Austin Surplus Industrial": {
+      "price": 161.78,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:07:22.223860",
+      "source": "live",
+      "url": "https://asisurplus.com/endress-hauser-pmc21-1pn4-0-cerabar-pressure-sensor-10-30vdc"
+    },
+    "Sigma Surplus": {
+      "price": 159.99,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:07:22.210505",
+      "source": "live",
+      "url": "https://sigmasurplus.com/endress-hauser-cerabar-pmc21-sensor"
+    }
+  },
+  "goulds pumps|UNKNOWN-PN": {
+    "Zoro": {
+      "price": 482.99,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:16:54.177679",
+      "source": "live",
+      "url": "https://www.zoro.com/goulds-water-technology-5-vane-9-12in-stainless-pump-impeller-pump-parts-and-accessory-3196-0100-595-1216/i/G710527016"
+    },
+    "Pump Catalog": {
+      "price": 869.71,
+      "lead_days": 1,
+      "date_fetched": "2026-07-04T11:16:06.899277",
+      "source": "live",
+      "url": "https://www.pumpcatalog.com/summit-pumps/3196-ansi-pump-repair-parts/96m101d-cd4"
+    }
+  },
+  "smc|NCDQ8B150-200": {
+    "SMC": {
+      "price": 70.4,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T10:58:19.615802",
+      "source": "live",
+      "url": "https://www.smcpneumatics.com/NCDQ8B150-200.html"
+    }
+  },
+  "festo|DSBC-50-100-PPVA-N3": {
+    "Motion Industries": {
+      "price": 266.94,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T10:59:01.517510",
+      "source": "live",
+      "url": "https://www.motion.com/products/sku/06173807"
+    }
+  },
+  "gates|5VX710": {
+    "MRO Supply": {
+      "price": 439.58,
+      "lead_days": 1,
+      "date_fetched": "2026-07-04T10:59:49.216449",
+      "source": "live",
+      "url": "https://www.mrosupply.com/v-belts/2242159_93895071_gates-rubber"
+    },
+    "Reid Supply": {
+      "price": 78.38,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T10:59:49.263356",
+      "source": "live",
+      "url": "https://www.reidsupply.com/en-us/p/v-belts/btq-5vx710"
+    }
+  },
+  "timken|32210": {
+    "Bearings Rus": {
+      "price": 53.5,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:00:28.154864",
+      "source": "live",
+      "url": "https://www.bearingsrus.com/32210-timken"
+    }
+  },
+  "baldwin filters|BT839-10": {
+    "Baldwin Filters": {
+      "price": 13.64,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:04:48.888478",
+      "source": "live",
+      "url": "https://www.baldwinfiltersrus.com/baldwin-bt839-10-hydraulic-spin-on-filter.html"
+    },
+    "FinditParts": {
+      "price": 13.99,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:04:48.915770",
+      "source": "live",
+      "url": "https://www.finditparts.com/p/bt839-10-baldwin-hydraulic-filter-used-for-various-truck-applications-64046"
+    },
+    "FleetPride": {
+      "price": 12.27,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T11:04:48.934778",
+      "source": "live",
+      "url": "https://www.fleetpride.com/parts/baldwin-hydraulic-filter-bt83910"
+    },
+    "Fisheries Supply": {
+      "price": 12.43,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T11:04:48.955318",
+      "source": "live",
+      "url": "https://www.fisheriessupply.com/baldwin-filters-bld-bt839-10/bt839-10"
+    },
+    "TOOLSiD": {
+      "price": 16.83,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:04:48.975243",
+      "source": "live",
+      "url": "https://www.toolsid.com/baldwin-filters/5-13-32-low-pressure-spin-on-hydraulic-filter-mpn-bt839-10.html"
+    },
+    "Maxim Truck & Trailer": {
+      "price": 12.59,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T11:04:48.998307",
+      "source": "live",
+      "url": "https://www.maximinc.com/part-141330-hydraulic-spin-on-bt839-10"
+    }
+  },
+  "square d|8536SD01": {
+    "Schneider Electric": {
+      "price": 1013.0,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T11:05:34.761023",
+      "source": "live",
+      "url": "https://www.se.com/us/en/product/8536SDO1V02S/nema-motor-starter-type-s-nonreversing-size-2-45a-25hp-at-460vac-5ka-sccr-3-phase-3-pole-melting-alloy-120vac-coil-open-taa"
+    }
+  },
+  "grundfos|CR15-03": {
+    "Pump Catalog": {
+      "price": 4474.79,
+      "lead_days": 1,
+      "date_fetched": "2026-07-04T11:08:02.420999",
+      "source": "live",
+      "url": "https://www.pumpcatalog.com/grundfos/cr-multistage-pumps/96890007"
+    },
+    "Optimal Distribution": {
+      "price": 4080.93,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:08:02.459815",
+      "source": "live",
+      "url": "https://optimaldist.com/products/grundfos-pump-99917481"
+    },
+    "MROSupply": {
+      "price": 3576.44,
+      "lead_days": 1,
+      "date_fetched": "2026-07-04T11:08:02.485105",
+      "source": "live",
+      "url": "https://www.mrosupply.com/pumps/5674299_96523612_grundfos"
+    }
+  },
+  "spirax sarco|UNKNOWN-PN": {
+    "State Supply": {
+      "price": 97.89,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:08:43.335608",
+      "source": "live",
+      "url": "https://www.statesupply.com/sg1171a"
+    },
+    "Cooney Brothers": {
+      "price": 134.0,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T11:08:43.358813",
+      "source": "live",
+      "url": "https://www.cooneybrothers.com/spirax-sarco-0666690"
+    }
+  },
+  "john crane|UNKNOWN-PN": {
+    "Pump Catalog": {
+      "price": 96.73,
+      "lead_days": 1,
+      "date_fetched": "2026-07-04T11:09:38.814929",
+      "source": "live",
+      "url": "https://www.pumpcatalog.com/us-seal-mfg/ps-line-mechanical-seals/ps-978v"
+    }
+  },
+  "chesterton|UNKNOWN-PN": {
+    "Pump World": {
+      "price": 8652.0,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:10:42.520219",
+      "source": "live",
+      "url": "https://www.pumpworld.com/products/722604/chesterton-442-split-mechanical-seal"
+    }
+  },
+  "garlock|UNKNOWN-PN": {
+    "Gallagher Seals": {
+      "price": 156.82,
+      "lead_days": 1,
+      "date_fetched": "2026-07-04T11:11:33.512008",
+      "source": "live",
+      "url": "https://www.gallagherseals.com/garlock-blue-gard-3000-sheet-material.html"
+    }
+  },
+  "alfa laval|UNKNOWN-PN": {
+    "Zoro": {
+      "price": 538.99,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:20:07.444171",
+      "source": "live",
+      "url": "https://www.zoro.com/alfa-laval-seal-kit-lkh10-60-csic-epdm-9612129609/i/G5644363"
+    },
+    "CPE Systems": {
+      "price": 274.0,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T11:20:07.415985",
+      "source": "live",
+      "url": "https://www.cpesystems.com/products/seal-kit-for-alfa-laval-lkh-pumps"
+    },
+    "Rodem Inc.": {
+      "price": 453.51,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T11:20:07.468391",
+      "source": "live",
+      "url": "https://rodem.com/product/service-kit-epdm-lkh-10-15-c-sic-single-shaft-seal"
+    }
+  },
+  "waukesha|UNKNOWN-PN": {
+    "ePump Store": {
+      "price": 14750.0,
+      "lead_days": 1,
+      "date_fetched": "2026-07-04T11:17:45.458419",
+      "source": "live",
+      "url": "https://www.epumpstore.com/waukesha-spx-flow-universal-1-series-060u1-ps1do-positive-displacement-pump-2-50-npt-ports-ps-1-dual-op-x08114-060-u1-model"
+    },
+    "Pump Catalog": {
+      "price": 3137.35,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:17:45.487962",
+      "source": "live",
+      "url": "https://www.pumpcatalog.com/mth-pumps/t51-series-turbine-pumps/0f-t510jssscsxsaxx-s05lxx"
+    }
+  },
+  "ashcroft|UNKNOWN-PN": {
+    "Instrumart": {
+      "price": 143.94,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:13:55.586442",
+      "source": "live",
+      "url": "https://www.instrumart.com/products/30344/ashcroft-1009-analog-pressure-gauges"
+    },
+    "Brice Barclay": {
+      "price": 85.98,
+      "lead_days": 2,
+      "date_fetched": "2026-07-04T11:13:55.608429",
+      "source": "live",
+      "url": "https://www.bricebarclay.com/product/ashcroft-1009-2-1-2-3-1-2-duralife-stainless-steel-case-pressure-gauges"
+    }
+  },
+  "sew-eurodrive|UNKNOWN-PN": {
+    "MROSupply": {
+      "price": 525.25,
+      "lead_days": 1,
+      "date_fetched": "2026-07-04T11:21:04.189864",
+      "source": "live",
+      "url": "https://www.mrosupply.com/speed-reducers/5817151_8702642590707001_sew-eurodrive"
+    }
+  },
+  "hytrol|UNKNOWN-PN": {
+    "Packer City Sales": {
+      "price": 1850.0,
+      "lead_days": 5,
+      "date_fetched": "2026-07-04T11:22:37.877392",
+      "source": "live",
+      "url": "https://www.packercitysales.com/listings/4773022-used-hytrol-25-crezd-chain-driven-pallet-conveyor-zero-pressure-many-avail"
+    }
+  },
+  "skf|6205-2RS": {
+    "JSB Great Bearings": {
+      "price": 13.99,
+      "lead_days": 2,
+      "date_fetched": "2026-07-06T11:02:34.037745",
+      "source": "live",
+      "url": "https://jsbgreatbearings.com/product/6205-2rs-skf-brand-rubber-seal-ball-bearing-25x52x15-6205-2rs-6205rs"
+    },
+    "123bearing.com": {
+      "price": 6.55,
+      "lead_days": 2,
+      "date_fetched": "2026-07-06T11:02:34.088113",
+      "source": "live",
+      "url": "https://www.123bearing.com/bearing-housing/deep-groove-bearing/single-row/6205-2rs-skf"
+    }
+  },
+  "skf|6205": {
+    "Quality Bearings Online": {
+      "price": 11.23,
+      "lead_days": 2,
+      "date_fetched": "2026-07-07T11:58:46.405000",
+      "source": "live",
+      "url": "https://www.qualitybearingsonline.com/6205-skf-deep-groove-bearing-25-x-52-x-15mm"
+    },
+    "EIS Inc": {
+      "price": 28.86,
+      "lead_days": 2,
+      "date_fetched": "2026-07-07T11:58:46.437055",
+      "source": "live",
+      "url": "https://www.eis-inc.com/product/deep-groove-radial-ball-bearing-6205-2rs04"
+    }
+  },
+  "dorner|804-1200VU": {
+    "Global Industrial": {
+      "price": 8399.0,
+      "lead_days": 20,
+      "date_fetched": "2026-07-07T13:49:55.828498",
+      "source": "live",
+      "url": "https://www.globalindustrial.com/p/2200-series-small-med-parts-hndl-conveyor-std-belt-8-x-12-80-lb-cap-6-36-fpm"
+    }
+  },
+  "crown triton (hyundai heavy industries)|HHI150-12-447T": {
+    "Global Industrial": {
+      "price": 16999.0,
+      "lead_days": 2,
+      "date_fetched": "2026-07-22T11:45:46.039464",
+      "source": "live",
+      "url": "https://www.globalindustrial.com/p/us-motor-c150p3c-150-hp-3-phase-1185-rpm"
+    },
+    "MROSupply": {
+      "price": 12254.99,
+      "lead_days": 5,
+      "date_fetched": "2026-07-22T11:45:46.073647",
+      "source": "live",
+      "url": "https://www.mrosupply.com/electric-motors/5979395_pe447t-150-6-575v_nae"
+    },
+    "Dealers Electric": {
+      "price": 19343.64,
+      "lead_days": 5,
+      "date_fetched": "2026-07-16T21:22:11.232927",
+      "source": "live",
+      "url": "https://dealerselectric.com/HHI150-12-447T-F2.asp"
+    },
+    "Electric Motors For Less": {
+      "price": 10718.0,
+      "lead_days": 2,
+      "date_fetched": "2026-07-22T11:45:46.057052",
+      "source": "live",
+      "url": "https://www.electricmotorsforless.com/PE447T-150-6-150-hp-447T-electric-motor-1200-North-American-_p_91.html"
+    },
+    "VFDs.com": {
+      "price": 7941.46,
+      "lead_days": 5,
+      "date_fetched": "2026-07-16T11:35:23.867023",
+      "source": "live",
+      "url": "https://vfds.com/galt-electric-gpt-motor-gpt15006447tk-150hp-1200rpm-3-phase-460v-60hz-445-7t"
+    }
+  },
+  "gusher pumps|84004-28-C238CBC": {
+    "Seals-Direct": {
+      "price": 85.28,
+      "lead_days": 2,
+      "date_fetched": "2026-07-29T23:42:02.421610",
+      "source": "live",
+      "url": "https://seals-direct.com/ps-238-gusher-pumps-pn-84004-28-shaft-size-1-625"
+    },
+    "Sealit123": {
+      "price": 53.25,
+      "lead_days": 5,
+      "date_fetched": "2026-07-17T08:18:27.724691",
+      "source": "live",
+      "url": "https://sealit123.com/oem-pump-seals/brands-f-p/gusher-pumps/84004-28-c238cb"
+    },
+    "Seal It": {
+      "price": 53.25,
+      "lead_days": 2,
+      "date_fetched": "2026-07-13T10:12:24.534956",
+      "source": "live",
+      "url": "https://sealit123.com/oem-pump-seals/brands-f-p/gusher-pumps/84004-28-c238cb"
+    },
+    "Seals Direct": {
+      "price": 85.28,
+      "lead_days": 2,
+      "date_fetched": "2026-07-13T10:12:24.559883",
+      "source": "live",
+      "url": "https://seals-direct.com/ps-238-gusher-pumps-pn-84004-28-shaft-size-1-625"
+    },
+    "Seal IT 123": {
+      "price": 53.25,
+      "lead_days": 2,
+      "date_fetched": "2026-07-17T08:15:45.371128",
+      "source": "live",
+      "url": "https://sealit123.com/oem-pump-seals/brands-f-p/gusher-pumps/84004-28-c238cb"
+    },
+    "Pump Catalog": {
+      "price": 221.0,
+      "lead_days": 1,
+      "date_fetched": "2026-07-22T11:47:35.720085",
+      "source": "live",
+      "url": "https://www.pumpcatalog.com/us-seal-mfg/ps-line-mechanical-seals/ps-7937"
+    },
+    "sealit123.com": {
+      "price": 53.25,
+      "lead_days": 5,
+      "date_fetched": "2026-07-17T08:17:14.011853",
+      "source": "live",
+      "url": "https://sealit123.com/oem-pump-seals/brands-f-p/gusher-pumps/84004-28-c238cb"
+    },
+    "Zoro": {
+      "price": 114.99,
+      "lead_days": 5,
+      "date_fetched": "2026-07-29T22:48:16.196010",
+      "source": "live",
+      "url": "https://www.zoro.com/springer-parts-mechanical-seal-replaces-gusher-pumps-84004-28-84004-28sp/i/G406012291"
+    },
+    "Seal-It 1 2 3": {
+      "price": 53.25,
+      "lead_days": 5,
+      "date_fetched": "2026-08-06T11:03:37.159298",
+      "source": "live",
+      "url": "https://sealit123.com/oem-pump-seals/brands-f-p/gusher-pumps/84004-28-c238cb"
+    }
+  }
+}

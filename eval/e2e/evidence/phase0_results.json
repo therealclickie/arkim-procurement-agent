@@ -1,0 +1,245 @@
+{
+  "phase": "0",
+  "checks": [
+    {
+      "check": "boot.health",
+      "ok": true,
+      "detail": "GET /api/health -> 200 {\"status\":\"ok\",\"version\":\"1.0.0-phase1\",\"demo_mode\":false,\"capture_failures\":0,\"label_failures\":0}"
+    },
+    {
+      "check": "flags.TIER1_V2_bound",
+      "ok": true,
+      "detail": "supplier_registry.TIER1_V2=True"
+    },
+    {
+      "check": "flags.SCORING_V2_bound",
+      "ok": true,
+      "detail": "scoring.SCORING_V2=True"
+    },
+    {
+      "check": "flags.CLAIM_TOKENS_bound",
+      "ok": true,
+      "detail": "claim_tokens.CLAIM_TOKENS_ENABLED=True"
+    },
+    {
+      "check": "flags.SUPPLIER_PORTAL_bound",
+      "ok": true,
+      "detail": "api_server.SUPPLIER_PORTAL_V1=True"
+    },
+    {
+      "check": "flags.DEMO_MODE_off",
+      "ok": true,
+      "detail": "api_server.DEMO_MODE=False"
+    },
+    {
+      "check": "isolation.store_paths",
+      "ok": true,
+      "detail": "all store paths under eval/e2e/data"
+    },
+    {
+      "check": "hardening.F04_gofer_data_dir_native",
+      "ok": true,
+      "detail": "GOFER_DATA_DIR natively isolated all 18 store modules (monkeypatch was a no-op)"
+    },
+    {
+      "check": "hardening.F04_handoffs_path",
+      "ok": true,
+      "detail": "api_server._HANDOFFS_PATH=C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\mock_maintenance_handoffs.json"
+    },
+    {
+      "check": "hardening.F02_frontend_default_8001",
+      "ok": true,
+      "detail": "next.config.ts defaults NEXT_PUBLIC_API_URL to :8001 (no stale :8000)"
+    },
+    {
+      "check": "hardening.F03_ses_unset_refuses_boot",
+      "ok": true,
+      "detail": "ses+accounts+var-unset -> exit 1, names the variable: True"
+    },
+    {
+      "check": "hardening.F03_ses_set_boots",
+      "ok": true,
+      "detail": "ses+accounts+var-set -> exit 0"
+    },
+    {
+      "check": "hardening.F03_fake_provider_exempt_at_boot",
+      "ok": true,
+      "detail": "fake+accounts+var-unset -> exit 0 (FakeProvider needs no auth set)"
+    },
+    {
+      "check": "mail.layer1_fake_transport",
+      "ok": true,
+      "detail": "active_provider() under profile -> FakeProvider (MAIL_PROVIDER=fake)"
+    },
+    {
+      "check": "mail.layer2_ses_cannot_construct",
+      "ok": true,
+      "detail": "SesProvider.send -> status='error' error='SES not configured (no region/client)'"
+    },
+    {
+      "check": "mail.layer3_gmail_no_creds",
+      "ok": true,
+      "detail": "Gmail path -> status='error' error='Gmail credentials not configured'"
+    },
+    {
+      "check": "mail.layer4_governance_blocks",
+      "ok": true,
+      "detail": "non-allowlisted send -> status='not_allowlisted' ('domain not on send allowlist: not-allowlisted-real-company.com')"
+    },
+    {
+      "check": "mail.capture_works",
+      "ok": true,
+      "detail": "allowlisted send -> status='sent', outbox +1, provider_message_id=fake-dabc0..."
+    },
+    {
+      "check": "hardening.F03_fake_captures_auth_mail_without_set",
+      "ok": true,
+      "detail": "helper reports refusal (True), FakeProvider still captures -> status='sent', outbox +1"
+    },
+    {
+      "check": "hardening.F03_ses_still_refuses_and_alerts",
+      "ok": true,
+      "detail": "SesProvider -> status='error' error='auth mail requires the tracking-off configuration set (SES_CONFIGURATION_SET_AUTH is unset); refusing to send on a tracking-enabled set'; AUTH_MAIL_REFUSED alerts=1 tier=ACTION_NOW"
+    },
+    {
+      "check": "mail.layer0_network_guard",
+      "ok": true,
+      "detail": "DNS for gmail.googleapis.com refused by guard (mail infra unreachable)"
+    },
+    {
+      "check": "mail.no_mail_dns_attempted",
+      "ok": true,
+      "detail": "blocked DNS so far: ['gmail.googleapis.com'] (only our probe)"
+    },
+    {
+      "check": "mode.live_keys_present",
+      "ok": true,
+      "detail": "ANTHROPIC_API_KEY and TAVILY_API_KEY present in env (values not shown) -> LIVE mode"
+    },
+    {
+      "check": "seed.known_sender",
+      "ok": true,
+      "detail": "intake known sender maintenance@bayfoods.com -> tenant bayfoods (fac-stockton, CA). NOTE: no admin API exists for this; seeded at store level."
+    },
+    {
+      "check": "seed.registry_dxp",
+      "ok": true,
+      "detail": "registry COPY has DXP: name=DXP Enterprises, tier1_lifecycle=onboarded, 410-supplier registry copied to eval/e2e/data/"
+    },
+    {
+      "check": "seed.dxp_account",
+      "ok": true,
+      "detail": "dxpe.com account with members [('owner@dxpe.com', 'OWNER'), ('admin@dxpe.com', 'ADMIN'), ('member1@dxpe.com', 'MEMBER'), ('member2@dxpe.com', 'MEMBER')]"
+    },
+    {
+      "check": "seed.s4_accounts",
+      "ok": true,
+      "detail": "S4 supplier accounts: ['supplier-a.example.com', 'supplier-b.example.com', 'supplier-c.example.com'] (owner-only, tz America/Los_Angeles)"
+    },
+    {
+      "check": "seed.allowlist",
+      "ok": true,
+      "detail": "governance allowlist restricted to: ['bayfoods.com', 'dxpe.com', 'supplier-a.example.com', 'supplier-b.example.com', 'supplier-c.example.com']"
+    }
+  ],
+  "t10_native_isolation": {
+    "utils.audit_log": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\audit_log.sqlite",
+      "under_eval_data": true
+    },
+    "utils.brand_intelligence": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\brand_intelligence.sqlite",
+      "under_eval_data": true
+    },
+    "utils.claim_tokens": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\claim_tokens.sqlite",
+      "under_eval_data": true
+    },
+    "utils.intake_channels": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\intake_channels.sqlite",
+      "under_eval_data": true
+    },
+    "utils.notifications_store": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\notifications.sqlite",
+      "under_eval_data": true
+    },
+    "utils.orders": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\orders.sqlite",
+      "under_eval_data": true
+    },
+    "utils.quote_store": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\quotes.sqlite",
+      "under_eval_data": true
+    },
+    "utils.quote_tokens": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\quote_tokens.sqlite",
+      "under_eval_data": true
+    },
+    "utils.run_capture": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\run_capture.sqlite",
+      "under_eval_data": true
+    },
+    "utils.run_labels": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\run_labels.sqlite",
+      "under_eval_data": true
+    },
+    "utils.send_governance": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\send_governance.sqlite",
+      "under_eval_data": true
+    },
+    "utils.site_settings": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\site_settings.sqlite",
+      "under_eval_data": true
+    },
+    "utils.spec_lookup": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\spec_cache.sqlite",
+      "under_eval_data": true
+    },
+    "utils.supplier_accounts": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\supplier_accounts.sqlite",
+      "under_eval_data": true
+    },
+    "utils.supplier_registry": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\supplier_registry.sqlite",
+      "under_eval_data": true
+    },
+    "utils.known_parts": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\known_parts.json",
+      "under_eval_data": true
+    },
+    "utils.price_db": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\price_db.json",
+      "under_eval_data": true
+    },
+    "persistence": {
+      "native_db_path": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data\\sourcing_runs.sqlite",
+      "under_eval_data": true
+    }
+  },
+  "boot_guard_probes": {
+    "ses_unset": {
+      "exit": 1,
+      "tail": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\api_server.py\", line 169, in <module>\n    _assert_auth_mail_configured()\n  File \"C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\api_server.py\", line 159, in _assert_auth_mail_configured\n    raise RuntimeError(\nRuntimeError: Refusing to start: supplier accounts are enabled (SUPPLIER_ACCOUNTS_V1) on the SES mail provider, but SES_CONFIGURATION_SET_AUTH is unset. Auth mail would be refused on every send and no supplier could sign in. Set SES_CONFIGURATION_SET_AUTH to the tracking-OFF SES configuration set, or run with MAIL_PROVIDER=fake.\n"
+    },
+    "ses_set": {
+      "exit": 0,
+      "tail": "BOOTED\n"
+    },
+    "fake_unset": {
+      "exit": 0,
+      "tail": "BOOTED\n"
+    }
+  },
+  "mode": "LIVE",
+  "network": {
+    "external_call_count": 0,
+    "budget": 150,
+    "by_host": {},
+    "blocked_dns_lookups": [
+      "gmail.googleapis.com"
+    ],
+    "recorded_at": "2026-09-24T10:50:42.231681+00:00"
+  },
+  "data_dir": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\data",
+  "fake_outbox_size": 2
+}
