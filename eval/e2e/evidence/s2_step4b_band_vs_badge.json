@@ -1,0 +1,144 @@
+{
+  "c3_less_rows": [
+    {
+      "vendor": "Motion Industries",
+      "band": null,
+      "pnMatchLevel": "mismatch",
+      "pnMatchReason": "C3 requested; listing is CN/unspecified",
+      "isExactMatch": false,
+      "url": "https://www.motion.com/products/sku/00052619"
+    },
+    {
+      "vendor": "EIS Inc.",
+      "band": null,
+      "pnMatchLevel": "mismatch",
+      "pnMatchReason": "C3 requested; listing is CN/unspecified",
+      "isExactMatch": false,
+      "url": "https://www.eis-inc.com"
+    },
+    {
+      "vendor": "EIS Inc.",
+      "band": "A",
+      "pnMatchLevel": "mismatch",
+      "pnMatchReason": "C3 requested; listing is CN/unspecified",
+      "isExactMatch": false,
+      "url": "https://www.eis-inc.com"
+    },
+    {
+      "vendor": "Motion Industries",
+      "band": "B",
+      "pnMatchLevel": "mismatch",
+      "pnMatchReason": "C3 requested; listing is CN/unspecified",
+      "isExactMatch": false,
+      "url": "https://www.motion.com/products/sku/00052619"
+    }
+  ],
+  "c3_true_rows": [
+    {
+      "vendor": "Radwell",
+      "band": null,
+      "pnMatchLevel": "none",
+      "pnMatchReason": "the extractor reports a weaker match than the part numbers alone suggest",
+      "isExactMatch": false,
+      "url": "https://www.radwell.com/Buy/TIMKEN/TIMKEN/6205-2RS"
+    },
+    {
+      "vendor": "Rodavictoria USA",
+      "band": null,
+      "pnMatchLevel": "none",
+      "pnMatchReason": "the extractor reports a weaker match than the part numbers alone suggest",
+      "isExactMatch": false,
+      "url": "https://rodavictoriausa.com/producto/6205-2rs-c3-skf-brand-rubber-seals-bearing-6205-rs-ball-bearings-6205-rs"
+    },
+    {
+      "vendor": "123bearing.com",
+      "band": null,
+      "pnMatchLevel": "needs_verification",
+      "pnMatchReason": "listing carries the additional designation WT",
+      "isExactMatch": false,
+      "url": "https://www.123bearing.com/bearing-housing/deep-groove-bearing/single-row/6205-2rs-c3-wt-skf"
+    },
+    {
+      "vendor": "Quality Bearings Online",
+      "band": null,
+      "pnMatchLevel": "needs_verification",
+      "pnMatchReason": "2RS requested; listing is 2RSH - same 2RS seal family, different designation",
+      "isExactMatch": false,
+      "url": "https://www.qualitybearingsonline.com/6205-2rs-c3-skf-deep-groove-bearing-25-x-52-x-15mm"
+    },
+    {
+      "vendor": "Intech Bearing Inc.",
+      "band": null,
+      "pnMatchLevel": "stem",
+      "pnMatchReason": "no resolvable listing URL (bare domain) \u2014 the part number cannot be verified on a page",
+      "isExactMatch": false,
+      "url": "https://intechbearing.com"
+    },
+    {
+      "vendor": "Bearing & Drive Systems (BDS)",
+      "band": null,
+      "pnMatchLevel": "needs_verification",
+      "pnMatchReason": "listing carries the additional designation HT51",
+      "isExactMatch": false,
+      "url": "https://store.bdsbearing.com"
+    },
+    {
+      "vendor": "Radwell",
+      "band": "A",
+      "pnMatchLevel": "none",
+      "pnMatchReason": "the extractor reports a weaker match than the part numbers alone suggest",
+      "isExactMatch": false,
+      "url": "https://www.radwell.com/Buy/TIMKEN/TIMKEN/6205-2RS"
+    },
+    {
+      "vendor": "Rodavictoria USA",
+      "band": "A",
+      "pnMatchLevel": "none",
+      "pnMatchReason": "the extractor reports a weaker match than the part numbers alone suggest",
+      "isExactMatch": false,
+      "url": "https://rodavictoriausa.com/producto/6205-2rs-c3-skf-brand-rubber-seals-bearing-6205-rs-ball-bearings-6205-rs"
+    },
+    {
+      "vendor": "Intech Bearing Inc.",
+      "band": "A",
+      "pnMatchLevel": "stem",
+      "pnMatchReason": "no resolvable listing URL (bare domain) \u2014 the part number cannot be verified on a page",
+      "isExactMatch": false,
+      "url": "https://intechbearing.com"
+    },
+    {
+      "vendor": "123bearing.com",
+      "band": "A",
+      "pnMatchLevel": "needs_verification",
+      "pnMatchReason": "listing carries the additional designation WT",
+      "isExactMatch": false,
+      "url": "https://www.123bearing.com/bearing-housing/deep-groove-bearing/single-row/6205-2rs-c3-wt-skf"
+    },
+    {
+      "vendor": "Bearing & Drive Systems (BDS)",
+      "band": "A",
+      "pnMatchLevel": "needs_verification",
+      "pnMatchReason": "listing carries the additional designation HT51",
+      "isExactMatch": false,
+      "url": "https://store.bdsbearing.com"
+    },
+    {
+      "vendor": "Quality Bearings Online",
+      "band": "B",
+      "pnMatchLevel": "needs_verification",
+      "pnMatchReason": "2RS requested; listing is 2RSH - same 2RS seal family, different designation",
+      "isExactMatch": false,
+      "url": "https://www.qualitybearingsonline.com/6205-2rs-c3-skf-deep-groove-bearing-25-x-52-x-15mm"
+    }
+  ],
+  "c3_less_in_band_A_or_B": [
+    "EIS Inc.",
+    "Motion Industries"
+  ],
+  "true_c3_scored_none": [
+    "Radwell",
+    "Rodavictoria USA",
+    "Radwell",
+    "Rodavictoria USA"
+  ]
+}

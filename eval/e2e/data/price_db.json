@@ -493,5 +493,42 @@
       "source": "live",
       "url": "https://sealit123.com/oem-pump-seals/brands-f-p/gusher-pumps/84004-28-c238cb"
     }
+  },
+  "skf|6205-2RS C3": {
+    "Quality Bearings Online": {
+      "price": 14.6,
+      "lead_days": 2,
+      "date_fetched": "2026-09-24T20:55:47.941462",
+      "source": "live",
+      "url": "https://www.qualitybearingsonline.com/6205-2rs-c3-skf-deep-groove-bearing-25-x-52-x-15mm"
+    },
+    "Rodavictoria USA": {
+      "price": 18.81,
+      "lead_days": 2,
+      "date_fetched": "2026-09-24T20:55:47.970447",
+      "source": "live",
+      "url": "https://rodavictoriausa.com/producto/6205-2rs-c3-skf-brand-rubber-seals-bearing-6205-rs-ball-bearings-6205-rs"
+    },
+    "123bearing.com": {
+      "price": 23.97,
+      "lead_days": 3,
+      "date_fetched": "2026-09-24T20:55:48.000410",
+      "source": "live",
+      "url": "https://www.123bearing.com/bearing-housing/deep-groove-bearing/single-row/6205-2rs-c3-wt-skf"
+    },
+    "Radwell": {
+      "price": 18.29,
+      "lead_days": 2,
+      "date_fetched": "2026-09-24T20:55:48.038468",
+      "source": "live",
+      "url": "https://www.radwell.com/Buy/TIMKEN/TIMKEN/6205-2RS"
+    },
+    "Motion Industries": {
+      "price": 32.48,
+      "lead_days": 2,
+      "date_fetched": "2026-09-24T20:55:48.066406",
+      "source": "live",
+      "url": "https://www.motion.com/products/sku/00052619"
+    }
   }
 }

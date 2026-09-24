@@ -154,7 +154,47 @@ Products, suitability 1%) into the visible list (`apollo_confirmed` rescue) — 
 don't-remove is by design, but a 1%-suitability rescue riding a cached verdict is worth
 a human eyeball (recorded as PH-08).
 
-*(S2–S4 pending)*
+### S2 — Substitute honesty (SKF 6205-2RS C3) — COMPLETE
+
+Run: `uv run python eval/e2e/s2_substitute_honesty.py`. Run id `1ec25ea0…`.
+**17 external calls**, 51s. Evidence: `eval/e2e/evidence/s2_*.json`.
+
+| # | Step | Expected | Observed | Verdict | vs previous eval |
+|---|---|---|---|---|---|
+| 1 | In-app intake | request captured | specs clean: SKF `6205-2RS C3`, C3 in PN + description; **substitute/backorder intent again dropped without comment** (survives only in the raw chat message) | PASS (gap) | F-14 unchanged |
+| 2 | C3 preserved at intake | yes | yes | PASS | same |
+| 3 | Sourcing completes | comparison | phase `comparison`; **`no_exact_match=True`** — the system no longer claims exact matches exist for this request | PASS | previously `false` (it claimed exacts) |
+| 4 | Equivalence honesty | no non-equivalent as equivalent | **ZERO exact-match claims across all 27 candidates.** The exact F-11 trap rows are now badged honestly: EIS `6205-2RS` → `mismatch` “C3 requested; listing is CN/unspecified”; Motion `6205 2RSJEM` → `mismatch`; bare-domain Intech → `stem` “no resolvable listing URL — the part number cannot be verified” | **PASS** | **F-11 badge FIXED (T2)** — was BREAK-BLOCKER |
+| 4b | **(new)** band vs badge (gate F-A) | note whether the BAND still lifts C3-less rows | **it does**: EIS (C3-less, badge `mismatch`, bare domain) sits in **Band A**; Motion (mismatch) in Band B — the ranking layer contradicts the badge layer | DEGRADED → PH-02 | F-A predicted by the gate, now measured live |
+| 5 | Honest fallback | needs-verification presentation | 26/27 candidates carry comparison artifacts; no priced candidate without a URL; honest | PASS | same |
+
+**Equivalence-engine inputs — post-hardening status of the S2 group:**
+
+1. **F-11 (was BLOCKER) — FIXED at the badge layer, verified live.** No C3-less listing is
+   badged exact; every verdict carries a `pnMatchReason`. The extractor's own claims
+   (`pn=exact_match` visible in the sourcing log for EIS/Intech/BDS) were **overruled by
+   the deterministic gate** — exactly T2's design (“the classifier is the ceiling”).
+2. **F-12 (notation) — FIXED at the badge layer.** QBO's `6205-2rsh/c3` now scores
+   `needs_verification` with a reason naming both designations (“2RS requested; listing
+   is 2RSH — same 2RS seal family, different designation”); `-WT-` and `HT51` suffixed
+   listings likewise `needs_verification`. Residual (PH-04, MINOR): Rodavictoria's
+   genuinely-C3 listing scored `none` via the extractor-may-downgrade rule — the safe
+   direction, but the true match still under-ranks. Radwell's echo-back (found PN
+   `6205-2RS-C3` on a Timken `6205-2RS` URL) still happens but is now **neutralized in
+   the unsafe direction** (kept at `none`).
+3. **F-A (band vs badge) — OPEN, now live evidence (PH-02, MAJOR).** The bands still rank
+   on `classify_pn_evidence`, which treats `6205-2RS` vs `6205-2RS C3` as `canonical`:
+   a C3-less, badge-`mismatch`, bare-domain row lands **Band A** while the honestly-
+   flagged family variant with a real listing (QBO) sits below it in Band B. Whatever
+   surface sorts by band still promotes the wrong-clearance part.
+4. **F-13 (clearance not a compared field) — OPEN, unchanged.** Artifacts still compare
+   only `{bore_diameter, detected_type}`; no clearance row; and the artifact still does
+   the type-string-vs-PN compare (“deep groove ball bearing vs 6205-2RS-C3” →
+   `incompatible`), so the artifact layer contradicts the now-honest badge layer.
+5. **F-14 (substitute intent) — OPEN, unchanged.** “SKF is on backorder — what can we
+   get?” produced SKF listings only; the intent appears nowhere in specs or results.
+
+*(S3–S4 pending)*
 
 ---
 

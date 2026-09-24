@@ -1,0 +1,15 @@
+{
+  "run_id": "1ec25ea0-d575-40a6-9698-0f1547b5c7d4",
+  "chat": {
+    "run_id": "1ec25ea0-d575-40a6-9698-0f1547b5c7d4",
+    "message": {
+      "id": "ce7714c1-2667-4c2a-ab6f-54f2ca2d3899",
+      "role": "agent",
+      "content": "Specs look complete \u2014 review in the panel and confirm to start sourcing.",
+      "created_at": "2026-09-24T10:55:20.497178+00:00"
+    },
+    "updated_phase": "intake",
+    "proceed_state": "proceed_full_confidence",
+    "parts": null
+  }
+}
