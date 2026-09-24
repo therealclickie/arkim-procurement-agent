@@ -1,0 +1,28 @@
+{
+  "run_id": "d4e7a998-958f-4293-9ef9-6ede75c67794",
+  "chat": {
+    "run_id": "d4e7a998-958f-4293-9ef9-6ede75c67794",
+    "message": {
+      "id": "923bf247-258c-4e29-a636-1969f9af93e0",
+      "role": "agent",
+      "content": "Specs look complete \u2014 review in the panel and confirm to start sourcing.",
+      "created_at": "2026-09-24T10:59:18.622679+00:00"
+    },
+    "updated_phase": "intake",
+    "proceed_state": "proceed_full_confidence",
+    "parts": null
+  },
+  "specs": {
+    "manufacturer": "Ashcroft",
+    "model": "1032",
+    "category": "Part",
+    "description": "Ashcroft 1032 pressure gauge, 0-60 PSI range, for CIP return line",
+    "psi": "0-60 PSI",
+    "detected_type": "pressure gauge",
+    "use_case": "CIP skid return line pressure measurement",
+    "manufacturer_confidence": 95.0,
+    "part_id_confidence": 72.0,
+    "confidence_reasoning": "Manufacturer (Ashcroft) and model (1032) are explicitly stated, giving high manufacturer confidence. PSI range is known (0-60). Part ID confidence is moderate \u2014 the Ashcroft 1032 series has multiple configurations (dial size, connection size, connection type, glycerin fill, stem length) that affect the exact part number. Additional specs needed to source the precise gauge.",
+    "quantity": 1
+  }
+}

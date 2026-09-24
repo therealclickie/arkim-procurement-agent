@@ -1,0 +1,52 @@
+{
+  "scenario": "S3 ambiguous gauge",
+  "run_id": "212202b5-88db-4628-9044-07bb4acdbc8f",
+  "duration_s": 37.4,
+  "network": {
+    "external_call_count": 10,
+    "budget": 150,
+    "by_host": {
+      "api.anthropic.com": 8,
+      "api.tavily.com": 2
+    },
+    "blocked_dns_lookups": [],
+    "recorded_at": "2026-09-24T10:58:31.122853+00:00"
+  },
+  "steps": [
+    {
+      "step": "1. ambiguous ask -> what does it ask back?",
+      "expected": "asks range, process connection, reference type, wetted material; raises hygienic (CIP)",
+      "observed": "agent reply: 'What does it measure and over what range, what output (4-20mA / 0-10V / HART), and what process connection/thread?' | topics detected: {'range': True, 'process_connection': True, 'reference_type': False, 'wetted_material': False, 'hygienic': False, 'brand_or_model': False}",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s3_step1_chat.json"
+    },
+    {
+      "step": "2. confirm-intake without range/connection/reference",
+      "expected": "refused (422) \u2014 sourcing must not start on an unspecified gauge",
+      "observed": "HTTP 422: {\"detail\": {\"message\": \"This request has no manufacturer and model, and no manufacturer part number \\u2014 there is nothing to match a supplier's listing against. Add them in the chat, or source anyway and review the results yourself.\", \"reason\": \"identity_insufficient\", \"missing_attrs\": [\"manufactu",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s3_step2_confirm_attempt.json"
+    },
+    {
+      "step": "3. partial answer (range only) -> remaining asks",
+      "expected": "asks connection / reference type / wetted material / hygienic next",
+      "observed": "agent reply: \"What is the current manufacturer or brand of the pressure gauge you're replacing?\" | topics: {'range': False, 'process_connection': False, 'reference_type': False, 'wetted_material': False, 'hygienic': False, 'brand_or_model': True} | specs now: {\"manufacturer\": null, \"model\": null, \"part_number\": null, \"detected_type\": \"pressure gauge\", \"description\": \"Replacement pressure gauge, 0-60 PSI, for CIP skid return line\"}",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s3_step3_partial_answer.json"
+    },
+    {
+      "step": "4. confirm with range only (connection/reference still unknown)",
+      "expected": "still refused \u2014 connection + reference type not established",
+      "observed": "HTTP 422: {\"detail\": {\"message\": \"This request has no manufacturer and model, and no manufacturer part number \\u2014 there is nothing to match a supplier's listing against. Add them in the chat, or source anyway and review the results yourself.\", \"reason\": \"id",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s3_step4_confirm2.json"
+    },
+    {
+      "step": "5. labelled override (arc5 T4: source_anyway=true)",
+      "expected": "200; run marked spec_incomplete with banner; acknowledgement recorded; NO candidate badged exact on a spec-incomplete run",
+      "observed": "HTTP 200, phase=comparison, marker={\"spec_incomplete\": true, \"banner\": \"These results have NOT been checked against your requirement \\u2014 the request was sourced without a manufacturer and model or a manufacturer part number.\", \"ack\": {\"spec_incomplete\": true, \"spec_incomplete_ack\":, exact-badged=0, candidates=0",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s3_step5_override.json"
+    }
+  ]
+}

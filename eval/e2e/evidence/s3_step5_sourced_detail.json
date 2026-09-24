@@ -1,0 +1,85 @@
+{
+  "id": "212202b5-88db-4628-9044-07bb4acdbc8f",
+  "phase": "comparison",
+  "urgency": "Predictive",
+  "warranty": "Unknown",
+  "facility_id": "fac-stockton",
+  "facility_state": "CA",
+  "group_id": null,
+  "asset_specs": {
+    "category": "Part",
+    "description": "Replacement pressure gauge, 0-60 PSI, for CIP skid return line",
+    "detected_type": "pressure gauge",
+    "use_case": "Replacement pressure gauge for CIP skid return line",
+    "manufacturer_confidence": 0.0,
+    "part_id_confidence": 42.0,
+    "confidence_reasoning": "User confirmed the pressure range as 0-60 PSI (with some uncertainty \u2014 'I think'), and identified the location as the CIP skid return line. This adds one key spec but still lacks dial size, connection size/type/thread, output type (analog/digital/mechanical), and manufacturer or part number. CIP applications typically require sanitary connections (tri-clamp or NPT) and may require hygienic-rated gauges, but none of this has been confirmed. Cannot reliably source without additional specifications.",
+    "quantity": 1,
+    "psi": "0-60 PSI",
+    "spec_incomplete": true,
+    "spec_incomplete_ack": {
+      "acknowledged": true,
+      "reason": "identity_insufficient",
+      "missing_attrs": [
+        "manufacturer",
+        "model"
+      ],
+      "acknowledged_by": null,
+      "acknowledged_at": "2026-09-24T10:58:09.332659+00:00"
+    },
+    "spec_based_sourcing": true
+  },
+  "inventory_result": {
+    "status": "no_data",
+    "message": "Inventory agent not yet connected (Phase 5)."
+  },
+  "sourcing_results": {
+    "tier1": [],
+    "tier2": [],
+    "tier3": [],
+    "warrantyBanner": null,
+    "tier3CapabilityPivot": false,
+    "specIncomplete": true,
+    "specIncompleteBanner": "These results have NOT been checked against your requirement \u2014 the request was sourced without a manufacturer and model or a manufacturer part number.",
+    "findings": [],
+    "outreachTargets": {
+      "suppliers": [],
+      "requestedCount": 0
+    }
+  },
+  "selected_candidate": null,
+  "approval_history": [],
+  "messages": [
+    {
+      "id": "e7a51382-c91d-437f-8cd3-27b2e66dd788",
+      "role": "user",
+      "content": "The pressure gauge on the CIP skid is reading wrong. Need a new one.",
+      "created_at": "2026-09-24T10:57:53.723582+00:00"
+    },
+    {
+      "id": "8b11f99f-e2c2-43d5-9159-46a85cafd5a3",
+      "role": "agent",
+      "content": "What does it measure and over what range, what output (4-20mA / 0-10V / HART), and what process connection/thread?",
+      "created_at": "2026-09-24T10:57:53.723582+00:00"
+    },
+    {
+      "id": "b06d0787-0b3c-4831-b7cd-d7786583d215",
+      "role": "user",
+      "content": "It reads 0-60 psi I think. It's the one on the CIP skid return line.",
+      "created_at": "2026-09-24T10:58:00.639638+00:00"
+    },
+    {
+      "id": "78af3a9f-c6f8-4738-96ef-3e0f2bb2b8d8",
+      "role": "agent",
+      "content": "What is the current manufacturer or brand of the pressure gauge you're replacing?",
+      "created_at": "2026-09-24T10:58:00.639638+00:00"
+    }
+  ],
+  "tier3_selection": null,
+  "tier3_outreach_sent": null,
+  "rfq_draft_status": {},
+  "maintenance_handoff": null,
+  "no_exact_match": false,
+  "created_at": "2026-09-24T10:57:53.706024",
+  "updated_at": "2026-09-24T10:58:31.029349"
+}

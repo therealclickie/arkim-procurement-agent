@@ -1,0 +1,25 @@
+{
+  "run_id": "212202b5-88db-4628-9044-07bb4acdbc8f",
+  "chat": {
+    "run_id": "212202b5-88db-4628-9044-07bb4acdbc8f",
+    "message": {
+      "id": "8b11f99f-e2c2-43d5-9159-46a85cafd5a3",
+      "role": "agent",
+      "content": "What does it measure and over what range, what output (4-20mA / 0-10V / HART), and what process connection/thread?",
+      "created_at": "2026-09-24T10:57:53.723582+00:00"
+    },
+    "updated_phase": "intake",
+    "proceed_state": "blocked_need_either",
+    "parts": null
+  },
+  "specs": {
+    "category": "Part",
+    "description": "Replacement pressure gauge for CIP skid",
+    "detected_type": "pressure gauge",
+    "use_case": "replacement pressure gauge for CIP skid",
+    "manufacturer_confidence": 0.0,
+    "part_id_confidence": 35.0,
+    "confidence_reasoning": "Part type is identified as a pressure gauge on a CIP (Clean-In-Place) skid, but no manufacturer, model, part number, pressure range, dial size, connection size, or connection type have been provided. Cannot reliably source without additional specifications.",
+    "quantity": 1
+  }
+}

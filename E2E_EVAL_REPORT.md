@@ -194,7 +194,44 @@ Run: `uv run python eval/e2e/s2_substitute_honesty.py`. Run id `1ec25ea0…`.
 5. **F-14 (substitute intent) — OPEN, unchanged.** “SKF is on backorder — what can we
    get?” produced SKF listings only; the intent appears nowhere in specs or results.
 
-*(S3–S4 pending)*
+### S3 — Ambiguous request (CIP-skid pressure gauge) — COMPLETE, ALL PASS
+
+Run: `uv run python eval/e2e/s3_ambiguous_gauge.py`. Run id `…` in `s3_steps.json`.
+**10 external calls**, 37s. Evidence: `eval/e2e/evidence/s3_*.json`.
+
+| # | Step | Expected | Observed | Verdict | vs previous eval |
+|---|---|---|---|---|---|
+| 1 | Ambiguous ask → questions? | asks the gauge fundamentals | asks range, output, process connection — good first question. Reference type / wetted / hygienic not asked in chat | PASS (partial coverage) | same first-turn behaviour |
+| 2 | Confirm with nothing established | refused | **422 `identity_insufficient`** with an honest, user-facing message (“…nothing to match a supplier's listing against. Add them in the chat, or source anyway and review the results yourself.”) | **PASS** | **F-15 FIXED (T4)** — previously 200 → priced noise ($923 gauge) |
+| 3 | Partial answer (range only) | keeps asking | asks brand/model next (the identity the floor needs) | PASS | same |
+| 4 | Confirm again | still refused | 422 `identity_insufficient` again | PASS | previously moot (already sourced) |
+| 5 | **(new)** labelled override `source_anyway=true` | 200 + honesty markers | 200 → sourcing; run marked `spec_incomplete: true`; banner “These results have NOT been checked against your requirement…”; acknowledgement recorded; **zero candidates badged exact** (this live run returned 0 candidates — no fabricated prices) | PASS | T4 override verified E2E |
+
+### S3b — Hygienic gate follow-up (arc 5 T5, F-16) — gate fires, but is UN-CLEARABLE in chat
+
+The S3 run never reached the hygienic gate (the identity floor fires first), so a
+follow-up run cleared the floor: *“Ashcroft 1032, 0-60 psi, on the CIP return line.”*
+Run: `uv run python eval/e2e/s3b_hygienic_gate.py`. **3 external calls.**
+Evidence: `eval/e2e/evidence/s3b_*.json`.
+
+| # | Step | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| 1 | Identity-sufficient CIP gauge | specs capture Ashcroft 1032 | captured cleanly, CIP context in description + use_case | PASS |
+| 2 | Confirm past the floor | hygienic gate blocks, naming the fields | **422 `hygienic_spec_incomplete`**, `missing_attrs: [process_connection, process_connection_size, wetted_material, hygienic_certification]`, message names 3-A/EHEDG — **F-16's gate is real and fires E2E** | PASS |
+| 3 | Answer all four in chat (“1.5 inch Tri-Clamp, 316L wetted, 3-A certified”), confirm again | 200 | **still 422** — `process_connection` and `hygienic_certification` remain “missing” though the user answered them; meanwhile the chat panel says “Specs look complete — review in the panel and confirm to start sourcing” | **BREAK → PH-07 (MAJOR)** |
+
+**Why (root cause, structural):** the gate accepts spec keys
+`process_connection|connection|connection_type` and
+`hygienic_certification|certification|hygienic_cert`
+(`utils/hygienic_context.py` `_FIELD_SOURCES`), but **`AssetSpecs`
+(`utils/models.py`) has no such fields** — the extractor stored the answers into
+`connection_size` (“1.5 inch Tri-Clamp”) and `material_spec` (“316L…”), which clears
+only two of the four. Two of the gate's required fields are structurally un-fillable by
+the intake chat, so the hygienic gate can only ever be exited via the `source_anyway`
+override. The arc-5 unit tests passed because they set the dict keys directly — this is
+precisely the cross-arc seam a flags-on E2E run exists to catch.
+
+*(S4 pending)*
 
 ---
 

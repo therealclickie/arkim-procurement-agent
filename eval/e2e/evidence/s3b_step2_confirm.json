@@ -1,0 +1,25 @@
+{
+  "status": 422,
+  "body": {
+    "detail": {
+      "message": "This is hygienic service, so the part has to match the skid: what process connection type, process connection size, wetted material and hygienic certification (3-A / EHEDG / none)?",
+      "reason": "hygienic_spec_incomplete",
+      "hygienic_context": [
+        "cip"
+      ],
+      "missing_attrs": [
+        "process_connection",
+        "process_connection_size",
+        "wetted_material",
+        "hygienic_certification"
+      ],
+      "missing_labels": [
+        "process connection type",
+        "process connection size",
+        "wetted material",
+        "hygienic certification (3-A / EHEDG / none)"
+      ],
+      "override": "source_anyway"
+    }
+  }
+}

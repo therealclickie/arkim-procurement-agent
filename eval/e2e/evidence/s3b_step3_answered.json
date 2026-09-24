@@ -1,0 +1,52 @@
+{
+  "chat": {
+    "run_id": "d4e7a998-958f-4293-9ef9-6ede75c67794",
+    "message": {
+      "id": "a3df5ca6-19b0-4670-81f0-b86fe9497f9f",
+      "role": "agent",
+      "content": "Specs look complete \u2014 review in the panel and confirm to start sourcing.",
+      "created_at": "2026-09-24T10:59:26.741956+00:00"
+    },
+    "updated_phase": "intake",
+    "proceed_state": "proceed_full_confidence",
+    "parts": null
+  },
+  "specs": {
+    "manufacturer": "Ashcroft",
+    "model": "1032",
+    "category": "Part",
+    "description": "Ashcroft 1032 sanitary pressure gauge, 0-60 PSI, 1.5\" Tri-Clamp connection, 316L SS wetted parts, 3-A certified, for CIP return line",
+    "psi": "0-60 PSI",
+    "detected_type": "pressure gauge",
+    "use_case": "CIP skid return line pressure measurement",
+    "manufacturer_confidence": 95.0,
+    "part_id_confidence": 85.0,
+    "confidence_reasoning": "Manufacturer (Ashcroft) and model (1032) explicitly stated, with high confidence. New specs significantly narrow the configuration: 1.5\" Tri-Clamp connection, 316L SS wetted parts, and 3-A sanitary certification. The Ashcroft 1032 sanitary series maps well to these specs. Part ID confidence raised to 85 \u2014 dial size and glycerin/dry fill preference are the remaining unknowns that could affect the exact part number, but enough detail is now present to source confidently.",
+    "quantity": 1,
+    "connection_size": "1.5 inch Tri-Clamp",
+    "material_spec": "316L stainless steel wetted parts"
+  },
+  "confirm_status": 422,
+  "body": {
+    "detail": {
+      "message": "This is hygienic service, so the part has to match the skid: what process connection type and hygienic certification (3-A / EHEDG / none)?",
+      "reason": "hygienic_spec_incomplete",
+      "hygienic_context": [
+        "cip",
+        "sanitary",
+        "3-a",
+        "tri-clamp"
+      ],
+      "missing_attrs": [
+        "process_connection",
+        "hygienic_certification"
+      ],
+      "missing_labels": [
+        "process connection type",
+        "hygienic certification (3-A / EHEDG / none)"
+      ],
+      "override": "source_anyway"
+    }
+  },
+  "sourced": null
+}

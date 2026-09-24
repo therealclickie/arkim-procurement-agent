@@ -1,0 +1,27 @@
+{
+  "status": 200,
+  "body": {
+    "run_id": "212202b5-88db-4628-9044-07bb4acdbc8f",
+    "phase": "sourcing"
+  },
+  "phase": "comparison",
+  "marker": {
+    "spec_incomplete": true,
+    "banner": "These results have NOT been checked against your requirement \u2014 the request was sourced without a manufacturer and model or a manufacturer part number.",
+    "ack": {
+      "spec_incomplete": true,
+      "spec_incomplete_ack": {
+        "acknowledged": true,
+        "reason": "identity_insufficient",
+        "missing_attrs": [
+          "manufacturer",
+          "model"
+        ],
+        "acknowledged_by": null,
+        "acknowledged_at": "2026-09-24T10:58:09.332659+00:00"
+      }
+    }
+  },
+  "exact_badged": [],
+  "candidate_count": 0
+}

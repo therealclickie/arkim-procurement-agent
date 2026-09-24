@@ -1,0 +1,19 @@
+{
+  "status": 422,
+  "body": {
+    "detail": {
+      "message": "This request has no manufacturer and model, and no manufacturer part number \u2014 there is nothing to match a supplier's listing against. Add them in the chat, or source anyway and review the results yourself.",
+      "reason": "identity_insufficient",
+      "missing_attrs": [
+        "manufacturer",
+        "model"
+      ],
+      "missing_labels": [
+        "manufacturer",
+        "model or part number"
+      ],
+      "override": "source_anyway"
+    }
+  },
+  "sourced": null
+}

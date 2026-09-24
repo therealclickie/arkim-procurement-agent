@@ -1,0 +1,37 @@
+{
+  "scenario": "S3b hygienic gate (T5)",
+  "run_id": "d4e7a998-958f-4293-9ef9-6ede75c67794",
+  "duration_s": 15.4,
+  "network": {
+    "external_call_count": 3,
+    "budget": 150,
+    "by_host": {
+      "api.anthropic.com": 3
+    },
+    "blocked_dns_lookups": [],
+    "recorded_at": "2026-09-24T10:59:34.006403+00:00"
+  },
+  "steps": [
+    {
+      "step": "1. identity-sufficient CIP gauge intake",
+      "expected": "specs capture Ashcroft 1032 + range; hygienic context available",
+      "observed": "reply='Specs look complete \u2014 review in the panel and confirm to start sourcing.' | specs: {\"manufacturer\": \"Ashcroft\", \"model\": \"1032\", \"detected_type\": \"pressure gauge\", \"description\": \"Ashcroft 1032 pressure gauge, 0-60 PSI range, for CIP return line\", \"use_case\": \"CIP skid return line pressure measurement\"}",
+      "verdict": "PASS",
+      "evidence": "s3b_step1_chat.json"
+    },
+    {
+      "step": "2. confirm past the identity floor (arc5 T5: hygienic gate)",
+      "expected": "422 blocking on the hygienic question set (connection size / wetted material / process connection / certification), NOT on identity",
+      "observed": "HTTP 422, reason='hygienic_spec_incomplete', missing=['process_connection', 'process_connection_size', 'wetted_material', 'hygienic_certification'], hygienic-vocab in refusal=True, body={\"detail\": {\"message\": \"This is hygienic service, so the part has to match the skid: what process connection type, process connection size, wetted material and hygienic certification (3-A / EHEDG / none)?\", \"reason\": \"hygienic_spec_incomplete\", \"hygienic_context\": [\"cip\"], \"missing_attrs\": [\"process",
+      "verdict": "PASS",
+      "evidence": "s3b_step2_confirm.json"
+    },
+    {
+      "step": "3. answering the hygienic fields lets it confirm",
+      "expected": "chat records tri-clamp/316L/3-A; confirm now 200 -> sourcing",
+      "observed": "specs after: {\"connection_size\": \"1.5 inch Tri-Clamp\", \"material_spec\": \"316L stainless steel wetted parts\"} | confirm=422, sourced=None",
+      "verdict": "DEGRADED",
+      "evidence": "s3b_step3_answered.json"
+    }
+  ]
+}

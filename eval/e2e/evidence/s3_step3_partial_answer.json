@@ -1,0 +1,33 @@
+{
+  "chat": {
+    "run_id": "212202b5-88db-4628-9044-07bb4acdbc8f",
+    "message": {
+      "id": "78af3a9f-c6f8-4738-96ef-3e0f2bb2b8d8",
+      "role": "agent",
+      "content": "What is the current manufacturer or brand of the pressure gauge you're replacing?",
+      "created_at": "2026-09-24T10:58:00.639638+00:00"
+    },
+    "updated_phase": "intake",
+    "proceed_state": "blocked_need_either",
+    "parts": null
+  },
+  "specs": {
+    "category": "Part",
+    "description": "Replacement pressure gauge, 0-60 PSI, for CIP skid return line",
+    "detected_type": "pressure gauge",
+    "use_case": "Replacement pressure gauge for CIP skid return line",
+    "manufacturer_confidence": 0.0,
+    "part_id_confidence": 42.0,
+    "confidence_reasoning": "User confirmed the pressure range as 0-60 PSI (with some uncertainty \u2014 'I think'), and identified the location as the CIP skid return line. This adds one key spec but still lacks dial size, connection size/type/thread, output type (analog/digital/mechanical), and manufacturer or part number. CIP applications typically require sanitary connections (tri-clamp or NPT) and may require hygienic-rated gauges, but none of this has been confirmed. Cannot reliably source without additional specifications.",
+    "quantity": 1,
+    "psi": "0-60 PSI"
+  },
+  "asked": {
+    "range": false,
+    "process_connection": false,
+    "reference_type": false,
+    "wetted_material": false,
+    "hygienic": false,
+    "brand_or_model": true
+  }
+}
