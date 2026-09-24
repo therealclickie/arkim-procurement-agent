@@ -1,0 +1,54 @@
+{
+  "scenario": "S4 silence + alert discipline",
+  "network": {
+    "external_call_count": 0,
+    "budget": 150,
+    "by_host": {},
+    "blocked_dns_lookups": [],
+    "recorded_at": "2026-09-24T11:00:51.913943+00:00"
+  },
+  "steps": [
+    {
+      "step": "1. Friday 15:00 PT release",
+      "expected": "3 RFQ_NEW notification mails (one per owner), sent at notify time",
+      "observed": "mails to ['owner@supplier-a.example.com', 'owner@supplier-b.example.com', 'owner@supplier-c.example.com']",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s4_step1_friday_release.json"
+    },
+    {
+      "step": "2. A views+replies; C hard-bounces (store-level, no webhook sig)",
+      "expected": "bounce accepted once; owner@C suppressed; EMAIL_SUPPRESSED alert ACTION_NOW (sole contact)",
+      "observed": "applied=True, suppressed=None, alerts=[('EMAIL_SUPPRESSED', 'ACTION_NOW', True)]",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s4_step2_setup.json"
+    },
+    {
+      "step": "3. weekend silence",
+      "expected": "scheduler runs Sat+Sun: zero sends, zero new alerts",
+      "observed": "outbox delta=0, results=[{'now': '2026-09-26T01:00:00+00:00', 'escalations': {'reminded': 0, 'alerted': 0, 'considered': 5}, 'coalesce': {'batches': 0, 'notifications': 0}, 'is_business_time': False}, {'now': '2026-09-26T17:00:00+00:00', 'escalations': {'reminded': 0, 'alerted': 0, 'considered': 5}, 'coalesce': {'batches': 0, 'notifications': 0}, 'is_business_time': False}, {'now': '2026-09-27T21:00:00+00:00', 'escalations': {'reminded': 0, 'alerted': 0, 'considered': 5}, 'coalesce': {'batches': 0, 'notifications': 0}, 'is_business_time': False}]",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s4_step3_weekend.json"
+    },
+    {
+      "step": "4. Monday reminder: ONE, consolidated, business hours, B only",
+      "expected": "exactly one reminder mail to owner@B at Mon 11:00 PT; rerun adds none; A (viewed/replied) and C (bounced+suppressed) get nothing",
+      "observed": "mon9={'reminded': 0, 'alerted': 0, 'considered': 5}, mon11={'reminded': 1, 'alerted': 0, 'considered': 5}, mails=[['owner@supplier-b.example.com']], subjects=['Reminder: quote request waiting \u2014 Goulds 3196-seal'], rerun added=0",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s4_step4_monday_reminder.json"
+    },
+    {
+      "step": "5. Monday escalation: per-account, QUEUE tier, fires once",
+      "expected": "exactly one RFQ_ESCALATION alert (B), tier QUEUE; reruns + Tuesday add nothing; no supplier mail from escalation",
+      "observed": "esc alerts=[('supplier-b.example.com', 'QUEUE')], mon3={'reminded': 0, 'alerted': 1, 'considered': 5}, rerun={'reminded': 0, 'alerted': 0, 'considered': 5}, tue={'reminded': 0, 'alerted': 0, 'considered': 5}, outbox delta=0",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s4_step5_escalation.json"
+    },
+    {
+      "step": "6. counts + nothing dropped",
+      "expected": "4 supplier mails total (3 Friday RFQ_NEW + 1 Monday reminder); 2 concierge alerts (C ACTION_NOW suppression, B QUEUE escalation); every notification accounted (sent/bounced/cancelled, reminded/escalated)",
+      "observed": "{\"emails\": 4, \"alerts\": [{\"kind\": \"RFQ_ESCALATION\", \"tier\": \"QUEUE\", \"who\": \"owner@supplier-b.example.com\"}, {\"kind\": \"EMAIL_SUPPRESSED\", \"tier\": \"ACTION_NOW\", \"who\": \"owner@supplier-c.example.com\"}], \"accounting\": [{\"domain\": \"supplier-a.example.com\", \"state\": \"SENT\", \"reminded_at\": false, \"escalated_at\": false, \"cancelled_at\": true}, {\"domain\": \"supplier-b.example.com\", \"state\": \"SENT\", \"reminded_at\": true, \"escalated_at\": true, \"cancelled_at\": false}, {\"domain\": \"supplier-c.example.com\", \"state\": \"BOUNCED\", \"reminded_at\": false, \"escalated_at\": false, \"cancelled_at\": false}]}",
+      "verdict": "PASS",
+      "evidence": "C:\\dev\\_Arkim\\Arkim Procurement Agent Prototype\\eval\\e2e\\evidence\\s4_step6_totals.json"
+    }
+  ]
+}

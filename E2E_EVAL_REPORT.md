@@ -3,7 +3,10 @@
 **Evaluator:** Claude Fable 5 · **Branch:** `eval/e2e-post-hardening` · **Date:** 2026-09-24
 **Baseline being re-measured:** `eval/e2e-flags-on` report (2026-09-23, 16 findings) after
 arc 5 demo hardening (T1–T10) merged at `756b195`.
-**Status:** IN PROGRESS — Phase 0 complete. Scenarios S1–S4 pending.
+**Status:** COMPLETE — Phase 0 + S1–S4 (+ S3b hygienic probe, S1c quote-form probe) +
+seam inventory + UI checklist. Mode LIVE, **57/150 external calls**.
+Flags-off baseline re-measured this run: `uv run pytest -q` → **3205 passed, 73 skipped**
+(matches arc 5's build report).
 
 This is the post-hardening re-run of the flags-on evaluation. Arc 5 claimed fixes for
 F-02, F-03, F-04, F-07, F-08, F-09, F-10, F-11(badge), F-12(notation), F-15, F-16; it
@@ -15,7 +18,24 @@ broken, on the same scenarios and the same pilot flag profile.
 
 ## 1. Verdict
 
-*(pending — completed after S1–S4)*
+**Demo-ready with named avoidances — materially stronger than the previous run, and the
+avoidance list has changed shape.** Ten of the eleven arc-5 fixes hold up end-to-end
+under the full flags-on pipeline: the S1 anchor now completes **through the order**
+(placed at the accepted $189 quote with quote-id provenance — the old F-07 stop-point is
+gone), the old BLOCKER class is closed at the badge layer (zero exact claims on the C3
+bearing run, per-row reasons, bare domains denied), the sufficiency gate refuses
+spec-less confirms with an honest message and a labelled override, supplier mail names
+the part and leaks nothing, the config traps (F-02/03/04) are closed and were verified
+live, and S4's alert discipline passed every check again. Three things still need
+steering: (1) **the hygienic gate fires but cannot be satisfied through the chat**
+(PH-01, new — its required fields don't exist in the extractor's schema, so answering
+its question loops; the panel simultaneously says “specs look complete”); (2) **the
+band layer and the comparison artifact still contradict the honest badge** on
+bearing-style runs (PH-02/F-13 — a wrong-clearance part can sit in Band A while its own
+badge says mismatch); (3) **email intake still cannot complete a family request**
+(F-06, untouched by arc 5, re-confirmed). Substitute intent is still silently dropped
+(F-14). With those steered around, the demo story is honest, repeatable, and now
+includes the buy-flow ending it previously had to avoid.
 
 ---
 
@@ -71,9 +91,12 @@ outbox is inspectable in-memory.
 
 **Mode: LIVE** — `ANTHROPIC_API_KEY` + `TAVILY_API_KEY` present in `.env` (values never
 read out); budget 150 external calls hard-enforced by the harness call counter.
-`APOLLO_API_KEY` / `PARALLEL_API_KEY` blanked (no credit spend). Phase 0 made **0**
-external calls; the only blocked DNS lookup was the deliberate `gmail.googleapis.com`
-probe.
+`APOLLO_API_KEY` / `PARALLEL_API_KEY` blanked (no credit spend).
+
+**Total external calls: 57 of 150** — Phase 0: 0; S1: 27 (21 Anthropic / 6 Tavily);
+S2: 17; S3: 10; S3b: 3; S4: 0; S1c: 0. No other host was ever contacted; the only
+blocked DNS lookup all evaluation was the deliberate `gmail.googleapis.com` probe in
+the Phase-0 proof (per-process network summaries in each `*_steps.json`).
 
 **Mail-safety proof — all layers re-demonstrated live, all PASS**
 (`eval/e2e/evidence/phase0_results.json`):
@@ -231,24 +254,212 @@ the intake chat, so the hygienic gate can only ever be exited via the `source_an
 override. The arc-5 unit tests passed because they set the dict keys directly — this is
 precisely the cross-arc seam a flags-on E2E run exists to catch.
 
-*(S4 pending)*
+### S4 — Supplier silence and alert discipline — COMPLETE, ALL PASS
+
+Run: `uv run python eval/e2e/s4_silence_and_alerts.py`. **0 external calls.**
+Evidence: `eval/e2e/evidence/s4_*.json`. Time driven ONLY via explicit `now` into
+`notifications.run_escalations` / `run_coalesced_sends`; RFQ release Friday
+2026-09-25 15:00 PT. **The bounce was injected through the store-level path
+(`notifications.apply_delivery_event`), which bypasses SNS webhook signature
+verification — deliberately; the webhook path has its own unit coverage.**
+
+| # | Step | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| 1 | Friday 15:00 PT release to A, B, C | 3 RFQ_NEW mails, one per OWNER | exactly 3 | PASS |
+| 2 | A views+replies; C hard-bounces | suppression + ACTION_NOW (sole contact) | confirmed (`sole_contact: true`) | PASS |
+| 3 | Weekend | zero sends across 3 scheduler passes | outbox delta 0 (considered 5 each pass — deferred, not dropped) | PASS |
+| 4 | Monday reminder | ONE consolidated, B only, business hours | Mon 09:00: nothing; Mon 11:00: exactly one, `owner@supplier-b`, subject “Reminder: quote request waiting — Goulds 3196-seal”; rerun adds none | PASS |
+| 5 | Escalation | per-account, QUEUE, once | Mon 15:00: one RFQ_ESCALATION (B, QUEUE); reruns + Tuesday add nothing; no supplier mail | PASS |
+| 6 | Totals | 4 emails, 2 alerts, nothing dropped | **4 emails** (3 RFQ_NEW + 1 reminder), **2 alerts** (B QUEUE, C ACTION_NOW); A `cancelled` (resolved), B `reminded+escalated`, C `BOUNCED` | PASS |
+
+Alert discipline remains the strongest part of the system — identical to the previous
+run, no regression from arc 5's notification-template changes (T8).
+
+### S1c — Public quote form (previously-unreached seam, GET side) — PASS
+
+Run: `uv run python eval/e2e/s1c_public_quote_form.py`. **0 external calls.**
+The `/quote/{token}` link minted into S1's RFQ mail resolves: `state: live`, honest
+request description (Chesterton, PN `null`, qty 1), correct supplier attribution
+(DXP), shows the existing active $189 quote, expiry date; an invalid token → 404.
+The **POST side was deliberately not exercised** (it would supersede the S1 quote and
+disturb the seeded UI-walk data) — recorded as partial coverage in the seam inventory.
+Evidence: `eval/e2e/evidence/s1c_public_quote_form.json`.
 
 ---
 
 ## 7. Findings
 
-*(pending — numbered PH-xx, with the previous report's F-xx cross-referenced)*
+### 7a. Previous findings FIXED and verified live this run
+
+| Prev | Arc 5 task | Verified by | Evidence |
+|---|---|---|---|
+| F-02 (frontend :8000 default) | T9 | static check, no stale 8000 | `phase0_results.json` `hardening.F02_*` |
+| F-03 (silent auth-mail refusal) | T7 | boot refusal names the var; FakeProvider captures; SES refusal raises one ACTION_NOW alert | `phase0_results.json` `hardening.F03_*` |
+| F-04 (no data-dir override) | T10 | `GOFER_DATA_DIR` natively isolated all 18 modules + persistence + JSON stores + handoffs path; the eval's old monkeypatch was a no-op | `phase0_results.json` `t10_native_isolation` |
+| F-07 (quote never prices order) | T1 | S1 order: `unit_price=189.0`, `source="quote"`, `status="placed"`, `quote_id` recorded | `s1_step10_accept_order.json` + adjudication |
+| F-08 (variant guard re-asks) | T6 | S1 in-app: no re-ask of supplied shaft size; plain confirm 200 first try (no `open_family` needed) | `s1_step1c/1d` |
+| F-09 (generic RFQ_NEW) | T8 | both RFQ_NEW mails name Chesterton/155 | `s1_step5b_mail_content.json` |
+| F-10 (FYI leaks UUID/vocab) | T8 | zero supplier-facing mails with UUID or internal vocabulary | same |
+| F-11 (C3-less badged exact) — **was the BLOCKER** | T2 | S2: **0 exact claims in 27 candidates**; the trap rows badged `mismatch` with reasons; bare domains denied exact grade; extractor's `exact_match` claims overruled | `s2_step4_candidate_analysis.json` |
+| F-12 (notation defeats matcher) | T3 | 2RSH → `needs_verification` naming both designations; WT/HT51 likewise | same |
+| F-15 (no sufficiency gate) | T4 | 422 `identity_insufficient` twice; `source_anyway` override works with banner + `spec_incomplete` + no exact badges | `s3_step2/4/5` |
+| F-16 (no hygienic awareness) | T5 | gate fires 422 `hygienic_spec_incomplete` naming the four fields — **but see PH-01** | `s3b_step2_confirm.json` |
+
+### 7b. NEW findings (post-hardening)
+
+- **PH-01 (MAJOR, S3b) — The hygienic gate cannot be cleared through the chat.**
+  The gate's field sources (`process_connection|connection|connection_type`,
+  `hygienic_certification|certification|hygienic_cert` — `utils/hygienic_context.py`)
+  do not exist in `AssetSpecs` (`utils/models.py`), so the intake extractor can never
+  fill two of the four required fields. A user who answers every question verbatim
+  (“1.5 inch Tri-Clamp, 316L wetted, 3-A certified”) stays blocked, while the chat
+  panel says “Specs look complete — review in the panel and confirm to start
+  sourcing.” Only exit: the `source_anyway` override, which then brands honest results
+  as unchecked. Repro: `uv run python eval/e2e/s3b_hygienic_gate.py` (step 3).
+  Evidence: `s3b_step3_answered.json`. (The arc-5 unit tests set the spec keys
+  directly, which is why this passed flags-on unit testing.)
+- **PH-02 (MAJOR, S2) — The band layer contradicts the now-honest badge layer**
+  (gate finding F-A, measured live). `classify_pn_evidence` still scores `6205-2RS`
+  vs `6205-2RS C3` as `canonical`: EIS Inc. — C3-less, badge `mismatch`, **bare
+  domain** — lands **Band A**, above the honestly-flagged true-family listing (QBO,
+  Band B). Any surface sorting by band still promotes the wrong-clearance part.
+  Repro: `uv run python eval/e2e/s2_substitute_honesty.py` step 4b.
+  Evidence: `s2_step4b_band_vs_badge.json`.
+- **PH-03 (MINOR, S2) — The extractor-may-downgrade rule buries a genuine match.**
+  Rodavictoria's listing (URL literally `…/6205-2rs-c3-skf…`) scored `none` with
+  reason “the extractor reports a weaker match than the part numbers alone suggest”.
+  Safe direction, but the true match under-ranks; same class as the residual Radwell
+  echo-back (found PN echoed on a Timken `6205-2RS` URL — correctly kept at `none`).
+- **PH-04 (MINOR, S1/S2) — Sub-floor candidates rescued on cached Apollo verdicts.**
+  S1: Platinum Performance Products rescued at suitability **1%**; S2: VXB at 24%,
+  Baker at 27% — all `apollo_confirmed` from cache with `APOLLO_API_KEY` blank.
+  Annotate-don't-remove is by design (CLAUDE.md §9), but a 1%-suitability rescue is
+  effectively noise reaching the buyer's list; consider a rescue floor.
+  Evidence: S1/S2 sourcing logs in the scenario outputs; `s1_step3_bands.json`.
+
+### 7c. Previous findings still OPEN (unchanged, deliberately out of arc-5 scope)
+
+- **F-06 (MAJOR)** — email intake cannot complete a family-level request; three
+  progressively complete mails all `NEEDS_CLARIFICATION`; no run created (re-confirmed
+  live this run, S1 steps 1–1b2, `s1_step1b2_intake_third_turn.json`).
+- **F-13 (MAJOR)** — clearance is still not a comparison-artifact field, and the
+  artifact still compares the type string against the PN (“deep groove ball bearing vs
+  6205-2RS-C3” → `incompatible`), so the artifact layer now **contradicts the honest
+  badge layer** on the same card (re-confirmed, `s2_step4_candidate_analysis.json`).
+- **F-14 (MAJOR)** — substitute/backorder intent is still dropped silently; it survives
+  only in the raw chat message (re-confirmed, `s2_step3_run_detail.json`).
+- **F-01 (MINOR)** — still no capture-only mail mode (safety = 4-variable configuration).
+- **F-05 (MINOR)** — still no admin API for intake known senders (store-level seed only).
 
 ---
 
-## 8. Seam inventory
+## 8. Seam inventory (Phase 2)
 
-*(pending)*
+| # | Seam | Exercised in | Post-hardening result |
+|---|---|---|---|
+| 1 | email/SMS adapter → intake consumer | S1 | works mechanically; **email dead-ends on family requests (F-06, unchanged)** |
+| 2 | intake consumer → run creation | S1 | never reached on email (F-06); works in-app |
+| 3 | chat IntakeAgent → specs merge → confirm guards | S1, S3, S3b | **improved**: variant guard honours supplied attrs (T6); identity floor live (T4); **hygienic gate fires but is un-clearable in chat (PH-01)** |
+| 3b | **(new)** identity floor → `source_anyway` override → spec-incomplete branding | S3 | PASS — banner + ack + no exact badges |
+| 3c | **(new)** hygienic context → confirm gate → chat answer loop | S3b | **BREAK (PH-01)** — gate fields not in the extractor's schema |
+| 4 | confirm-intake → background sourcing | S1, S2, S3 | PASS (inline under TestClient) |
+| 5 | SourcingAgent → ranking-bands annotation | S1, S2 | PASS mechanically; **band semantics contradict badges (PH-02)** |
+| 6 | banded result → TIER1_V2 registry re-derive | S1 | PASS — DXP with class-gate explanation |
+| 7 | stored result → run-detail transform (findings/outreach/quote overlay) | S1, S2 | PASS — `pnMatchReason` (new field) present per row |
+| 8 | rfq-draft → candidate snapshot → recipient resolution | S1 | PASS |
+| 9 | draft approve → send governance (409 + release queue) | S1 | PASS |
+| 10 | `rfq_send` → ledger → quote-token mint → `{quote_link}` | S1, S1c | PASS — and the minted link now **resolves** (S1c) |
+| 11 | `rfq_send` → RFQ_NEW fan-out → OWNER+ADMIN routing | S1, S4 | PASS |
+| 11b | **(new)** `rfq_send` → run-specs read → mail identity (T8) | S1 | PASS — mail names the part, no leaks |
+| 12 | notifications → governance/caps → delivery gate → transport | S1, S4 | PASS |
+| 13 | magic-link mail → token → verify → session | S1 | PASS |
+| 14 | session → requests inbox → RfqView write | S1 | PASS |
+| 15 | RfqView → escalation suppression | S1, S4 | PASS |
+| 16 | session quote POST → quote_store | S1 | PASS |
+| 17 | quote_store → buyer run-detail overlay | S1 | PASS |
+| 18 | accepted quote → order (select/approve/execute) | S1 | **PASS — F-07 fixed: quote-priced, quote-id-stamped, PLACED** |
+| 18b | **(new)** quote resolution inside `_selection_for_order` (run_id+domain join) | S1 | PASS |
+| 19 | delivery event → suppression → alert tier | S4 | PASS (store-level; **SNS signature seam still unit-tested only**) |
+| 20 | scheduler (`--now`) → escalations/coalesce | S4 | PASS |
+| 21 | **(new)** boot guard (SES/auth-set/accounts matrix) | Phase 0 | PASS (subprocess probes) |
+| 22 | **(new)** public `/quote/{token}` GET (form payload, invalid token) | S1c | PASS (GET only — **POST/submission still unproven E2E**, by choice) |
+
+**Seams still unreached (unchanged from previous report, still findings in themselves):**
+public quote-form **POST**; `/api/portal/{token}` claim portal; email reply parsing
+(`process-replies`); Apollo **live** validation (cache-rescue path observed only,
+PH-04); SES webhook with signed SNS envelope; admin quote review lane (`review →
+active`); basket/group approval, reorder, impact endpoints; the React frontend's
+rendering of all of the above (Phase-3 checklist below).
 
 ## 9. Demo guidance
 
-*(pending)*
+**Show live, honestly (expanded from the previous report):**
+- The full S1 anchor **including the order click**: in-app chat → confirm (now clean,
+  no variant-guard workaround) → DXP Tier-1 with provenance → RFQ draft → 409 →
+  release queue → magic-link login → inbox → structured quote → buyer card “quoted ·
+  $189 · 2 days” → **select → approve → execute → order placed at $189 with quote
+  provenance**. The previous “stop at the quoted card” avoidance is lifted.
+- The refusal story is now a *feature*: confirm an under-specified request and show
+  the honest 422 (“nothing to match a supplier's listing against”), then the labelled
+  `source_anyway` override with its banner. This demonstrates spec discipline.
+- S2's badge honesty: show that a C3 bearing request yields **zero** exact claims and
+  per-row reasons (“C3 requested; listing is CN/unspecified”). This was the old
+  BLOCKER; it is now a strength — at the badge level.
+- The S4 discipline story (weekend silence → one reminder → one QUEUE escalation →
+  bounce ACTION_NOW), unchanged and solid.
 
-## 10. Human UI checklist
+**Still steer around:**
+- **Email intake** (F-06) — unchanged; do not demo, describe as “in pilot wiring”.
+- **Anything that sorts or filters by evidence band on a bearing-style request**
+  (PH-02): a knowledgeable manager can still spot a wrong-clearance part sitting in
+  Band A while its own badge says mismatch. Don't open the band explanation on S2-type
+  runs.
+- **The comparison artifact on bearing cards** (F-13): it still says “incompatible”
+  for reasons unrelated to clearance — contradicting the badge on the same card.
+- **The hygienic question flow past the first refusal** (PH-01): the gate's question is
+  a great moment; *answering it* dead-ends. Show the question, then use a
+  fully-specified request — or the override — not the answer loop.
+- **Substitute requests** (“what else can we get”, F-14): still answered with the
+  original brand only, silently.
 
-*(pending)*
+**Fix before a real plant manager uses it unsupervised:** PH-01 (hygienic loop —
+either add the two spec fields to `AssetSpecs`/the extractor or widen
+`_FIELD_SOURCES`), PH-02/F-13 (make band + artifact agree with the badge), F-06
+(email loop), then F-14 (substitute intent).
+
+## 10. Human UI checklist (Phase 3 — ≤25 minutes)
+
+Playwright is not in the repo; manual walk. **Setup (5 min):**
+
+```powershell
+# Terminal 1 — backend on :8001, isolated data, mail captured & PRINTED here
+uv run python eval/e2e/ui_walk_server.py
+# Terminal 2 — frontend (NEXT_PUBLIC_API_URL now defaults to :8001 — arc 5 T9)
+cd frontend
+$env:NEXT_PUBLIC_SUPPLIER_SESSION_V1 = "1"
+$env:NEXT_PUBLIC_NOTIFICATIONS_V1 = "1"
+npm run dev
+```
+
+Seeded state: S1 run `eed47011…` (DXP quoted $189, **order placed at $189 with
+quote id**), S3 run spec-incomplete with banner, S3b run blocked at the hygienic
+gate, S4 accounts + alerts. Magic-link tokens print in Terminal 1. Admin token:
+`eval-admin-token-e2e`. Logins: `owner@dxpe.com` / `admin@dxpe.com` (OWNER/ADMIN),
+`member1@dxpe.com` (MEMBER).
+
+| ✓ | Check (URL) | What proves it |
+|---|---|---|
+| ☐ | `http://localhost:3000` — open S1's run | DXP card “quoted · $189 · 2 days”; order section shows a **placed order at $189** (arc 5 T1) — and no claim beyond the data |
+| ☐ | Same run, order provenance | The order/receipt view references the quote (price source “quote”), NOT a listing price |
+| ☐ | Open the S3 run | The spec-incomplete banner (“results have NOT been checked against your requirement…”) renders; no exact badges anywhere |
+| ☐ | Open the S3b run, read the last agent turn | The panel says “Specs look complete — confirm” while Confirm returns the hygienic 422 — **observe PH-01 on screen**; check the refusal renders its message, not a raw error |
+| ☐ | `http://localhost:3000/supplier/login` → `owner@dxpe.com` → link from Terminal 1 | Verify page **waits for an explicit “Continue” click** (does not consume the token on load) |
+| ☐ | After login, DevTools → Application → Cookies | `gofer_supplier_session` is **HttpOnly**; `document.cookie` in Console does NOT contain it |
+| ☐ | `/supplier/requests` at phone width (390px) | Inbox usable; S1 request shows Chesterton; seen-state consistent |
+| ☐ | Open request → quote form at phone width | Form usable; submitting a second quote says exactly what happened (supersede language), and the buyer card updates — “live to the buyer” is true. *(Do this LAST — it supersedes the $189 quote.)* |
+| ☐ | `/supplier/profile` and `/supplier/members` as `member1@dxpe.com` | Member cannot manage members/rfq-contacts; polite 403s, no fake success |
+| ☐ | `/admin` (token above) → send-governance | Allowlist = exactly the 5 eval domains; release queue empty; suppression shows `owner@supplier-c.example.com` |
+| ☐ | Admin → notification alerts | S4's 2 alerts render with tiers (QUEUE escalation supplier-b, ACTION_NOW suppression owner@supplier-c) **plus** the Phase-0 `AUTH_MAIL_REFUSED` ACTION_NOW probe alert — counts match evidence, nothing invented |
+| ☐ | Any screen | No screen claims a send FakeProvider didn't capture; no supplier mail shows a run UUID (arc 5 T8) |
+
+Stop both terminals when done (Ctrl+C; verify :8001 released).

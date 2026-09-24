@@ -1,0 +1,31 @@
+{
+  "a_viewed": true,
+  "a_replied": true,
+  "c_pmid": "fake-a74f4090-6743-4575-a3ab-d44520c86ff6",
+  "bounce_applied": true,
+  "c_suppressed": null,
+  "bounce_alerts": [
+    {
+      "id": "7c4d7f38-adcb-42e0-9529-2e21dad880e7",
+      "kind": "EMAIL_SUPPRESSED",
+      "dedupe_key": "suppressed:hard_bounce:owner@supplier-c.example.com",
+      "account_id": "0dc9f615-a518-4ffe-aeb5-9c905b606f6c",
+      "member_id": "9f5f99fd-3e7b-4e35-b15e-9b8608d0fc8f",
+      "notification_id": "05e157da-b321-472e-be26-05efb8eefe08",
+      "run_id": null,
+      "supplier_domain": null,
+      "email": "owner@supplier-c.example.com",
+      "status": "open",
+      "tier": "ACTION_NOW",
+      "created_at": "2026-09-24T11:00:51.545924+00:00",
+      "acknowledged_at": null,
+      "acknowledged_by": null,
+      "is_test": 0,
+      "detail": {
+        "reason": "hard_bounce",
+        "sole_contact": true,
+        "subtype": "General"
+      }
+    }
+  ]
+}

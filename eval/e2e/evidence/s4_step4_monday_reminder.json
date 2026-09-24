@@ -1,0 +1,72 @@
+{
+  "mon9": {
+    "reminded": 0,
+    "alerted": 0,
+    "considered": 5
+  },
+  "mon11": {
+    "reminded": 1,
+    "alerted": 0,
+    "considered": 5
+  },
+  "mon11_rerun": {
+    "reminded": 0,
+    "alerted": 0,
+    "considered": 5
+  },
+  "mails_at_11": [
+    {
+      "to": [
+        "owner@supplier-b.example.com"
+      ],
+      "subject": "Reminder: quote request waiting \u2014 Goulds 3196-seal",
+      "body": "Hello,\n\nA quote request from Arkim is still waiting for you in your supplier portal. If it is not something you can quote, you can simply reply and let us know.\n\nhttp://localhost:3000/supplier/requests\n\nRegards,\nArkim Procurement\nprocurement@arkim.ai"
+    }
+  ],
+  "rerun_mails": 0,
+  "reminder_rows": [
+    {
+      "id": "d6254801-5512-4470-99e0-a53ce8749aab",
+      "account_id": "25cb536f-c58f-4343-b52d-16aec20b07bd",
+      "member_id": "71b590eb-dfb3-440c-b154-107a9e517bad",
+      "kind": "RFQ_REMINDER",
+      "subject_ref": "f8abe2e8-2043-4ea6-87d8-c3ace58f5ee0",
+      "run_id": "s4-run",
+      "supplier_domain": "supplier-b.example.com",
+      "recipient": "owner@supplier-b.example.com",
+      "channel": "EMAIL",
+      "provider": null,
+      "provider_message_id": "fake-3b828dcc-7c45-4477-b5cf-56a42cb941e0",
+      "configuration_set": "eval-notify-set",
+      "state": "SENT",
+      "deferred": 0,
+      "coalesce_until": null,
+      "mailed_day": "2026-09-28",
+      "cancelled_at": null,
+      "cancel_reason": null,
+      "reminded_at": null,
+      "escalated_at": null,
+      "created_at": "2026-09-24T11:00:51.723108+00:00",
+      "updated_at": "2026-09-28T18:00:00+00:00",
+      "queued_at": "2026-09-24T11:00:51.723108+00:00",
+      "sent_at": "2026-09-28T18:00:00+00:00",
+      "delivered_at": null,
+      "opened_at": null,
+      "clicked_at": null,
+      "suppressed_at": null,
+      "bounced_at": null,
+      "complained_at": null,
+      "rejected_at": null,
+      "failed_at": null,
+      "is_test": 0,
+      "detail": {
+        "reminder_for": "206894a6-a4e8-4d3c-8461-ebfb4a64c8e8",
+        "batched": [
+          "206894a6-a4e8-4d3c-8461-ebfb4a64c8e8"
+        ],
+        "day": "2026-09-28"
+      }
+    }
+  ],
+  "business_time_11": true
+}

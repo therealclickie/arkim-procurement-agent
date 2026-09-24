@@ -1,0 +1,110 @@
+{
+  "mon3": {
+    "reminded": 0,
+    "alerted": 1,
+    "considered": 5
+  },
+  "mon3_rerun": {
+    "reminded": 0,
+    "alerted": 0,
+    "considered": 5
+  },
+  "tue9": {
+    "reminded": 0,
+    "alerted": 0,
+    "considered": 5
+  },
+  "escalation_alerts": [
+    {
+      "id": "14f5ada5-c344-451d-b0ec-b40b1420ca27",
+      "kind": "RFQ_ESCALATION",
+      "dedupe_key": "escalation:25cb536f-c58f-4343-b52d-16aec20b07bd:2026-09-28",
+      "account_id": "25cb536f-c58f-4343-b52d-16aec20b07bd",
+      "member_id": "71b590eb-dfb3-440c-b154-107a9e517bad",
+      "notification_id": "206894a6-a4e8-4d3c-8461-ebfb4a64c8e8",
+      "run_id": "s4-run",
+      "supplier_domain": "supplier-b.example.com",
+      "email": "owner@supplier-b.example.com",
+      "status": "open",
+      "tier": "QUEUE",
+      "created_at": "2026-09-24T11:00:51.836132+00:00",
+      "acknowledged_at": null,
+      "acknowledged_by": null,
+      "is_test": 0,
+      "detail": {
+        "state": "SENT",
+        "reminded_at": "2026-09-24T11:00:51.720147+00:00",
+        "business_day": "2026-09-28"
+      }
+    }
+  ],
+  "open_queue_alerts": [
+    {
+      "id": "14f5ada5-c344-451d-b0ec-b40b1420ca27",
+      "kind": "RFQ_ESCALATION",
+      "dedupe_key": "escalation:25cb536f-c58f-4343-b52d-16aec20b07bd:2026-09-28",
+      "account_id": "25cb536f-c58f-4343-b52d-16aec20b07bd",
+      "member_id": "71b590eb-dfb3-440c-b154-107a9e517bad",
+      "notification_id": "206894a6-a4e8-4d3c-8461-ebfb4a64c8e8",
+      "run_id": "s4-run",
+      "supplier_domain": "supplier-b.example.com",
+      "email": "owner@supplier-b.example.com",
+      "status": "open",
+      "tier": "QUEUE",
+      "created_at": "2026-09-24T11:00:51.836132+00:00",
+      "acknowledged_at": null,
+      "acknowledged_by": null,
+      "is_test": 0,
+      "detail": {
+        "state": "SENT",
+        "reminded_at": "2026-09-24T11:00:51.720147+00:00",
+        "business_day": "2026-09-28"
+      }
+    },
+    {
+      "id": "7c4d7f38-adcb-42e0-9529-2e21dad880e7",
+      "kind": "EMAIL_SUPPRESSED",
+      "dedupe_key": "suppressed:hard_bounce:owner@supplier-c.example.com",
+      "account_id": "0dc9f615-a518-4ffe-aeb5-9c905b606f6c",
+      "member_id": "9f5f99fd-3e7b-4e35-b15e-9b8608d0fc8f",
+      "notification_id": "05e157da-b321-472e-be26-05efb8eefe08",
+      "run_id": null,
+      "supplier_domain": null,
+      "email": "owner@supplier-c.example.com",
+      "status": "open",
+      "tier": "ACTION_NOW",
+      "created_at": "2026-09-24T11:00:51.545924+00:00",
+      "acknowledged_at": null,
+      "acknowledged_by": null,
+      "is_test": 0,
+      "detail": {
+        "reason": "hard_bounce",
+        "sole_contact": true,
+        "subtype": "General"
+      }
+    },
+    {
+      "id": "5ba8fc3f-5f93-4101-be39-536252ebef72",
+      "kind": "AUTH_MAIL_REFUSED",
+      "dedupe_key": "AUTH_MAIL_REFUSED:SES_CONFIGURATION_SET_AUTH",
+      "account_id": null,
+      "member_id": null,
+      "notification_id": null,
+      "run_id": null,
+      "supplier_domain": null,
+      "email": null,
+      "status": "open",
+      "tier": "ACTION_NOW",
+      "created_at": "2026-09-24T10:50:41.999120+00:00",
+      "acknowledged_at": null,
+      "acknowledged_by": null,
+      "is_test": 0,
+      "detail": {
+        "reason": "auth mail requires the tracking-off configuration set (SES_CONFIGURATION_SET_AUTH is unset); refusing to send on a tracking-enabled set",
+        "missing_env": "SES_CONFIGURATION_SET_AUTH",
+        "supplier_domain": ""
+      }
+    }
+  ],
+  "outbox_delta_after_3pm": 0
+}

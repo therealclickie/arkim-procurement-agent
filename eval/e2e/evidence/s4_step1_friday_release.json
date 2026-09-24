@@ -1,0 +1,27 @@
+{
+  "rows": {
+    "supplier-a.example.com": "05e7ad0f-d4bd-41c6-9271-bbe142cd840d",
+    "supplier-b.example.com": "f8abe2e8-2043-4ea6-87d8-c3ace58f5ee0",
+    "supplier-c.example.com": "7749a5e4-eb6a-41c6-924f-232d4d41e9e8"
+  },
+  "mails": [
+    {
+      "to": [
+        "owner@supplier-a.example.com"
+      ],
+      "subject": "New quote request \u2014 Goulds 3196-seal"
+    },
+    {
+      "to": [
+        "owner@supplier-b.example.com"
+      ],
+      "subject": "New quote request \u2014 Goulds 3196-seal"
+    },
+    {
+      "to": [
+        "owner@supplier-c.example.com"
+      ],
+      "subject": "New quote request \u2014 Goulds 3196-seal"
+    }
+  ]
+}

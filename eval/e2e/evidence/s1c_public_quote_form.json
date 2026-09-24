@@ -1,0 +1,24 @@
+{
+  "token_found": true,
+  "status": 200,
+  "body": {
+    "state": "live",
+    "request": {
+      "manufacturer": "Chesterton",
+      "part_number": null,
+      "quantity": 1.0,
+      "need_by": null
+    },
+    "supplier": {
+      "name": "DXP Enterprises",
+      "domain": "dxpe.com"
+    },
+    "expires_at": "2026-10-08T10:53:01.600424+00:00",
+    "existing_quote": {
+      "status": "active",
+      "unit_price": 189.0,
+      "submitted_at": "2026-09-24T10:53:01.993525+00:00"
+    }
+  },
+  "invalid_token_status": 404
+}

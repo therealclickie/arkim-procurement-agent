@@ -1,0 +1,64 @@
+{
+  "s4_supplier_emails_total": 4,
+  "s4_supplier_email_breakdown": [
+    {
+      "to": [
+        "owner@supplier-a.example.com"
+      ],
+      "subject": "New quote request \u2014 Goulds 3196-seal"
+    },
+    {
+      "to": [
+        "owner@supplier-b.example.com"
+      ],
+      "subject": "New quote request \u2014 Goulds 3196-seal"
+    },
+    {
+      "to": [
+        "owner@supplier-c.example.com"
+      ],
+      "subject": "New quote request \u2014 Goulds 3196-seal"
+    },
+    {
+      "to": [
+        "owner@supplier-b.example.com"
+      ],
+      "subject": "Reminder: quote request waiting \u2014 Goulds 3196-seal"
+    }
+  ],
+  "s4_concierge_alerts": [
+    {
+      "kind": "RFQ_ESCALATION",
+      "tier": "QUEUE",
+      "who": "owner@supplier-b.example.com"
+    },
+    {
+      "kind": "EMAIL_SUPPRESSED",
+      "tier": "ACTION_NOW",
+      "who": "owner@supplier-c.example.com"
+    }
+  ],
+  "rfq_new_accounting": [
+    {
+      "domain": "supplier-a.example.com",
+      "state": "SENT",
+      "reminded_at": false,
+      "escalated_at": false,
+      "cancelled_at": true
+    },
+    {
+      "domain": "supplier-b.example.com",
+      "state": "SENT",
+      "reminded_at": true,
+      "escalated_at": true,
+      "cancelled_at": false
+    },
+    {
+      "domain": "supplier-c.example.com",
+      "state": "BOUNCED",
+      "reminded_at": false,
+      "escalated_at": false,
+      "cancelled_at": false
+    }
+  ]
+}
