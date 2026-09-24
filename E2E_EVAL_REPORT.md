@@ -148,7 +148,7 @@ Evidence: `eval/e2e/evidence/s1_*.json`.
 |---|---|---|---|---|---|
 | 1 | Email intake | run or honest clarification | `NEEDS_CLARIFICATION`, good question | DEGRADED | same |
 | 1b | Self-contained reply answering everything | `RUN_CREATED` | `NEEDS_CLARIFICATION` again | **BREAK** | **F-06 still open** (out of arc-5 scope, as briefed) |
-| 1b2 | Third mail taking the family-as-is exit | `RUN_CREATED` | `NEEDS_CLARIFICATION` — email loop never terminates | **BREAK** → PH-01 | F-06 unchanged |
+| 1b2 | Third mail taking the family-as-is exit | `RUN_CREATED` | `NEEDS_CLARIFICATION` — email loop never terminates | **BREAK** (F-06, carried) | F-06 unchanged |
 | 1c | In-app chat fallback | run + specs | run created; specs correct (Chesterton 155, 1.875″ shaft); chat asked a NEW question (face/elastomer materials) instead of re-asking the supplied shaft size | PASS | **F-08 FIXED** (T6) — no re-ask of a supplied attr |
 | 1d | Confirm intake | phase → sourcing | **200 on the FIRST plain confirm** — no 422, no `open_family` needed | PASS | **F-08's 422-names-supplied-field FIXED** (T6); previous run needed the `open_family` affordance |
 | 2 | Identification | honest like-for-like, no invented PN | Chesterton 155 for Goulds 3196 MTX, `part_number=null`, phase `comparison` | PASS | same (good) |
@@ -170,12 +170,12 @@ is fixed for future runs. Nothing about the product broke.
 
 **Bottom line S1:** the anchor demo now completes **all the way through the order** —
 the one demo avoidance the previous report imposed on the buy-flow (“stop at the quoted
-card”) is gone. Email intake remains the single dead channel (PH-01/F-06, known,
+card”) is gone. Email intake remains the single dead channel (F-06, known,
 deliberately out of arc-5 scope). Side observation, unchanged from the previous run: the
 Apollo **cache**-rescue lifted two sub-floor Tier-3 candidates (Platinum Performance
 Products, suitability 1%) into the visible list (`apollo_confirmed` rescue) — annotate-
 don't-remove is by design, but a 1%-suitability rescue riding a cached verdict is worth
-a human eyeball (recorded as PH-08).
+a human eyeball (recorded as PH-04).
 
 ### S2 — Substitute honesty (SKF 6205-2RS C3) — COMPLETE
 
@@ -200,7 +200,7 @@ Run: `uv run python eval/e2e/s2_substitute_honesty.py`. Run id `1ec25ea0…`.
 2. **F-12 (notation) — FIXED at the badge layer.** QBO's `6205-2rsh/c3` now scores
    `needs_verification` with a reason naming both designations (“2RS requested; listing
    is 2RSH — same 2RS seal family, different designation”); `-WT-` and `HT51` suffixed
-   listings likewise `needs_verification`. Residual (PH-04, MINOR): Rodavictoria's
+   listings likewise `needs_verification`. Residual (PH-03, MINOR): Rodavictoria's
    genuinely-C3 listing scored `none` via the extractor-may-downgrade rule — the safe
    direction, but the true match still under-ranks. Radwell's echo-back (found PN
    `6205-2RS-C3` on a Timken `6205-2RS` URL) still happens but is now **neutralized in
@@ -241,7 +241,7 @@ Evidence: `eval/e2e/evidence/s3b_*.json`.
 |---|---|---|---|---|
 | 1 | Identity-sufficient CIP gauge | specs capture Ashcroft 1032 | captured cleanly, CIP context in description + use_case | PASS |
 | 2 | Confirm past the floor | hygienic gate blocks, naming the fields | **422 `hygienic_spec_incomplete`**, `missing_attrs: [process_connection, process_connection_size, wetted_material, hygienic_certification]`, message names 3-A/EHEDG — **F-16's gate is real and fires E2E** | PASS |
-| 3 | Answer all four in chat (“1.5 inch Tri-Clamp, 316L wetted, 3-A certified”), confirm again | 200 | **still 422** — `process_connection` and `hygienic_certification` remain “missing” though the user answered them; meanwhile the chat panel says “Specs look complete — review in the panel and confirm to start sourcing” | **BREAK → PH-07 (MAJOR)** |
+| 3 | Answer all four in chat (“1.5 inch Tri-Clamp, 316L wetted, 3-A certified”), confirm again | 200 | **still 422** — `process_connection` and `hygienic_certification` remain “missing” though the user answered them; meanwhile the chat panel says “Specs look complete — review in the panel and confirm to start sourcing” | **BREAK → PH-01 (MAJOR)** |
 
 **Why (root cause, structural):** the gate accepts spec keys
 `process_connection|connection|connection_type` and
