@@ -1,6 +1,6 @@
 # run_e2e_eval.ps1 -- flags-on end-to-end evaluation (demo readiness)
 #
-# One evaluator run (Fable 5), plus an optional verify pass (Opus 5) that re-runs every
+# One evaluator run (Fable 5), plus an optional verify pass (Opus 5.5) that re-runs every
 # BLOCKER/MAJOR repro. Nothing is built or fixed. Both run on the claude.ai subscription.
 #
 # Usage:
@@ -20,7 +20,7 @@ param(
     [string]$RepoPath     = "C:\dev\_Arkim\Arkim Procurement Agent Prototype",
     [string]$Branch       = "eval/e2e-flags-on",
     [string]$EvalModel    = "claude-fable-5",
-    [string]$VerifyModel  = "claude-opus-5"
+    [string]$VerifyModel  = "claude-opus-5-5"
 )
 
 $ErrorActionPreference = "Continue"
