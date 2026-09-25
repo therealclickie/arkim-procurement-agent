@@ -271,6 +271,12 @@ export interface SourcingResults {
   outreachTargets?: OutreachTargets;
 }
 
+export interface IntakeReadiness {
+  ready: boolean;
+  missing_attrs: string[];
+  missing_labels: string[];
+}
+
 export interface SourcingRunDetail {
   id: string;
   phase: Phase;
@@ -294,6 +300,9 @@ export interface SourcingRunDetail {
   messages?: ChatMessage[];
   /** True when T2+T3 have candidates but none are an exact PN match. Drives transparency banner. */
   no_exact_match?: boolean;
+  /** PH-01 round 3b: the backend's ONE readiness decision (intake_readiness.assess — what
+   *  confirm-intake refuses on). The intake card renders ready / Still needed from this only. */
+  intake_readiness?: IntakeReadiness;
   created_at: string;
   updated_at: string;
 }

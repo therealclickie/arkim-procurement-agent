@@ -30,8 +30,10 @@ vi.mock("../proc-shell", () => ({ useProcToast: () => fire }));
 
 const GENERIC_TOAST = "Couldn't start sourcing — please try again.";
 
-/** Identity-sufficient on the FRONTEND's own check, so "Find options" is enabled. */
 const specs = { manufacturer: "Ashcroft", model: "1032", detected_type: "pressure gauge" };
+/** The run detail says ready (PH-01 round 3b), so "Find options" is enabled; these tests
+ *  cover a confirm that still refuses (the specs changed between the fetch and the click). */
+const intake_readiness = { ready: true, missing_attrs: [], missing_labels: [] };
 
 const IDENTITY_REFUSAL = {
   message:
@@ -73,7 +75,7 @@ function stubBackend(refusal: unknown): FetchCall[] {
       return jsonResponse(422, { detail: refusal });
     }
     if (call.url.endsWith(`/api/runs/${RUN}`)) {
-      return jsonResponse(200, { id: RUN, phase: "intake", asset_specs: specs });
+      return jsonResponse(200, { id: RUN, phase: "intake", asset_specs: specs, intake_readiness });
     }
     return jsonResponse(200, {});
   });
@@ -168,7 +170,7 @@ describe("a 422 without a reason", () => {
       if (isConfirm(call)) {
         return jsonResponse(422, { detail: "No asset specs captured yet — complete intake chat first" });
       }
-      return jsonResponse(200, { id: RUN, phase: "intake", asset_specs: specs });
+      return jsonResponse(200, { id: RUN, phase: "intake", asset_specs: specs, intake_readiness });
     });
     renderScreen();
     await findOptions();

@@ -647,6 +647,11 @@ class RunDetail(BaseModel):
     # True when T2+T3 have candidates but none have pnMatchLevel=="exact".
     # Suppressed when spec_based_sourcing or part_number is absent (not a typo case).
     no_exact_match: bool = False
+    # PH-01 round 3b: the ONE readiness decision (utils.intake_readiness.assess — the
+    # same one confirm_intake refuses on and the chat replies from), so the intake card
+    # renders "ready" / "Still needed" from the backend instead of guessing client-side.
+    # {"ready": bool, "missing_attrs": [...], "missing_labels": [...]}.
+    intake_readiness: Optional[Dict[str, Any]] = None
     created_at: str
     updated_at: str
 
@@ -1877,6 +1882,18 @@ def _redact_sourcing_error(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _intake_readiness_detail(specs: Dict[str, Any]) -> Dict[str, Any]:
+    """The run's readiness as the intake card reads it — ``intake_readiness.assess``
+    on the persisted specs (the unstripped dict confirm_intake reads)."""
+    from utils import intake_readiness
+    readiness = intake_readiness.assess(specs)
+    return {
+        "ready": readiness.ready,
+        "missing_attrs": list(readiness.missing_attrs),
+        "missing_labels": list(readiness.missing_labels),
+    }
+
+
 def _orm_to_detail(run: SourcingRunORM) -> RunDetail:
     def _parse(col): return json.loads(col) if col else None
 
@@ -1943,6 +1960,7 @@ def _orm_to_detail(run: SourcingRunORM) -> RunDetail:
         rfq_draft_status=_rfq_draft_status_for_run(run.id),
         maintenance_handoff=_parse(run.maintenance_handoff_json),
         no_exact_match=no_exact_match,
+        intake_readiness=_intake_readiness_detail(_specs_for_badges),
         created_at=run.initiated_at.isoformat() if run.initiated_at else "",
         updated_at=run.updated_at.isoformat() if run.updated_at else "",
     )

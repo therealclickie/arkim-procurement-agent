@@ -66,18 +66,6 @@ const formatType = (t: string): string =>
     )
     .join(" ");
 
-function specsReady(specs?: AssetSpecs): boolean {
-  if (!specs) return false;
-  // Spec-based commit (proceed_spec_based / forced_commit) is a deliberate backend "ready"
-  // signal — the intake committed to source by category with NO manufacturer/model/PN. The
-  // mfg && identity gate below would short-circuit on the missing manufacturer and never
-  // honor it, so recognize it first. The "Matching by category" meta line renders in the
-  // card to qualify this as identified-by-spec, not by identity.
-  if (specs.spec_based_sourcing) return true;
-  const mfg = val(specs.manufacturer);
-  return Boolean(mfg && (val(specs.part_number) || val(specs.model)));
-}
-
 type Stage = "entry" | "working" | "identify" | "error";
 
 // The family-variant 422 detail (T5 contract — test_run_pending_then_confirm_422).
@@ -505,7 +493,7 @@ export function RequestScreen() {
  *  each card resolves independently: one card's submit/pending/error never touches another's.
  *
  *  - partLabel comes from the run's REAL intake result, "Unidentified part" if absent (never guessed).
- *  - A ready item (specsReady true, incl. a PN'd part via the over-ask fix) shows NO box.
+ *  - A ready item (the backend's run.intake_readiness.ready) shows NO box.
  *  - While its request is pending the input AND button lock together; they re-enable on response
  *    OR error. An error surfaces the real detail on THIS card (server detail, or the connectivity
  *    line for a true network failure) and the user can edit + retry.
@@ -535,7 +523,11 @@ function ItemCard({
   const fire = useProcToast();
   const { data: run } = useRun(runId, { enabled: Boolean(runId) });
   const specs = run?.asset_specs;
-  const ready = specsReady(specs);
+  // Readiness is the BACKEND's decision (PH-01 round 3b): run.intake_readiness is
+  // intake_readiness.assess — what confirm-intake refuses on. The card never derives it
+  // from the specs; absent (run not loaded yet) is not ready.
+  const ready = run?.intake_readiness?.ready === true;
+  const stillNeeded = run?.intake_readiness?.missing_labels ?? [];
   const pn = val(specs?.part_number);
   const mfg = val(specs?.manufacturer);
   // Parent identity (mfg + model/PN) — how the headline has always read.
@@ -589,7 +581,7 @@ function ItemCard({
   // Editable-before-confirm (brief §2.2): the identification card's identity fields
   // (manufacturer / model / part number) can be corrected before Confirm, persisted
   // through the SAME PUT the quantity control already uses (seedAssetSpecs). The
-  // sufficiency gate re-derives from the saved specs — clearing a field honestly
+  // backend readiness re-derives from the saved specs on refetch — clearing a field honestly
   // drops the card back to "need a little more".
   const [editing, setEditing] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
@@ -755,9 +747,6 @@ function ItemCard({
           <div className="id-kick">{ready ? "Part identified" : "Need a little more"}</div>
           <div className="id-name">{label || (multiPart ? "Multiple parts detected" : "Unidentified part")}</div>
           {ready && pn && <div className="id-meta">Part no. <b>{pn}</b>{mfg ? <> · {mfg}</> : null}</div>}
-          {ready && !pn && specs?.spec_based_sourcing && (
-            <div className="id-meta">Matching by category — no exact part number needed.</div>
-          )}
           {/* Real extraction confidence (0–100 from the backend) — shown, never invented. */}
           {ready && (specs?.part_id_confidence ?? specs?.manufacturer_confidence) != null && (
             <div className="id-meta" style={{ marginTop: 2 }}>
@@ -816,6 +805,15 @@ function ItemCard({
                   onClick={() => stepQty(1)}
                 >+</button>
               </div>
+            </div>
+          )}
+          {/* Not ready (the backend's decision): exactly what confirm is still missing. */}
+          {!ready && !refusalVisible && stillNeeded.length > 0 && (
+            <div className="id-meta" style={{ marginTop: 4 }} data-testid="readiness-still-needed">
+              Still needed:
+              <ul style={{ margin: "2px 0 0 18px" }}>
+                {stillNeeded.map((l) => <li key={l}>{l}</li>)}
+              </ul>
             </div>
           )}
           {(!ready || (refusal && engagedAfterRefusal)) && reply && (

@@ -1402,6 +1402,14 @@ designation"*. Cross-maker seal equivalence is **not** decided here.
   `hygienic_override_ack` for the hygienic set) and sourcing starts. Sending a
   chat answer from the card hides the refusal; the next *Find options*
   re-checks. A 422 with no reason (e.g. no specs captured) keeps the toast.
+- **The card's "ready" is the backend's decision (PH-01 round 3b).** The run
+  detail carries `intake_readiness` — `{ready, missing_attrs, missing_labels}`
+  from `intake_readiness.assess`, the same decision confirm refuses on and the
+  chat replies from. The card shows *“Part identified”* and counts toward
+  enabling *Find options* only when `ready` is true; otherwise it shows *“Need a
+  little more”* with a *Still needed* list of `missing_labels`. The card has no
+  readiness rule of its own: `spec_based_sourcing` no longer makes a card ready,
+  and the *“Matching by category — no exact part number needed.”* line is gone.
 - **The variant guard stops re-asking.** An attribute the user supplied in their
   own words is not asked again, and the hard guard no longer reports a present
   field as missing: it returns `missing_attrs: []` with reason
