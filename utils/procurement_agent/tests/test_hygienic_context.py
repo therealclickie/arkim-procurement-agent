@@ -359,6 +359,12 @@ _S3B = json.loads(
 
 _COMPLETE = "Specs look complete"
 
+#: The step-3 gauge with its hygienic context removed, and nothing else changed.
+_NO_HYGIENIC_CONTEXT = {"description": "Ashcroft 1032 pressure gauge, 0-60 PSI",
+                        "use_case": "hydraulic press gauge",
+                        "confidence_reasoning": "Manufacturer and model stated.",
+                        "connection_size": "1/4 inch", "material_spec": None}
+
 
 def _chat(api, rid, text, extraction, monkeypatch):
     """One chat turn through send_message with the extractor returning ``extraction``."""
@@ -435,16 +441,28 @@ class TestTheChatAndTheGateAgree:
                              "hygienic_certification": "3-A"}),
         ("no wetted material", {"material_spec": None,
                                 "hygienic_certification": "3-A"}),
-        ("no hygienic context", {"description": "Ashcroft 1032 pressure gauge, 0-60 PSI",
-                                 "use_case": "hydraulic press gauge",
-                                 "confidence_reasoning": "Manufacturer and model stated.",
-                                 "connection_size": "1/4 inch", "material_spec": None}),
+        ("no hygienic context", _NO_HYGIENIC_CONTEXT),
+        # Round 2, findings 1-2: the arc-5 identity floor, which the chat used to
+        # call "complete" while confirm refused it 422 identity_insufficient. Each
+        # identity shape with the step-3 hygienic context (certification still open,
+        # so BOTH gates refuse) and without it (the identity floor alone).
+        ("model only, hygienic", {"manufacturer": None}),
+        ("model only, no hygienic context",
+         dict(_NO_HYGIENIC_CONTEXT, manufacturer=None)),
+        ("manufacturer only, hygienic", {"model": None}),
+        ("manufacturer only, no hygienic context",
+         dict(_NO_HYGIENIC_CONTEXT, model=None)),
+        ("no identity, hygienic", {"manufacturer": None, "model": None}),
+        ("no identity, no hygienic context",
+         dict(_NO_HYGIENIC_CONTEXT, manufacturer=None, model=None)),
     ])
     def test_the_panel_says_complete_iff_the_gate_confirms(
             self, api, monkeypatch, case, overrides):
         """Review finding 4: one table, both surfaces. For every spec state the chat
         reply and confirm-intake agree — "complete" exactly when confirm returns
-        200, and otherwise the chat asks the very question the 422 carries."""
+        200, and otherwise the chat asks for exactly what the 422 says is missing:
+        the hygienic question verbatim when that is the only gate open, and every
+        missing item across both gates when the identity floor refuses."""
         extraction = dict(_S3B["step3_specs"], **overrides)
         rid = api.post("/api/runs", json={}).json()["id"]
         reply = _chat(api, rid, _S3B["step3_user_message"], extraction, monkeypatch)
@@ -452,9 +470,21 @@ class TestTheChatAndTheGateAgree:
 
         assert reply.startswith(_COMPLETE) == (confirm.status_code == 200), (
             case, reply, confirm.json())
-        if confirm.status_code == 422:
-            assert confirm.json()["detail"]["reason"] == "hygienic_spec_incomplete"
-            assert reply == confirm.json()["detail"]["message"], case
+        identity_row = case.startswith(("model only", "manufacturer only", "no identity"))
+        if confirm.status_code == 200:
+            assert not identity_row, case
+            return
+        assert confirm.status_code == 422, case
+        detail = confirm.json()["detail"]
+        if not identity_row:
+            assert detail["reason"] == "hygienic_spec_incomplete", case
+            assert reply == detail["message"], case
+            return
+        assert detail["reason"] == "identity_insufficient", case
+        for label in detail["all_missing_labels"]:
+            assert label in reply, (case, label, reply)
+        hygienic_row = not case.endswith("no hygienic context")
+        assert ("hygienic_certification" in detail["all_missing_attrs"]) == hygienic_row
 
 
 class TestNormalise:

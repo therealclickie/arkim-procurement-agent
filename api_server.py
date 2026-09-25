@@ -2317,10 +2317,28 @@ def send_message(run_id: str, body: SendMessageRequest, request: Request):
 
     # Determine reply — do NOT auto-advance on sufficient=True.
     # The confirm-intake endpoint owns the intake → sourcing transition.
+    #
+    # PH-01: the chat may call the specs complete ONLY when intake_readiness — the
+    # same decision confirm_intake refuses on — says ready. Otherwise it asks for
+    # exactly the items confirm is missing (identity floor and/or hygienic set).
+    from utils import intake_readiness
     proceed_state = result.get("confidence_summary", {}).get("proceed_state", "")
-    if result["sufficient"]:
+    _specs_dict = result.get("asset_specs") or {}
+    readiness = intake_readiness.assess(_specs_dict)
+    # The intake agent withholds "sufficient" while the hygienic gate is open and
+    # hands back the hygienic question (missing_field "hygienic"); that is a
+    # readiness ask too, so it is phrased — and counted — here.
+    _hygienic_turn = (
+        result.get("confidence_summary", {}).get("missing_field") == "hygienic")
+    if (result["sufficient"] or _hygienic_turn) and not readiness.ready:
+        reply_text = intake_readiness.chat_ask(readiness, _specs_dict)
+        result["asset_specs"] = _specs_dict
+        if result.get("commit_message"):
+            # Intake cap / nothing-left-to-ask commit: keep the honest commit message,
+            # then say what confirm will still refuse without.
+            reply_text = f"{result['commit_message']} {reply_text}"
+    elif result["sufficient"]:
         _null_vals = {"", "N/A", "n/a", "null", "None", "UNKNOWN-PN", "Unknown", "unknown", None}
-        _specs_dict = result.get("asset_specs") or {}
         _has_model = _specs_dict.get("model") not in _null_vals
         _has_pn = _specs_dict.get("part_number") not in _null_vals
         _mfg_c = float(result.get("manufacturer_confidence") or 0)
@@ -2343,21 +2361,15 @@ def send_message(run_id: str, body: SendMessageRequest, request: Request):
                 "Verify the manufacturer in the panel before confirming."
             )
         else:
-            if not _has_model and not _has_pn:
-                _specs_dict["spec_based_sourcing"] = True
-                result["asset_specs"] = _specs_dict
-                reply_text = (
-                    "Sourcing by category — we have enough specs (manufacturer, type, key dimensions) "
-                    "to find functionally equivalent options. No specific part number or model is required."
-                )
-            else:
-                reply_text = "Specs look complete — review in the panel and confirm to start sourcing."
-        new_phase = current_phase
+            # (The pre-arc-5 "Sourcing by category — no specific part number or model
+            # is required" reply is gone: arc 5's identity floor refuses exactly those
+            # specs, so readiness routes them to the ask above.)
+            reply_text = "Specs look complete — review in the panel and confirm to start sourcing."
     else:
         reply_text = result.get("follow_up_question") or (
             "Can you provide more details? I need the manufacturer, model, and part number."
         )
-        new_phase = current_phase
+    new_phase = current_phase
 
     # Persist updated specs (and phase) back to the DB
     with _SessionFactory() as session:
@@ -2503,10 +2515,20 @@ async def upload_nameplate(
         # (a) High confidence — both thresholds met
         elif result.get("sufficient"):
             ident = " ".join(p for p in [mfg, pn or model] if p)
-            reply_text = (
-                f"Extracted: {ident} — specs are in the panel. "
-                "Review and confirm to start sourcing."
-            )
+            # PH-01: "confirm to start sourcing" only when confirm would proceed —
+            # the same readiness decision confirm_intake refuses on.
+            from utils import intake_readiness
+            readiness = intake_readiness.assess(specs)
+            if readiness.ready:
+                reply_text = (
+                    f"Extracted: {ident} — specs are in the panel. "
+                    "Review and confirm to start sourcing."
+                )
+            else:
+                reply_text = (
+                    f"Extracted: {ident} — specs are in the panel. "
+                    f"{intake_readiness.chat_ask(readiness, specs)}"
+                )
         # (b) Both confidences above threshold but a required field is still missing
         elif mfg_conf >= 70 and part_conf >= 70 and mfg and mfg not in ("Unknown", "N/A", "null", "unknown"):
             ident = " ".join(p for p in [mfg, pn or model] if p)
@@ -3071,6 +3093,10 @@ def confirm_intake(
     anyway, but never silently: an acknowledgement is recorded on the run, the run is
     marked `spec_incomplete`, its results carry a banner saying they have NOT been
     checked against the requirement, and no candidate in it may be badged exact.
+    The same override exits the hygienic question set (R5, reason
+    "hygienic_spec_incomplete"); that records `hygienic_override_ack` on the run.
+    Both refusals come from `intake_readiness.assess` — the decision the chat's
+    "Specs look complete" reply also reads (PH-01).
 
     Writes the inventory stub and transitions phase in a single DB commit so
     there is no window where the run is phase=sourcing without inventory_result.
@@ -3159,29 +3185,27 @@ def confirm_intake(
                     },
                 )
 
-        # Identity-sufficiency floor (R4, F-15) — AFTER the registry-driven family
-        # guard above, which already enforces required fields for the classes that
-        # define them. Where the registry defines none, R4's minimum applies: a
-        # manufacturer plus a model, or a manufacturer part number. Refuses back to
-        # clarification unless the buyer explicitly overrides.
-        from utils import intake_sufficiency
-        sufficiency = intake_sufficiency.identity_block(specs_dict)
-        if sufficiency is not None and not source_anyway:
-            raise HTTPException(status_code=422, detail=sufficiency.as_detail())
-        if sufficiency is not None:
-            intake_sufficiency.record_override(specs_dict, sufficiency)
+        # Readiness (PH-01): ONE decision over both arc-5 gates, the same one the
+        # chat's "Specs look complete" reply reads (send_message), so the chat never
+        # invites a confirm this refuses. AFTER the registry-driven family guard above.
+        #  - Identity floor (R4, F-15): where the registry defines no required fields,
+        #    a manufacturer plus a model, or a manufacturer part number.
+        #  - Hygienic question set (R5, F-16): an instrument or fitting in hygienic
+        #    context (CIP/SIP/sanitary/washdown/food/dairy/beverage/pharma/3-A/EHEDG/
+        #    tri-clamp) must answer process connection type and size, wetted material
+        #    and hygienic certification. Question-set only — no equivalence logic.
+        # Refused back to clarification (identity first) unless the buyer explicitly
+        # overrides with source_anyway, which records an acknowledgement per gate.
+        from utils import intake_readiness, intake_sufficiency
+        readiness = intake_readiness.assess(specs_dict)
+        if not readiness.ready and not source_anyway:
+            raise HTTPException(status_code=422, detail=readiness.refusal_detail())
+        if readiness.identity is not None:
+            intake_sufficiency.record_override(specs_dict, readiness.identity)
+        if readiness.hygienic is not None:
+            intake_readiness.record_hygienic_override(specs_dict, readiness.hygienic)
+        if not readiness.ready:
             run.asset_specs_json = json.dumps(specs_dict)
-
-        # Hygienic question set (R5, F-16) — a QUESTION-SET addition, nothing more.
-        # When intake context indicates hygienic service (CIP/SIP/sanitary/washdown/
-        # food/dairy/beverage/pharma/3-A/EHEDG/tri-clamp), an instrument or fitting
-        # must answer process connection type and size, wetted material and hygienic
-        # certification before confirm. The same explicit source_anyway override
-        # applies. No hygienic EQUIVALENCE logic anywhere in this arc.
-        from utils import hygienic_context
-        hygienic = hygienic_context.hygienic_block(specs_dict)
-        if hygienic is not None and not source_anyway:
-            raise HTTPException(status_code=422, detail=hygienic.as_detail())
 
         urgency_factor, warranty_status = _commit_intake_to_sourcing(
             session, run, specs_dict, exact_only=exact_only, open_family=open_family,
@@ -3192,7 +3216,7 @@ def confirm_intake(
     _run_capture.capture_user_action(
         run_id, "confirm_intake",
         detail={"exact_only": exact_only, "open_family": open_family,
-                "source_anyway": bool(sufficiency is not None or hygienic is not None)},
+                "source_anyway": not readiness.ready},
     )
     return {"run_id": run_id, "phase": Phase.SOURCING.value}
 

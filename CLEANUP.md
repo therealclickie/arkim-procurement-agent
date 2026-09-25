@@ -236,6 +236,17 @@ tracked elsewhere, and frontend UI polish / design iteration items.
 | **Risk / impact** | The suite asserts a `VARIANT_ATTR_TO_SPEC_FIELDS` row exists for every `variant_selecting_attr` (backend completeness) — but **nothing asserts frontend parity**. If a variant-selecting attr is added/renamed in the registry without updating `VARIANT_ATTR_FIELDS`, the T5b `blockSatisfied` check silently treats that attr as unanswered (`attrAnswered` returns false for an unmapped attr) → a satisfied block lingers on the card → **the card-lies bug class T5b fixed recurs for that attr**. `head` in `hydraulic_duty` is already not in the TS `AssetSpecs` type (read via dict access). |
 | **Recommended action** | Expose the mapping (or a derived `variant_block_satisfied` flag) from the backend so the frontend doesn't re-derive it — e.g. add a non-`_` `variant_attrs_answered` / `variant_block_active` field to the run-detail `asset_specs` (or the 422 detail), computed by the same `variant_attr_answered` the guard uses. Then the card derives from one backend-provided boolean and the duplication (and the drift risk) goes away. |
 
+
+### 5.7 Intake card's "ready" is a frontend guess at the backend readiness decision
+
+| Field | Detail |
+|---|---|
+| **File** | `frontend/src/components/proc/request-screen.tsx` (`specsReady`, the *"Matching by category — no exact part number needed."* meta line); backend decision in `utils/intake_readiness.py` (PH-01 round 3) |
+| **Kind** | Frontend re-derivation of a backend decision, plus stale copy. |
+| **Why it exists** | `specsReady` predates arc 5: it treats `spec_based_sourcing` as ready and checks only manufacturer + model/PN. The backend's one readiness decision (`intake_readiness.assess` = identity floor + hygienic question set) is not exposed on the run detail, so the card cannot read it. PH-01 round 3 made every refusal render on the card (message, missing items, Source anyway), so a wrong "ready" is no longer a dead end — but the card can still say *"Part identified"* / *"Matching by category"* and enable *Find options* on specs confirm will refuse. |
+| **Risk / impact** | Cosmetic-to-confusing: the buyer clicks *Find options* and gets the refusal instead of being asked up front. The chat reply is already correct (it reads the same decision). |
+| **Recommended action** | Expose `ready` + `missing_labels` from `intake_readiness.assess` on the run detail (a non-`_` field) and drive `specsReady` and the card's kicker from it; drop the *"Matching by category"* line. Same shape of fix as §5.6. |
+
 ---
 
 ## 6. Documentation

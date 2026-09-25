@@ -156,23 +156,30 @@ in dot-leader format (label … value).
   (not-yet-provided indicator).
 
 **Sufficiency message variants (text input path — `send_message`):** The agent
-message that fires when `sufficient=true` depends on whether a model or part
-number was identified:
+message that fires when `sufficient=true` depends first on the confirm gate's own
+readiness decision (`intake_readiness.assess` — the arc-5 identity floor plus the
+hygienic question set; see *Intake — confirm is gated on sufficiency* below):
 
 | Condition | Message |
 |---|---|
+| Readiness says NOT ready (confirm would refuse) | The ask for exactly the missing items — e.g. *"Before sourcing I need the manufacturer and the model or part number — without them there is nothing to match a supplier's listing against."*, followed by the hygienic question when that gate is open too. A cap/nothing-left commit keeps its own message first and appends the ask. |
 | `proceed_with_manufacturer_caveat` AND NOT (both confidences ≥ 70 + model + PN present) | "Specs extracted but the manufacturer could not be confirmed. Verify the manufacturer in the panel before confirming." |
-| Both model and part_number absent (spec-based path) | "Sourcing by category — we have enough specs (manufacturer, type, key dimensions) to find functionally equivalent options. No specific part number or model is required." |
-| Model or part number present (fully-identified path) | "Specs look complete — review in the panel and confirm to start sourcing." |
+| Ready (fully-identified path) | "Specs look complete — review in the panel and confirm to start sourcing." |
+
+The former *"Sourcing by category — … No specific part number or model is
+required."* reply is **removed** (PH-01 round 3): arc 5's identity floor refuses
+exactly those specs, so the reply invited a confirm that always failed. The
+nameplate upload path follows the same rule — its *"Review and confirm to start
+sourcing"* is only said when readiness says ready.
 
 Guard: if both `manufacturer_confidence` and `part_id_confidence` are ≥ 70 AND
 model + part_number are both present, the `proceed_with_manufacturer_caveat`
 branch is bypassed and the full-confidence message fires instead. Prevents
 contradictory caveat on high-confidence extractions.
 
-The spec-based path is triggered when both `model` and `part_number` are null
-or null-equivalent ("N/A", "UNKNOWN-PN", etc.) at sufficiency. The backend sets
-`spec_based_sourcing: true` on the AssetSpecs payload in this case.
+The spec-based marker `spec_based_sourcing: true` is now set by the intake
+agent's cap/nothing-left commit, the `open_family` escape, and the identity
+`source_anyway` override — no longer by the chat reply itself.
 
 **Image upload response variants (`POST /api/runs/{id}/upload`):** Four cases,
 evaluated in order:
@@ -1363,6 +1370,38 @@ designation"*. Cross-maker seal equivalence is **not** decided here.
   run saved before this change. *“none”*, *“None”* or *“not needed”* for the
   certification is recorded as *“not required”*; *“N/A”* / *“unknown”* stay
   unanswered.
+- **One readiness decision for both gates (PH-01 round 3).** The identity floor
+  and the hygienic question set are one function (`intake_readiness.assess`),
+  read by confirm-intake AND by the chat reply. The chat says *“Specs look
+  complete”* only when that decision says ready; otherwise it asks for exactly
+  the missing items (a model-only request is asked for its manufacturer, not
+  told “complete”). Confirm refuses identity first; the 422 detail keeps that
+  gate's `reason` and `message` and adds `all_missing_attrs` /
+  `all_missing_labels` — everything BOTH gates still need.
+- **Certification answers.** Accepted negatives are *“none”*, *“no”*, *“not
+  required”*, *“not needed”* (and *“none required”*, the choice the question
+  offers). *“N/A”* and *“not applicable”* both count as **unanswered** — one
+  reading for both spellings. The certification question offers the choices
+  *“3-A, EHEDG, or none required”*.
+- **The hygienic ask is outside the intake turn cap.** The turn cap
+  (`INTAKE_TURN_CAP`) bounds the intake agent's own clarification questions;
+  the hygienic ask is not counted against it, because a sanitary part must not
+  be committed on a guess. **Source anyway is the way out:** from the second
+  hygienic ask onward the chat reply ends with *“If you can't answer that,
+  choose **Source anyway** when you confirm — the results will be marked as not
+  checked against your requirement.”* (counted per run in the `_hygienic_asks`
+  ledger key, stripped from the panel like `_intake_turns`).
+- **Every refusal renders on its card.** A confirm 422 that carries a `reason`
+  never shows the generic *“Couldn't start sourcing — please try again.”*
+  toast: the card shows *“Can't start sourcing yet”*, the backend's message,
+  and a *Still needed* list of every missing item. When the refusal carries
+  `override: "source_anyway"`, a **Source anyway** button appears — disabled
+  until the buyer ticks *“I understand the results will NOT be checked against
+  my requirement.”* It re-sends confirm with `source_anyway=true`; the backend
+  records the acknowledgement (`spec_incomplete_ack` for the identity floor,
+  `hygienic_override_ack` for the hygienic set) and sourcing starts. Sending a
+  chat answer from the card hides the refusal; the next *Find options*
+  re-checks. A 422 with no reason (e.g. no specs captured) keeps the toast.
 - **The variant guard stops re-asking.** An attribute the user supplied in their
   own words is not asked again, and the hard guard no longer reports a present
   field as missing: it returns `missing_attrs: []` with reason

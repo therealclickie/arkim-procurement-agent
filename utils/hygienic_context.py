@@ -108,13 +108,21 @@ _NULL_FOLDED: frozenset[str] = frozenset(
 #: The canonical explicit-negative certification answer.
 NOT_REQUIRED = "not required"
 
-#: What a buyer types when no hygienic certification is needed. Deliberately excludes
-#: "n/a" / "unknown": those mean *not stated*, not *not needed*.
+#: What a buyer types when no hygienic certification is needed: "none", "no", "not
+#: required", "not needed", plus "none required" — the choice the question itself
+#: offers. Deliberately excludes "N/A" AND "not applicable" (one reading for both
+#: spellings, PH-01 review round 2 finding 6) and "unknown": those mean *not
+#: stated*, not *not needed*, and stay unanswered.
 _CERT_NEGATIVES: frozenset[str] = frozenset({
-    "none", "no", "nope", "not required", "not needed", "none required",
-    "none needed", "no certification", "no certification required",
-    "no certification needed", "not applicable",
+    "none", "no", "not required", "not needed", "none required",
 })
+
+#: Certification replies that are NOT answers even though the shared null set does not
+#: list them. "N/A" is already a null token; its long form must read the same way.
+_CERT_UNSTATED: frozenset[str] = frozenset({"not applicable", "n.a.", "na"})
+
+#: The certification choices the question offers, verbatim.
+CERT_CHOICES = "3-A, EHEDG, or none required"
 
 #: Connection TYPES a size answer commonly carries ("1.5 inch Tri-Clamp"), in match
 #: order, with the canonical name recorded as ``process_connection``. The evaluation's
@@ -243,8 +251,11 @@ def _stated(specs: dict[str, Any], field: str) -> bool:
     """True iff one of the field's own source keys carries an answer."""
     for key in _FIELD_SOURCES[field]:
         value = specs.get(key)
-        if field == "hygienic_certification" and _is_cert_negative(value):
-            return True
+        if field == "hygienic_certification":
+            if _is_cert_negative(value):
+                return True
+            if isinstance(value, str) and value.strip().lower() in _CERT_UNSTATED:
+                continue
         if not _is_null(value):
             return True
     return False
@@ -270,15 +281,19 @@ def question(missing: Iterable[str]) -> str:
     Built by joining ``FIELD_LABELS`` for the missing fields, so the question can
     only ever name fields R5 defines.
     """
-    labels = [FIELD_LABELS[f] for f in missing if f in FIELD_LABELS]
+    missing = [f for f in missing if f in FIELD_LABELS]
+    labels = [FIELD_LABELS[f] for f in missing]
     if not labels:
         return ""
     if len(labels) == 1:
         phrase = labels[0]
     else:
         phrase = ", ".join(labels[:-1]) + " and " + labels[-1]
-    return (f"This is hygienic service, so the part has to match the skid: "
-            f"what {phrase}?")
+    ask = (f"This is hygienic service, so the part has to match the skid: "
+           f"what {phrase}?")
+    if "hygienic_certification" in missing:
+        ask += f" For the certification: {CERT_CHOICES}?"
+    return ask
 
 
 def hygienic_block(specs: Optional[dict[str, Any]],

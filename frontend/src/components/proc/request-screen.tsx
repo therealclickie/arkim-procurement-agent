@@ -92,6 +92,35 @@ type FamilyVariantBlock = {
   pending: boolean;
 };
 
+// Any OTHER reasoned 422 from confirm_intake — today the arc-5 readiness refusals
+// (api_server.confirm_intake -> intake_readiness): reason "identity_insufficient"
+// (no manufacturer + model / part number) or "hygienic_spec_incomplete" (the
+// sanitary questions). `all_missing_labels` lists what BOTH gates still need;
+// `override: "source_anyway"` means the explicit Source anyway exit is available.
+type ReadinessRefusal = {
+  message: string;
+  reason: string;
+  missing_attrs?: string[];
+  missing_labels?: string[];
+  all_missing_labels?: string[];
+  override?: string;
+};
+
+// The detail of a reasoned 422 (an object carrying a string `reason`), else null.
+// A 422 that carries a reason is always rendered on its card — never the generic toast.
+function reasoned422(e: unknown): ReadinessRefusal | null {
+  if (!(e instanceof ApiError) || e.status !== 422) return null;
+  const detail = (e.body as { detail?: unknown } | undefined)?.detail;
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return null;
+  const d = detail as Record<string, unknown>;
+  if (typeof d.reason !== "string") return null;
+  return {
+    ...(d as Partial<ReadinessRefusal>),
+    reason: d.reason,
+    message: typeof d.message === "string" ? d.message : "This request can't start sourcing yet.",
+  };
+}
+
 /** One part in the request, each backed by its OWN run (the per-item / basket model). The
  *  parent holds the runId + the latest intake reply; specs / partLabel / ready-state are
  *  derived per-card from useRun(runId) (Stage A data layer). */
@@ -130,6 +159,8 @@ export function RequestScreen() {
   // blocked (T5). Keyed by runId so only the blocked card re-surfaces the ask;
   // cleared at the start of each advance so a fresh confirm never shows a stale block.
   const [blockById, setBlockById] = useState<Record<string, FamilyVariantBlock>>({});
+  // Every other reasoned 422 (the readiness refusals), attributed to its run the same way.
+  const [refusalById, setRefusalById] = useState<Record<string, ReadinessRefusal>>({});
   // The real failure reason (server detail) when the backend responded with an error;
   // null means a pure network failure -> show the "is the backend running?" fallback.
   const [errMsg, setErrMsg] = useState<string | null>(null);
@@ -276,27 +307,34 @@ export function RequestScreen() {
     if (!allReady || advancing || items.length === 0) return;
     setAdvancing(true);
     setBlockById({});   // fresh confirm — never carry a stale block forward
+    setRefusalById({});
     // allSettled (not Promise.all) so a 422 on one item doesn't short-circuit and
     // hide which runs DID advance to sourcing. Per-run attribution lets the exact
     // blocked card re-surface the family-variant ask (T5); other rejections keep the
     // existing toast. The variant-blocked items render state on their card (no toast).
     const results = await Promise.allSettled(items.map((it) => confirmIntake(it.runId, false)));
     const blocked: Record<string, FamilyVariantBlock> = {};
+    const refused: Record<string, ReadinessRefusal> = {};
     let failed = false;
     results.forEach((r, i) => {
       if (r.status === "fulfilled") return;
-      if (r.reason instanceof ApiError && r.reason.status === 422) {
-        const detail = (r.reason.body as { detail?: unknown } | undefined)?.detail;
-        if (detail && typeof detail === "object" && (detail as { reason?: string }).reason === "family_variant_unconfirmed") {
-          blocked[items[i].runId] = detail as FamilyVariantBlock;
-          return;
-        }
+      const detail = reasoned422(r.reason);
+      if (detail?.reason === "family_variant_unconfirmed") {
+        blocked[items[i].runId] = detail as unknown as FamilyVariantBlock;
+        return;
+      }
+      if (detail) {
+        // A reasoned refusal renders on its card (message, missing items, Source
+        // anyway) — never the generic try-again toast.
+        refused[items[i].runId] = detail;
+        return;
       }
       failed = true;
     });
     if (failed) fire("Couldn't start sourcing — please try again.");
     if (Object.keys(blocked).length) setBlockById(blocked);
-    if (!failed && !Object.keys(blocked).length) {
+    if (Object.keys(refused).length) setRefusalById(refused);
+    if (!failed && !Object.keys(blocked).length && !Object.keys(refused).length) {
       router.push(`/parts/${items[0].runId}`);
     }
     setAdvancing(false);   // stay on the page so the user can answer / escape / retry
@@ -414,6 +452,7 @@ export function RequestScreen() {
               initialReply={item.reply}
               multiPart={item.multiPart}
               variantBlock={blockById[item.runId]}
+              refusal={refusalById[item.runId]}
               onReady={handleReady}
               // Removable only when there's more than one card — you can't remove the last part.
               onRemove={items.length > 1 ? removeItem : undefined}
@@ -479,6 +518,7 @@ function ItemCard({
   initialReply,
   multiPart,
   variantBlock,
+  refusal,
   onReady,
   onRemove,
 }: {
@@ -486,6 +526,7 @@ function ItemCard({
   initialReply: string;
   multiPart?: boolean;
   variantBlock?: FamilyVariantBlock;
+  refusal?: ReadinessRefusal;
   onReady?: (runId: string, ready: boolean) => void;
   onRemove?: (runId: string) => void;
 }) {
@@ -621,6 +662,26 @@ function ItemCard({
   // truthy-gates below so a satisfied block self-heals instead of lingering.
   const blockVisible = Boolean(variantBlock) && !blockSatisfied;
 
+  // Readiness refusal (PH-01): shown until the buyer answers in the chat from this
+  // card, after which the chat's own reply (the same readiness decision) takes over
+  // and the next "Find options" re-checks. A fresh refusal re-arms it.
+  const [engagedAfterRefusal, setEngagedAfterRefusal] = useState(false);
+  // Source anyway needs an explicit acknowledgement before it is offered (arc 5): the
+  // results of such a run are NOT checked against the requirement.
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [sourcingAnyway, setSourcingAnyway] = useState(false);
+  const refusalRef = useRef(refusal);
+  useEffect(() => {
+    if (refusal !== refusalRef.current) {
+      refusalRef.current = refusal;
+      setEngagedAfterRefusal(false);
+      setAcknowledged(false);
+    }
+  }, [refusal]);
+  const refusalVisible = Boolean(refusal) && !engagedAfterRefusal;
+  const refusalItems = refusal?.all_missing_labels ?? refusal?.missing_labels ?? [];
+  const canSourceAnyway = refusal?.override === "source_anyway";
+
   const submit = async () => {
     const more = moreText.trim();
     if (!more || pending) return;
@@ -637,6 +698,7 @@ function ItemCard({
       // variant block is re-evaluated against the refetched specs (the run
       // query invalidation above refetches, then blockSatisfied derives hide).
       setEngagedAfterBlock(true);
+      setEngagedAfterRefusal(true);
     } catch (e) {
       // Real reason on THIS card: server detail (HTTP error) or null -> the connectivity line.
       setErr(apiErrorMessage(e) ?? "Couldn't reach the backend — is it running?");
@@ -658,10 +720,30 @@ function ItemCard({
     try {
       await confirmIntake(runId, false, true);
       router.push(`/parts/${runId}`);
-    } catch {
-      fire("Couldn't start sourcing — please try again.");
+    } catch (e) {
+      const detail = reasoned422(e);
+      if (detail) setErr(detail.message);
+      else fire("Couldn't start sourcing — please try again.");
     } finally {
       setEscaping(false);
+    }
+  };
+
+  // Source anyway (arc 5 / PH-01): re-calls confirm-intake with source_anyway=true,
+  // which records the acknowledgement on the run and marks its results unchecked.
+  const sourceAnyway = async () => {
+    if (sourcingAnyway || !acknowledged) return;
+    setSourcingAnyway(true);
+    setErr(null);
+    try {
+      await confirmIntake(runId, false, false, true);
+      router.push(`/parts/${runId}`);
+    } catch (e) {
+      const detail = reasoned422(e);
+      if (detail) setErr(detail.message);
+      else fire("Couldn't start sourcing — please try again.");
+    } finally {
+      setSourcingAnyway(false);
     }
   };
 
@@ -736,7 +818,25 @@ function ItemCard({
               </div>
             </div>
           )}
-          {!ready && reply && <div className="id-meta" style={{ marginTop: 4 }}>{reply}</div>}
+          {(!ready || (refusal && engagedAfterRefusal)) && reply && (
+            <div className="id-meta" style={{ marginTop: 4 }}>{reply}</div>
+          )}
+          {/* Readiness refusal (PH-01): the backend's own message and every item it
+              still needs, in place of the generic toast. */}
+          {refusalVisible && refusal && (
+            <div role="alert" data-testid="readiness-refusal">
+              <div className="id-kick" style={{ marginTop: 6 }}>Can&apos;t start sourcing yet</div>
+              <div className="id-meta" style={{ marginTop: 2 }}>{refusal.message}</div>
+              {refusalItems.length > 0 && (
+                <div className="id-meta" style={{ marginTop: 4 }}>
+                  Still needed:
+                  <ul style={{ margin: "2px 0 0 18px" }}>
+                    {refusalItems.map((l) => <li key={l}>{l}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
           {/* Family-variant 422 (T5): the run IS ready by the sufficiency gate (mfg + model,
               no PN) but confirm_intake's binding guard blocked it. Re-surface the ask here —
               pending frames "confirm the rating you nearly named" vs "provide the rating" —
@@ -770,7 +870,7 @@ function ItemCard({
         )}
       </div>
 
-      {(!ready || blockVisible) && (
+      {(!ready || blockVisible || refusalVisible) && (
         <div className="id-actions" style={{ marginTop: 10 }}>
           <input
             className="proc-idinput"
@@ -799,6 +899,31 @@ function ItemCard({
         >
           {escaping ? "Sourcing the family as-is…" : "I don't know the rating — source the family as-is"}
         </button>
+      )}
+
+      {/* Source anyway (arc 5): the explicit, labelled override. Offered only when the
+          refusal advertises it, and enabled only once the buyer acknowledges the results
+          will not be checked; confirm-intake then records that acknowledgement on the run. */}
+      {refusalVisible && canSourceAnyway && (
+        <div style={{ marginTop: 10 }}>
+          <label className="id-meta" style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)}
+            />
+            I understand the results will NOT be checked against my requirement.
+          </label>
+          <button
+            className="proc-btn"
+            data-kind="quiet"
+            style={{ marginTop: 6 }}
+            disabled={!acknowledged || sourcingAnyway}
+            onClick={sourceAnyway}
+          >
+            {sourcingAnyway ? "Sourcing anyway…" : "Source anyway"}
+          </button>
+        </div>
       )}
 
       {err && (
