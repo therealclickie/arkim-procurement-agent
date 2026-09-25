@@ -797,11 +797,17 @@ class IntakeAgent:
         elif not isinstance(extracted, dict):
             extracted = {}
 
+        # Hygienic answers go where the confirm gate reads them (PH-01). BEFORE the
+        # merge: a certification "none" is an answer here, but the merge drops it.
+        from utils import hygienic_context
+        hygienic_context.normalise(extracted)
+
         # Merge with prior specs — new non-null values win
         merged = dict(prior_specs)
         for k, v in extracted.items():
             if not isinstance(v, (list, dict)) and v not in _NULL_VALUES:
                 merged[k] = v
+        hygienic_context.normalise(merged)
 
         # Phase 1 — quantity capture (gated behind INTAKE_TYPE_AWARE). Inert when
         # the flag is off: zero new keys, byte-identical specs. When on, a stated
@@ -924,6 +930,19 @@ class IntakeAgent:
                 state = "forced_commit"
                 sufficient = True
                 follow_up = None
+
+        # PH-01 — "sufficient" drives the chat's "Specs look complete — confirm to
+        # start sourcing", so it must never be True while confirm_intake's hygienic
+        # gate would refuse the same specs. Same function, same input: the gate reads
+        # the persisted specs, which are exactly `merged`. The explicit override stays
+        # `source_anyway` on confirm (or force_proceed above), never the chat.
+        hygienic = hygienic_context.hygienic_block(merged)
+        if sufficient and hygienic is not None:
+            state = "needs_clarification"
+            missing_field = "hygienic"
+            sufficient = False
+            follow_up = hygienic.message
+            commit_message = None
 
         # Carry the pending flag forward into the persisted specs. When the
         # variant ask is issued this turn, _next_clarification sets it True; when

@@ -85,9 +85,10 @@ FIELD_LABELS: dict[str, str] = {
 #: extractor keys; ``test_hygienic_context.TestTheGateIsAnswerableInChat`` holds the
 #: contract. Extending REQUIRED_FIELDS means extending both of those too.
 #:
-#: ``hygienic_certification`` is the one field whose honest answer can be a negative;
-#: the extractor is instructed to write ``"not required"`` rather than "none", because
-#: the shared ``_NULL_VALUES`` set reads a bare "none" as *unanswered*.
+#: ``hygienic_certification`` is the one field whose honest answer can be a negative.
+#: The question itself offers "none", but the shared ``_NULL_VALUES`` set reads a bare
+#: "none" as *unanswered*, so :func:`normalise` rewrites any explicit negative to
+#: ``NOT_REQUIRED`` before intake's merge can drop it (PH-01 review, finding 6).
 _FIELD_SOURCES: dict[str, tuple[str, ...]] = {
     "process_connection":      ("process_connection", "connection", "connection_type"),
     "process_connection_size": ("process_connection_size", "connection_size"),
@@ -98,6 +99,37 @@ _FIELD_SOURCES: dict[str, tuple[str, ...]] = {
 _REASON = "hygienic_spec_incomplete"
 
 from utils.procurement_agent.agents.intake_agent import _NULL_VALUES
+
+#: Case-folded null tokens. ``_NULL_VALUES`` is case-sensitive ("none" is null but
+#: "None" is not); the gate must not read a capitalised null as an answer.
+_NULL_FOLDED: frozenset[str] = frozenset(
+    v.lower() for v in _NULL_VALUES if isinstance(v, str))
+
+#: The canonical explicit-negative certification answer.
+NOT_REQUIRED = "not required"
+
+#: What a buyer types when no hygienic certification is needed. Deliberately excludes
+#: "n/a" / "unknown": those mean *not stated*, not *not needed*.
+_CERT_NEGATIVES: frozenset[str] = frozenset({
+    "none", "no", "nope", "not required", "not needed", "none required",
+    "none needed", "no certification", "no certification required",
+    "no certification needed", "not applicable",
+})
+
+#: Connection TYPES a size answer commonly carries ("1.5 inch Tri-Clamp"), in match
+#: order, with the canonical name recorded as ``process_connection``. The evaluation's
+#: extractor stored exactly that string in ``connection_size`` (PH-01 review,
+#: finding 3); deriving the type from it means a run persisted before the extractor
+#: learned the split, or a turn where the model ignores it, is not left blocked.
+_CONNECTION_TYPES: tuple[tuple[str, str], ...] = (
+    (r"tri[\s-]?clamp", "Tri-Clamp"),
+    (r"din\s*11851", "DIN 11851"),
+    (r"(?<![a-z])sms(?![a-z])", "SMS"),
+    (r"butt[\s-]?weld", "butt weld"),
+    (r"(?<![a-z])n\.?p\.?t(?![a-z])", "NPT"),
+    (r"(?<![a-z])bsp[pt]?(?![a-z])", "BSP"),
+    (r"flange", "flanged"),
+)
 
 
 @dataclass(frozen=True)
@@ -160,13 +192,69 @@ def is_instrument_or_fitting(specs: Optional[dict[str, Any]]) -> bool:
     return any(t in kind for t in _INSTRUMENT_TOKENS)
 
 
-def _answered(specs: dict[str, Any], field: str) -> bool:
+def _is_null(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in _NULL_FOLDED
+    return False
+
+
+def _is_cert_negative(value: Any) -> bool:
+    return isinstance(value, str) and value.strip().lower().rstrip(".") in _CERT_NEGATIVES
+
+
+def derived_process_connection(specs: Optional[dict[str, Any]]) -> Optional[str]:
+    """The connection TYPE carried inside a connection SIZE answer, if any."""
+    specs = specs or {}
+    for key in _FIELD_SOURCES["process_connection_size"]:
+        value = specs.get(key)
+        if not isinstance(value, str):
+            continue
+        text = value.lower()
+        for pattern, name in _CONNECTION_TYPES:
+            if re.search(pattern, text):
+                return name
+    return None
+
+
+def normalise(specs: dict[str, Any]) -> dict[str, Any]:
+    """Put the hygienic answers where the gate reads them. Mutates and returns ``specs``.
+
+    - an explicit certification negative ("none", "None", "no", "not needed") becomes
+      ``NOT_REQUIRED`` — run this on the extractor output BEFORE intake's merge, which
+      drops the ``_NULL_VALUES`` "none";
+    - an unanswered ``process_connection`` is derived from a connection-size answer
+      that names the type ("1.5 inch Tri-Clamp" -> "Tri-Clamp").
+
+    Never overwrites an answered field.
+    """
+    for key in _FIELD_SOURCES["hygienic_certification"]:
+        if _is_cert_negative(specs.get(key)):
+            specs[key] = NOT_REQUIRED
+    if not _stated(specs, "process_connection"):
+        derived = derived_process_connection(specs)
+        if derived:
+            specs["process_connection"] = derived
+    return specs
+
+
+def _stated(specs: dict[str, Any], field: str) -> bool:
+    """True iff one of the field's own source keys carries an answer."""
     for key in _FIELD_SOURCES[field]:
         value = specs.get(key)
-        if isinstance(value, str):
-            value = value.strip()
-        if value not in _NULL_VALUES:
+        if field == "hygienic_certification" and _is_cert_negative(value):
             return True
+        if not _is_null(value):
+            return True
+    return False
+
+
+def _answered(specs: dict[str, Any], field: str) -> bool:
+    if _stated(specs, field):
+        return True
+    if field == "process_connection":
+        return derived_process_connection(specs) is not None
     return False
 
 

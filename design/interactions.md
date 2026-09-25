@@ -1354,6 +1354,15 @@ designation"*. Cross-maker seal equivalence is **not** decided here.
   this, the gate named two fields the extractor had nowhere to store, so answering
   it changed nothing and `source_anyway` was the only exit — evaluation finding
   PH-01.)
+- **The chat never says “complete” while the hygienic gate would refuse.** The
+  chat's *“Specs look complete — review in the panel and confirm”* and the
+  confirm gate are one check on the same specs: while any hygienic field is
+  open, the chat instead asks the gate's own question (the same text the 422
+  carries), naming only the fields still open. A size answer that names the
+  type (*“1.5 inch Tri-Clamp”*) also answers the connection type, including on a
+  run saved before this change. *“none”*, *“None”* or *“not needed”* for the
+  certification is recorded as *“not required”*; *“N/A”* / *“unknown”* stay
+  unanswered.
 - **The variant guard stops re-asking.** An attribute the user supplied in their
   own words is not asked again, and the hard guard no longer reports a present
   field as missing: it returns `missing_attrs: []` with reason
