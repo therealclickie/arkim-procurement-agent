@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useRunLive, useOrderNow, useOrders, useGroup, useDemoMode } from "@/lib/queries";
 import { ProcIcon } from "./proc-icon";
+import { UnverifiedBanner } from "./unverified-banner";
 import { ProcHead, SecHead, procMoney } from "./proc-ui";
 import { composeFindings, registrableDomain } from "./options-compose";
 import { GoferLoader } from "@/components/ui/gofer-loader";
@@ -468,6 +469,10 @@ export function OptionsScreen({ runId }: { runId: string }) {
           the candidate list leads (the working decision surface) and OrderSection stays at
           the bottom (self-hides until there's something to place/track). */}
       {committed && <OrderSection runId={runId} />}
+
+      {/* Sourced with unmet requirements (Source anyway): say what was NOT checked,
+          above every result. Nothing for a checked run. */}
+      <UnverifiedBanner results={sr} />
 
       {options.length === 0 ? (
         nothingFoundAsking ? (

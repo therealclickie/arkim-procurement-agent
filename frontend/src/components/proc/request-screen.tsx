@@ -21,7 +21,6 @@ import { ProcIcon } from "./proc-icon";
 import { ProcHead } from "./proc-ui";
 import { GoferLoader } from "@/components/ui/gofer-loader";
 import { useProcToast } from "./proc-shell";
-import type { AssetSpecs } from "@/types";
 
 const QUICK = [
   "Filter for the main compressor",
@@ -901,7 +900,8 @@ function ItemCard({
 
       {/* Source anyway (arc 5): the explicit, labelled override. Offered only when the
           refusal advertises it, and enabled only once the buyer acknowledges the results
-          will not be checked; confirm-intake then records that acknowledgement on the run. */}
+          will not be checked; confirm-intake then records that acknowledgement on the run,
+          and the backend marks the results (banner + no exact badge — PH-01 round 3c). */}
       {refusalVisible && canSourceAnyway && (
         <div style={{ marginTop: 10 }}>
           <label className="id-meta" style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
@@ -910,7 +910,8 @@ function ItemCard({
               checked={acknowledged}
               onChange={(e) => setAcknowledged(e.target.checked)}
             />
-            I understand the results will NOT be checked against my requirement.
+            I understand the results will NOT be checked against my requirement — they
+            will carry a banner saying so, and none will be marked an exact match.
           </label>
           <button
             className="proc-btn"

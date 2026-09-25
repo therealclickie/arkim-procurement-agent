@@ -36,8 +36,20 @@ HYGIENIC_OVERRIDE_ACK = "hygienic_override_ack"
 SOURCE_ANYWAY_FROM_ASK = 2
 
 SOURCE_ANYWAY_HINT = ("If you can't answer that, choose **Source anyway** when you "
-                      "confirm — the results will be marked as not checked against "
-                      "your requirement.")
+                      "confirm — the results will carry a banner saying they were not "
+                      "checked against your requirement, and none will be marked an "
+                      "exact match.")
+
+#: The chat's reply when readiness says ready but the intake agent still has a
+#: question (PH-01 round 3c, finding 3): the buyer is NOT blocked, so the reply says
+#: they can find options now and the question is optional.
+READY_NOW = "You have enough to find options now — confirm in the panel to start sourcing."
+OPTIONAL_PREFIX = "Optional, if you know it:"
+
+#: The requirement groups a run can have been sourced without (PH-01 round 3c,
+#: finding 2), in banner order.
+IDENTITY = "identity"
+HYGIENIC = "hygienic"
 
 
 @dataclass(frozen=True)
@@ -116,7 +128,8 @@ def record_hygienic_override(specs: dict[str, Any], block: HygienicBlock, *,
 
     Deliberately NOT ``intake_sufficiency.record_override``: that marks the run
     ``spec_incomplete`` and its banner says the manufacturer/model was missing, which
-    is false for a request that cleared the identity floor.
+    is false for a request that cleared the identity floor. The marking comes from
+    :func:`unverified_requirements`, which reads this acknowledgement.
     """
     from datetime import datetime, timezone
 
@@ -124,6 +137,8 @@ def record_hygienic_override(specs: dict[str, Any], block: HygienicBlock, *,
         "acknowledged": True,
         "reason": block.reason,
         "missing_attrs": list(block.missing_fields),
+        # The banner names these (unverified_banner), so record them as asked.
+        "missing_labels": list(block.missing_labels),
         "acknowledged_at": at or datetime.now(timezone.utc).isoformat(),
     }
     return specs
@@ -140,3 +155,104 @@ def chat_ask(readiness: Readiness, specs: dict[str, Any]) -> str:
         asks += 1
         specs[HYGIENIC_ASKS_KEY] = asks
     return readiness.ask(hygienic_ask_number=asks)
+
+
+def ready_reply(question: Optional[str]) -> str:
+    """The chat's reply when readiness says ready — any question is optional."""
+    question = (question or "").strip()
+    if not question:
+        return READY_NOW
+    return f"{READY_NOW} {OPTIONAL_PREFIX} {question}"
+
+
+# ---------------------------------------------------------------------------
+# Sourced with unmet requirements — ONE marking (PH-01 round 3c, finding 2)
+# ---------------------------------------------------------------------------
+
+def unverified_requirements(specs: Optional[dict[str, Any]]) -> tuple[str, ...]:
+    """Which requirement groups this run was sourced without: ``identity``,
+    ``hygienic``, both, or neither.
+
+    Derived from the acknowledgement records confirm writes on ``source_anyway``
+    (``spec_incomplete`` for identity, ``hygienic_override_ack`` for hygienic). The
+    results banner AND the exact-badge cap both read this — nothing else decides
+    whether a run's results are marked unchecked.
+    """
+    specs = specs or {}
+    groups: list[str] = []
+    if intake_sufficiency.is_spec_incomplete(specs):
+        groups.append(IDENTITY)
+    ack = specs.get(HYGIENIC_OVERRIDE_ACK)
+    if isinstance(ack, dict) and ack.get("acknowledged"):
+        groups.append(HYGIENIC)
+    return tuple(groups)
+
+
+def _hygienic_labels(specs: dict[str, Any]) -> list[str]:
+    """The hygienic items the acknowledgement recorded as unconfirmed, as labels."""
+    ack = specs.get(HYGIENIC_OVERRIDE_ACK) or {}
+    labels = [str(l) for l in (ack.get("missing_labels") or []) if l]
+    if labels:
+        return labels
+    # An acknowledgement recorded before labels were stored: map its attrs.
+    return [hygienic_context.FIELD_LABELS.get(a, str(a))
+            for a in (ack.get("missing_attrs") or []) if a]
+
+
+def _join(items: list[str]) -> str:
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+_UNCHECKED = "These results have NOT been checked against your requirement"
+
+
+def _hygienic_clause(specs: dict[str, Any]) -> str:
+    labels = _hygienic_labels(specs)
+    if not labels:
+        return "without confirming its hygienic fitment"
+    return f"without confirming its {_join(labels)}"
+
+
+def unverified_banner_lines(specs: Optional[dict[str, Any]]) -> tuple[str, ...]:
+    """The results banner naming what was not checked; empty for a checked run.
+
+    - identity only: ``(intake_sufficiency.BANNER,)`` — arc 5's text, byte-identical;
+    - hygienic only: one line naming the unconfirmed hygienic items;
+    - both: arc 5's line unchanged, then a line naming the hygienic items. (Kept as
+      two lines, not one rewritten sentence, so arc 5's line reads the same on every
+      identity override — its S3 fixture is a hygienic-context gauge, i.e. a both
+      run.)
+    """
+    specs = specs or {}
+    groups = unverified_requirements(specs)
+    lines: list[str] = []
+    if IDENTITY in groups:
+        lines.append(intake_sufficiency.BANNER)
+    if HYGIENIC in groups:
+        if lines:
+            lines.append(f"It was also sourced {_hygienic_clause(specs)}.")
+        else:
+            lines.append(f"{_UNCHECKED} — the request was sourced "
+                         f"{_hygienic_clause(specs)}.")
+    return tuple(lines)
+
+
+def unverified_badge_reason(specs: Optional[dict[str, Any]]) -> Optional[str]:
+    """Why no row in this run may be badged exact, or None for a checked run.
+
+    Any identity override: exactly ``badge_integrity.SPEC_INCOMPLETE_REASON``
+    (unchanged — "nothing was checked against a requirement" covers both groups).
+    Hygienic only: names the unconfirmed hygienic items.
+    """
+    from utils import badge_integrity
+
+    specs = specs or {}
+    groups = unverified_requirements(specs)
+    if IDENTITY in groups:
+        return badge_integrity.SPEC_INCOMPLETE_REASON
+    if HYGIENIC in groups:
+        return (f"the request was sourced {_hygienic_clause(specs)} — its fitment was "
+                f"not checked against a requirement")
+    return None

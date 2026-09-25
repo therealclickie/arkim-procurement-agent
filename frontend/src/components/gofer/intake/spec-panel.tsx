@@ -6,6 +6,7 @@ import { AssetPanel } from "@/components/gofer/asset-panel";
 import { Button } from "@/components/ui/button";
 import { Dot } from "@/components/ui/pill";
 import { useConfirmIntake } from "@/lib/queries";
+import { apiErrorMessage } from "@/lib/query-client";
 import type { AssetSpecs, SourcingRunDetail } from "@/types";
 
 interface SpecPanelProps {
@@ -15,8 +16,13 @@ interface SpecPanelProps {
 
 export function SpecPanel({ run, className }: SpecPanelProps) {
   const specs = run.asset_specs as AssetSpecs | null | undefined;
-  const hasSpecs = Boolean(specs && (specs.manufacturer || specs.part_number));
-  const showConfirmCard = run.phase === "intake" && hasSpecs;
+  // Readiness is the BACKEND's decision (PH-01 round 3c): run.intake_readiness is
+  // intake_readiness.assess — what confirm-intake refuses on. The panel never derives
+  // it from the specs; absent (older backend, run not loaded) is not ready.
+  const ready = run.intake_readiness?.ready === true;
+  const stillNeeded = run.intake_readiness?.missing_labels ?? [];
+  const inIntake = run.phase === "intake";
+  const showConfirmCard = inIntake && ready && Boolean(specs);
 
   const [dismissed, setDismissed] = useState(false);
 
@@ -47,7 +53,20 @@ export function SpecPanel({ run, className }: SpecPanelProps) {
           onDismiss={() => setDismissed(true)}
         />
       ) : specs ? (
-        <AssetPanel specs={specs} defaultExpanded />
+        <>
+          {inIntake && !ready && stillNeeded.length > 0 && (
+            <div
+              className="rounded-card border border-amber-line bg-amber-tint px-4 py-3 text-[11.5px] text-amber-fg"
+              data-testid="spec-panel-still-needed"
+            >
+              Still needed before sourcing — answer in the chat:
+              <ul className="mt-1 ml-4 list-disc">
+                {stillNeeded.map((l) => <li key={l}>{l}</li>)}
+              </ul>
+            </div>
+          )}
+          <AssetPanel specs={specs} defaultExpanded />
+        </>
       ) : (
         <ExtractingSkeleton phase={run.phase} />
       )}
@@ -153,11 +172,23 @@ function ConfirmCard({ runId, specs, onDismiss }: ConfirmCardProps) {
 
       {confirm.isError && (
         <p className="text-[11px] text-red-fg text-center">
-          Failed to confirm — is the backend running?
+          {confirmErrorMessage(confirm.error)}
         </p>
       )}
     </div>
   );
+}
+
+// A reasoned refusal (confirm-intake's 422 {detail: {message, reason}}) shows the
+// backend's own message; any other HTTP error its detail; only a request that got
+// no response is reported as connectivity.
+function confirmErrorMessage(err: unknown): string {
+  const detail = (err as { body?: { detail?: unknown } } | null)?.body?.detail;
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return apiErrorMessage(err) ?? "Failed to confirm — is the backend running?";
 }
 
 // ---------------------------------------------------------------------------

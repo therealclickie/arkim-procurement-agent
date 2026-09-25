@@ -260,6 +260,11 @@ export interface SourcingResults {
   // requirement, and no candidate in it is badged exact.
   specIncomplete?: boolean;
   specIncompleteBanner?: string;
+  // PH-01 round 3c: the same marking for ANY overridden requirement group. The
+  // banner's lines (identity-only: exactly [specIncompleteBanner]; a hygienic
+  // override names the unconfirmed hygienic items) and which groups were overridden.
+  specIncompleteBannerLines?: string[];
+  unverifiedRequirements?: ("identity" | "hygienic")[];
   tier3CapabilityPivot?: boolean;
   // RANKING_BANDS_V1: present ONLY when the stored result carries the
   // ranking_bands:v1 marker (the backend keys these off the result, not the env —

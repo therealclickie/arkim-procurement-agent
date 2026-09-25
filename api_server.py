@@ -924,15 +924,18 @@ def _transform_option(opt: dict, tier: int, idx: int, quote: Optional[dict] = No
     # also covers the cache-replay paths that re-derive pn_match_status from
     # match_type (gate finding F-B).
     _specs = specs or {}
+    from utils import intake_readiness
     _badge = badge_integrity.resolve(
         opt,
         advisory_level=_pn_match_level(opt, tier),
         searched_pn=_specs.get("part_number"),
         manufacturer=_specs.get("manufacturer"),
         claims_exact=(opt.get("match_type") == "Exact OEM"),
-        # R4 (F-15): no candidate in a spec-incomplete run may be badged exact —
-        # the request it would claim to match was never specified.
-        spec_incomplete=bool(_specs.get("spec_incomplete")),
+        # R4 (F-15) / PH-01 round 3c: no candidate in a run sourced with ANY
+        # requirement group overridden (identity and/or hygienic) may be badged
+        # exact. The same derived value drives the results banner.
+        spec_incomplete=bool(intake_readiness.unverified_requirements(_specs)),
+        unverified_reason=intake_readiness.unverified_badge_reason(_specs),
     )
     out = {
         "id":                    f"{opt.get('vendor_name','')}-t{tier}-{idx}",
@@ -1184,11 +1187,18 @@ def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None,
     }
     # R4 (F-15): a run that reached sourcing on the explicit override says so, on
     # every read, above its results. Absent for every other run, so flag-off /
-    # sufficient runs are byte-identical.
-    if (specs or {}).get("spec_incomplete"):
-        from utils import intake_sufficiency
+    # sufficient runs are byte-identical. PH-01 round 3c: ONE marking for any
+    # overridden requirement group — the banner names what was not checked
+    # (identity-only keeps arc 5's text exactly), read from the same
+    # unverified_requirements the badge cap reads.
+    from utils import intake_readiness
+    _unverified = intake_readiness.unverified_requirements(specs)
+    if _unverified:
+        _lines = intake_readiness.unverified_banner_lines(specs)
         result["specIncomplete"] = True
-        result["specIncompleteBanner"] = intake_sufficiency.BANNER
+        result["specIncompleteBanner"] = _lines[0]
+        result["specIncompleteBannerLines"] = list(_lines)
+        result["unverifiedRequirements"] = list(_unverified)
     # RANKING_BANDS_V1 (spec §7) — a BANDED raw result additionally distinguishes
     # findings (Band A/B cards, banded order) from outreachTargets (the Band-C
     # ask-and-see block: onboarded supplier named first, capped seeds, provenance
@@ -2383,6 +2393,11 @@ def send_message(run_id: str, body: SendMessageRequest, request: Request):
             # is required" reply is gone: arc 5's identity floor refuses exactly those
             # specs, so readiness routes them to the ask above.)
             reply_text = "Specs look complete — review in the panel and confirm to start sourcing."
+    elif readiness.ready:
+        # PH-01 round 3c (finding 3): the agent's own sufficiency is False but the
+        # readiness decision confirm refuses on says ready — the buyer is NOT blocked.
+        # The agent may still ask, but only as an optional question.
+        reply_text = intake_readiness.ready_reply(result.get("follow_up_question"))
     else:
         reply_text = result.get("follow_up_question") or (
             "Can you provide more details? I need the manufacturer, model, and part number."
@@ -3112,7 +3127,10 @@ def confirm_intake(
     marked `spec_incomplete`, its results carry a banner saying they have NOT been
     checked against the requirement, and no candidate in it may be badged exact.
     The same override exits the hygienic question set (R5, reason
-    "hygienic_spec_incomplete"); that records `hygienic_override_ack` on the run.
+    "hygienic_spec_incomplete"); that records `hygienic_override_ack` on the run,
+    and the run is marked the same way (PH-01 round 3c): a banner naming the
+    unconfirmed hygienic items and no exact badge — both read from
+    `intake_readiness.unverified_requirements`.
     Both refusals come from `intake_readiness.assess` — the decision the chat's
     "Specs look complete" reply also reads (PH-01).
 

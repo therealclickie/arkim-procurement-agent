@@ -1388,16 +1388,18 @@ designation"*. Cross-maker seal equivalence is **not** decided here.
   the hygienic ask is not counted against it, because a sanitary part must not
   be committed on a guess. **Source anyway is the way out:** from the second
   hygienic ask onward the chat reply ends with *“If you can't answer that,
-  choose **Source anyway** when you confirm — the results will be marked as not
-  checked against your requirement.”* (counted per run in the `_hygienic_asks`
-  ledger key, stripped from the panel like `_intake_turns`).
+  choose **Source anyway** when you confirm — the results will carry a banner
+  saying they were not checked against your requirement, and none will be marked
+  an exact match.”* (counted per run in the `_hygienic_asks` ledger key, stripped
+  from the panel like `_intake_turns`).
 - **Every refusal renders on its card.** A confirm 422 that carries a `reason`
   never shows the generic *“Couldn't start sourcing — please try again.”*
   toast: the card shows *“Can't start sourcing yet”*, the backend's message,
   and a *Still needed* list of every missing item. When the refusal carries
   `override: "source_anyway"`, a **Source anyway** button appears — disabled
   until the buyer ticks *“I understand the results will NOT be checked against
-  my requirement.”* It re-sends confirm with `source_anyway=true`; the backend
+  my requirement — they will carry a banner saying so, and none will be marked
+  an exact match.”* It re-sends confirm with `source_anyway=true`; the backend
   records the acknowledgement (`spec_incomplete_ack` for the identity floor,
   `hygienic_override_ack` for the hygienic set) and sourcing starts. Sending a
   chat answer from the card hides the refusal; the next *Find options*
@@ -1410,6 +1412,35 @@ designation"*. Cross-maker seal equivalence is **not** decided here.
   little more”* with a *Still needed* list of `missing_labels`. The card has no
   readiness rule of its own: `spec_based_sourcing` no longer makes a card ready,
   and the *“Matching by category — no exact part number needed.”* line is gone.
+- **No other surface has a readiness rule (PH-01 round 3c).** The run page's
+  spec panel (`/runs/[id]`) offered *Confirm & Source* whenever the run had a
+  manufacturer or a part number. It now offers it only when
+  `intake_readiness.ready` is true (absent → not offered); otherwise it shows
+  the specs with a *“Still needed before sourcing — answer in the chat”* list of
+  `missing_labels`. A reasoned confirm 422 there shows the backend's message,
+  not *“Failed to confirm — is the backend running?”* (kept only for a request
+  that got no response).
+- **One marking for any sourcing with unmet requirements (PH-01 round 3c).**
+  Source anyway past the identity floor, the hygienic questions, or both marks
+  the run the same way: a banner above the results and no candidate badged
+  exact. Both read one derived value (`intake_readiness.unverified_requirements`
+  → `identity` / `hygienic`, from the recorded acknowledgements; the results
+  carry it as `unverifiedRequirements`). The banner names what was not checked:
+  identity only — arc 5's text, unchanged; hygienic only — *“These results have
+  NOT been checked against your requirement — the request was sourced without
+  confirming its {the unconfirmed hygienic items}.”*; both — arc 5's line, then
+  *“It was also sourced without confirming its {items}.”* The items are the
+  labels recorded in `hygienic_override_ack.missing_labels`. The banner shows on
+  the proc options screen (`/parts/[id]`) as well as the run page.
+- **Ready means the buyer can go, even if the agent has a question (PH-01 round
+  3c).** When readiness says ready but the intake agent would still like a
+  detail, the chat says *“You have enough to find options now — confirm in the
+  panel to start sourcing.”* followed by *“Optional, if you know it: {the
+  question}”* — never a question that implies the buyer is blocked.
+- **Certification answers are normalised once.** Every certification check
+  casefolds, trims whitespace and strips trailing punctuation first, so
+  *“None.”* is an answer (*“not required”*) and *“Not applicable.”* / *“N/A.”*
+  stay unanswered, the same as without the period.
 - **The variant guard stops re-asking.** An attribute the user supplied in their
   own words is not asked again, and the hard guard no longer reports a present
   field as missing: it returns `missing_attrs: []` with reason

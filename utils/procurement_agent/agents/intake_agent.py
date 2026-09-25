@@ -936,7 +936,11 @@ class IntakeAgent:
         # gate would refuse the same specs. Same function, same input: the gate reads
         # the persisted specs, which are exactly `merged`. The explicit override stays
         # `source_anyway` on confirm (or force_proceed above), never the chat.
-        hygienic = hygienic_context.hygienic_block(merged)
+        # Read through intake_readiness.assess — the ONE readiness call site
+        # (PH-01 round 3c, finding 5). Only its hygienic gate applies here: the
+        # identity floor is phrased by send_message, which re-assesses.
+        from utils import intake_readiness
+        hygienic = intake_readiness.assess(merged).hygienic
         if sufficient and hygienic is not None:
             state = "needs_clarification"
             missing_field = "hygienic"

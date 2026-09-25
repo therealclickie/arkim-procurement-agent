@@ -117,9 +117,31 @@ _CERT_NEGATIVES: frozenset[str] = frozenset({
     "none", "no", "not required", "not needed", "none required",
 })
 
-#: Certification replies that are NOT answers even though the shared null set does not
-#: list them. "N/A" is already a null token; its long form must read the same way.
-_CERT_UNSTATED: frozenset[str] = frozenset({"not applicable", "n.a.", "na"})
+#: Trailing punctuation a typed answer may carry ("None.", "N/A.", "not applicable!").
+_TRAILING_PUNCT = ".,;:!?"
+
+
+def cert_token(value: Any) -> Optional[str]:
+    """THE token normaliser for every certification check (PH-01 round 3c, finding 4):
+    casefold, trim whitespace, strip trailing punctuation. None for a non-string.
+
+    Every certification set below is stored in this form and every value is compared
+    in it, so "None." is answered like "none" and "Not applicable." is unanswered
+    like "not applicable".
+    """
+    if not isinstance(value, str):
+        return None
+    return value.strip().casefold().rstrip(_TRAILING_PUNCT).strip()
+
+
+_CERT_NEGATIVES = frozenset(cert_token(v) for v in _CERT_NEGATIVES)
+
+#: Certification replies that are NOT answers: the shared null tokens ("N/A",
+#: "unknown", "none" is handled as a negative first) plus the long forms of "N/A"
+#: the null set does not list.
+_CERT_UNSTATED: frozenset[str] = frozenset(
+    {cert_token(v) for v in ("not applicable", "n.a.", "na")}
+    | {cert_token(v) for v in _NULL_VALUES if isinstance(v, str)})
 
 #: The certification choices the question offers, verbatim.
 CERT_CHOICES = "3-A, EHEDG, or none required"
@@ -209,7 +231,17 @@ def _is_null(value: Any) -> bool:
 
 
 def _is_cert_negative(value: Any) -> bool:
-    return isinstance(value, str) and value.strip().lower().rstrip(".") in _CERT_NEGATIVES
+    return cert_token(value) in _CERT_NEGATIVES
+
+
+def _cert_stated(value: Any) -> bool:
+    """A certification answer: an explicit negative, or any other non-null string."""
+    token = cert_token(value)
+    if token is None:
+        return value is not None          # a non-string answer, as _is_null reads it
+    if token in _CERT_NEGATIVES:
+        return True
+    return token not in _CERT_UNSTATED
 
 
 def derived_process_connection(specs: Optional[dict[str, Any]]) -> Optional[str]:
@@ -252,10 +284,9 @@ def _stated(specs: dict[str, Any], field: str) -> bool:
     for key in _FIELD_SOURCES[field]:
         value = specs.get(key)
         if field == "hygienic_certification":
-            if _is_cert_negative(value):
+            if _cert_stated(value):
                 return True
-            if isinstance(value, str) and value.strip().lower() in _CERT_UNSTATED:
-                continue
+            continue
         if not _is_null(value):
             return True
     return False
