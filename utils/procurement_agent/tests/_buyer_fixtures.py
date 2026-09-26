@@ -151,7 +151,7 @@ def login(client, member, monkeypatch=None) -> TestClient:
     sess = client._ba.create_session(member["id"])
     assert sess is not None
     client.cookies.clear()
-    client.cookies.set(BUYER_COOKIE, sess["token"], domain="testserver", path="/")
+    client.cookies.set(BUYER_COOKIE, sess["token"])
     return client
 
 

@@ -206,6 +206,8 @@ from utils import claim_tokens  # Night 6 — supplier claim-portal token store 
 from utils import intake_channels  # Night 8 — channel-agnostic intake spine
 from utils import supplier_accounts  # Arc 2 — supplier identity (accounts/members/sessions)
 from utils import supplier_accounts_rbac  # Arc 2 T11 — the D7 permission matrix
+from utils import buyer_accounts  # Arc 6 — buyer identity (companies/members/sessions)
+from utils import buyer_accounts_rbac  # Arc 6 T2 — the D2 buyer permission matrix
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -1982,6 +1984,197 @@ def _orm_to_detail(run: SourcingRunORM) -> RunDetail:
         created_at=run.initiated_at.isoformat() if run.initiated_at else "",
         updated_at=run.updated_at.isoformat() if run.updated_at else "",
     )
+
+
+# ===========================================================================
+# Arc 6 — BUYER IDENTITY: the session door every buyer-facing route stands
+# behind (BUYER_ACCOUNTS_V1).
+#
+# One identity (gate ruling Q1): under the flag the httpOnly
+# ``gofer_buyer_session`` cookie is the ONLY credential a buyer route accepts —
+# a Cognito bearer alone authenticates nothing here. The cookie is the buyer's
+# own (D4), so buyer and supplier sessions never collide.
+#
+# The door does three things, in this order, before any handler runs:
+#   1. authenticate — a live buyer session, else the uniform 401 (and the arc 3
+#      CSRF origin check on state-changing requests, reused as-is);
+#   2. scope — every resource id in the PATH (run, basket, draft, review item,
+#      facility) must belong to the session's company, else the SAME 404 the
+#      route gives a genuinely missing record (D6: cross-company access is
+#      indistinguishable from not-found);
+#   3. authorise — THE matrix (utils/buyer_accounts_rbac), never a role name.
+#
+# Flag OFF, the door returns None and does nothing (D8): every route behaves
+# exactly as before this arc. Handlers that need the acting member read the
+# value the door returns — never a name from the request body (D7).
+# ===========================================================================
+
+BUYER_SESSION_COOKIE = "gofer_buyer_session"
+
+
+def _buyer_accounts_enabled() -> bool:
+    """Live check for the buyer-identity gate (honours monkeypatched env)."""
+    return buyer_accounts.buyer_accounts_active()
+
+
+def _buyer_flag_off_404():
+    """Flag off ⇒ the new buyer routes do not exist (byte-identical 404)."""
+    raise HTTPException(status_code=404, detail="Not Found")
+
+
+def _buyer_route_present() -> None:
+    """Route-level gate for the NEW buyer routes. A route dependency runs
+    before body validation, so flag-off is the plain 404 whatever the body —
+    a 422 would reveal that the route exists."""
+    if not _buyer_accounts_enabled():
+        _buyer_flag_off_404()
+
+
+_BUYER_NEW_ROUTE = [Depends(_buyer_route_present)]
+
+
+def _buyer_session_reject_401():
+    """The UNIFORM buyer session rejection — missing, invalid, expired,
+    revoked, or a failed origin check: one 401 body for all of them."""
+    raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+
+def _buyer_validate_cookie(request: Request, raw: Optional[str]) -> dict:
+    ctx = buyer_accounts.validate_session((raw or "").strip()) if raw else None
+    if ctx is None:
+        _buyer_session_reject_401()
+    # Arc 3 D2's origin check, reused as-is: the cookie is an ambient
+    # credential, so a state-changing request must carry a configured Origin.
+    _supplier_csrf_check(request, "cookie")
+    request.state.buyer = ctx
+    return ctx
+
+
+def _require_buyer_session(
+    request: Request,
+    gofer_buyer_session: Optional[str] = Cookie(default=None),
+) -> dict:
+    """The session dependency for the NEW /api/buyer/* routes: flag off ⇒ the
+    route is absent (404); flag on ⇒ a live session or the uniform 401."""
+    if not _buyer_accounts_enabled():
+        _buyer_flag_off_404()
+    return _buyer_validate_cookie(request, gofer_buyer_session)
+
+
+# The same 404 each route gives a genuinely missing record of that kind.
+_BUYER_SCOPE_NOT_FOUND: Dict[str, str] = {
+    "run_id": "Run not found",
+    "group_id": "Basket not found",
+    "draft_id": "Draft not found",
+    "item_id": "Review item not found",
+    "facility_id": "Facility not found",
+}
+# Path parameters that are NOT resource ids needing a company check: a ship-to
+# site is stored under the session's company (so another company's "lamirada"
+# is simply a different row — isolation by construction, F8).
+_BUYER_SCOPE_BY_CONSTRUCTION: frozenset = frozenset({"site_id"})
+
+
+def _buyer_run_company(run_id: str) -> Optional[str]:
+    with _SessionFactory() as session:
+        run = session.get(SourcingRunORM, run_id)
+        return run.company_id if run is not None else None
+
+
+def _buyer_path_company(param: str, value: str, company: dict) -> bool:
+    """True iff the resource ``param``=``value`` belongs to ``company``. A
+    missing resource is False — the caller renders the same 404 either way."""
+    cid = company["id"]
+    if param == "run_id":
+        return _buyer_run_company(value) == cid
+    if param == "group_id":
+        with _SessionFactory() as session:
+            return session.query(SourcingRunORM).filter_by(
+                group_id=value, company_id=cid).first() is not None
+    if param == "draft_id":
+        from utils.procurement_agent.state import persistence
+        draft = persistence.get_draft(value)
+        return bool(draft) and _buyer_run_company(draft.get("run_id") or "") == cid
+    if param == "item_id":
+        from utils import supplier_registry
+        item = supplier_registry.get_review_item(value)
+        return bool(item) and _buyer_run_company(item.get("run_id") or "") == cid
+    if param == "facility_id":
+        return buyer_accounts.company_owns_facility(company, value)
+    return False
+
+
+def _buyer_scope_path(request: Request, ctx: dict) -> None:
+    """D6 at the door: every resource id in the path must be the session
+    company's. Fail closed — a path parameter this function does not know is
+    refused, so a new route with a new kind of id cannot slip through
+    unscoped (the T4 structural test also pins the known set)."""
+    for param, value in request.path_params.items():
+        if param in _BUYER_SCOPE_BY_CONSTRUCTION:
+            continue
+        if not _buyer_path_company(param, value, ctx["company"]):
+            raise HTTPException(status_code=404,
+                                detail=_BUYER_SCOPE_NOT_FOUND.get(param, "Not Found"))
+
+
+def _buyer_session_in_force(
+    request: Request,
+    gofer_buyer_session: Optional[str] = Cookie(default=None),
+) -> Optional[dict]:
+    """The session dependency for PRE-EXISTING buyer-facing routes. Flag off
+    ⇒ None (identity not in force; today's behaviour, D8). Flag on ⇒
+    authenticate, then scope every path resource to the session company."""
+    if not _buyer_accounts_enabled():
+        return None
+    ctx = _buyer_validate_cookie(request, gofer_buyer_session)
+    _buyer_scope_path(request, ctx)
+    return ctx
+
+
+def _buyer_door(capability: str):
+    """THE door for a pre-existing buyer-facing route: session (flag-gated) →
+    company scope → the matrix. Returns the session context, or None with the
+    flag off. The T4 structural test requires this (or the explicit
+    disabled-under-flag door) on every buyer-facing route."""
+    return buyer_accounts_rbac.capability_dependency(capability, _buyer_session_in_force)
+
+
+def _buyer_require(capability: str):
+    """The door for the NEW /api/buyer/* routes (absent with the flag off)."""
+    return buyer_accounts_rbac.capability_dependency(capability, _require_buyer_session)
+
+
+def _buyer_disabled_under_flag() -> None:
+    """For routes that are not buyer surfaces and have no buyer identity to
+    check (gate rulings Q2/Q3): with BUYER_ACCOUNTS_V1 on they do not exist
+    (404); with it off they behave exactly as before."""
+    if _buyer_accounts_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+_buyer_disabled_under_flag.buyer_disabled = True  # the T4 guard's marker
+
+
+def _acting_member_id(buyer: Optional[dict]) -> Optional[str]:
+    """The acting member's id from the session (D7) — None with the flag off."""
+    return buyer["member_id"] if buyer else None
+
+
+def _buyer_company_id(buyer: Optional[dict]) -> Optional[str]:
+    return buyer["company_id"] if buyer else None
+
+
+def _buyer_record_action(buyer: Optional[dict], action: str, *,
+                         run_id: Optional[str] = None,
+                         detail: Optional[dict] = None) -> None:
+    """Attribute one buyer action to the session member in the buyer audit
+    trail (D7). No-op with the flag off."""
+    if not buyer:
+        return
+    buyer_accounts.audit(
+        f"action:{action}", company_id=buyer["company_id"],
+        member_id=buyer["member_id"], email=buyer["member"]["email"],
+        actor=buyer["member_id"], run_id=run_id, detail=detail)
 
 
 # ---------------------------------------------------------------------------
@@ -8035,3 +8228,193 @@ def admin_acknowledge_notification_alert(
     if out is None:
         raise HTTPException(status_code=409, detail="Alert already acknowledged")
     return {"ok": True, "alert": out}
+
+
+# ===========================================================================
+# Arc 6 T3 — BUYER LOGIN AND SESSIONS (BUYER_ACCOUNTS_V1).
+#
+# Magic links only, invite-only membership (D3), the arc 2/3 machinery reused
+# (D4): uniform request-link response, single-use hashed links, server-side
+# sessions, the httpOnly cookie, the arc 3 origin check. The buyer cookie is
+# its OWN (``gofer_buyer_session``) and the buyer rate-limit buckets are their
+# OWN, so nothing here touches supplier behaviour.
+#
+# Unlike the supplier verify, the buyer verify returns NO raw token in the body:
+# the cookie is the only buyer credential (gate ruling Q1), so there is no
+# API-client bearer to hand back, and nothing a script could read.
+# ===========================================================================
+
+_BUYER_AUTH_RATE_WINDOW_SEC: int = _env_int("BUYER_AUTH_RATE_WINDOW_SEC", 600)
+_buyer_auth_rate_lock = threading.Lock()
+_buyer_auth_rate_buckets: Dict[tuple, list] = {}
+
+
+def _buyer_rate_over(keys_caps: list) -> bool:
+    """Bump each (key, cap) bucket; True when any is over its cap in the
+    window. A cap <= 0 is inert."""
+    import time
+    now = time.monotonic()
+    tripped = False
+    with _buyer_auth_rate_lock:
+        for key, cap in keys_caps:
+            if cap <= 0:
+                continue
+            entry = _buyer_auth_rate_buckets.get(key)
+            if not entry or (now - entry[1]) >= _BUYER_AUTH_RATE_WINDOW_SEC:
+                entry = [0, now]
+                _buyer_auth_rate_buckets[key] = entry
+            entry[0] += 1
+            if entry[0] > cap:
+                tripped = True
+    return tripped
+
+
+def _buyer_ok_response() -> JSONResponse:
+    """THE request-link response — one body, one status, one header set for
+    every outcome (known, unknown, revoked, rate-limited, send failure)."""
+    return JSONResponse(content={"ok": True}, headers=_portal_response_headers({}))
+
+
+class BuyerRequestLinkBody(BaseModel):
+    email: str
+
+
+@app.post("/api/buyer/auth/request-link", dependencies=_BUYER_NEW_ROUTE)
+def buyer_request_link(body: BuyerRequestLinkBody, request: Request):
+    """Request a sign-in link. UNIFORM: always ``{"ok": true}`` / 200 —
+    whether the email is a member, unknown, revoked, or over the rate limit —
+    so the endpoint is no oracle for who works where. Only an ACTIVE member
+    gets a link, and only in their mailbox. Membership is by invitation only
+    (D3): an unknown email is never auto-joined. Rate-limited per email and
+    per IP BEFORE any lookup; a throttled request still gets the uniform 200
+    (and no mail). Every outcome is audited. Flag off ⇒ 404."""
+    if not _buyer_accounts_enabled():
+        _buyer_flag_off_404()
+    ip = _client_ip(request)
+    raw_email = body.email or ""
+    email = buyer_accounts.normalize_email(raw_email)
+    if _buyer_rate_over([
+        (("email", email or raw_email), _env_int("BUYER_AUTH_RATE_CAP_EMAIL", 3)),
+        (("ip", ip), _env_int("BUYER_AUTH_RATE_CAP_IP", 20)),
+    ]):
+        buyer_accounts.audit("link_requested", email=email or raw_email, actor="public",
+                             ip=ip, detail={"outcome": "rate_limited"})
+        return _buyer_ok_response()
+    member = buyer_accounts.get_member_by_email(email) if email else None
+    if member is None or member.get("status") != buyer_accounts.MEMBER_ACTIVE:
+        buyer_accounts.audit(
+            "link_requested", email=email or raw_email, actor="public", ip=ip,
+            company_id=(member or {}).get("company_id"),
+            member_id=(member or {}).get("id"),
+            detail={"outcome": "no_active_member"})
+        return _buyer_ok_response()
+    link = buyer_accounts.mint_magic_link(member["id"])
+    if link is None:
+        buyer_accounts.audit("link_requested", company_id=member["company_id"],
+                             member_id=member["id"], email=email, actor="public",
+                             ip=ip, detail={"outcome": "mint_failed"})
+        return _buyer_ok_response()
+    status = buyer_accounts.send_magic_link_email(
+        email, link["token"], company_id=member["company_id"], member_id=member["id"])
+    buyer_accounts.audit("link_requested", company_id=member["company_id"],
+                         member_id=member["id"], email=email, actor="public", ip=ip,
+                         detail={"outcome": "send_attempted", "send_status": status})
+    return _buyer_ok_response()
+
+
+class BuyerVerifyBody(BaseModel):
+    token: str
+
+
+def _buyer_verify_reject_401():
+    raise HTTPException(status_code=401, detail="Invalid or expired link")
+
+
+def _set_buyer_session_cookie(response: JSONResponse, token: str,
+                              expires_at: Optional[str]) -> JSONResponse:
+    """HttpOnly, Secure, SameSite=Lax, Path=/ — the supplier cookie's four
+    attributes, on the buyer's own cookie name."""
+    response.set_cookie(
+        key=BUYER_SESSION_COOKIE,
+        value=token,
+        max_age=_supplier_session_cookie_max_age(expires_at),
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+    return response
+
+
+def _clear_buyer_session_cookie(response: JSONResponse) -> JSONResponse:
+    response.delete_cookie(key=BUYER_SESSION_COOKIE, path="/",
+                           httponly=True, secure=True, samesite="lax")
+    return response
+
+
+@app.post("/api/buyer/auth/verify", dependencies=_BUYER_NEW_ROUTE)
+def buyer_verify_link(body: BuyerVerifyBody, request: Request):
+    """Verify a link → a session, delivered ONLY as the httpOnly cookie. Every
+    failure mode (unknown, expired, used, revoked member) is the one uniform
+    401. Rate-limited per (IP, token prefix). Audited. Flag off ⇒ 404."""
+    if not _buyer_accounts_enabled():
+        _buyer_flag_off_404()
+    ip = _client_ip(request)
+    token = body.token or ""
+    if _buyer_rate_over([(("verify", ip, token[:8]),
+                          _env_int("BUYER_VERIFY_RATE_CAP", 20))]):
+        raise HTTPException(status_code=429, detail="Too many requests.",
+                            headers={"Retry-After": str(_BUYER_AUTH_RATE_WINDOW_SEC)})
+    ctx = buyer_accounts.verify_magic_link(token)
+    sess = buyer_accounts.create_session(ctx["member_id"]) if ctx else None
+    if ctx is None or sess is None:
+        buyer_accounts.audit("link_verified", actor="public", ip=ip,
+                             detail={"outcome": "rejected"})
+        _buyer_verify_reject_401()
+    buyer_accounts.audit("login", company_id=ctx["company_id"], member_id=ctx["member_id"],
+                         email=ctx["email"], actor=ctx["member_id"], ip=ip,
+                         detail={"session_id": sess["session_id"]})
+    resp = JSONResponse(content={"ok": True, "expires_at": sess["expires_at"]},
+                        headers=_portal_response_headers({}))
+    return _set_buyer_session_cookie(resp, sess["token"], sess["expires_at"])
+
+
+@app.post("/api/buyer/auth/logout", dependencies=_BUYER_NEW_ROUTE)
+def buyer_logout(request: Request, session: dict = Depends(_require_buyer_session)):
+    """Revoke the session and clear the cookie. Audited."""
+    buyer_accounts.revoke_session(session["session_id"])
+    buyer_accounts.audit("logout", company_id=session["company_id"],
+                         member_id=session["member_id"], email=session["member"]["email"],
+                         actor=session["member_id"], ip=_client_ip(request),
+                         detail={"session_id": session["session_id"]})
+    resp = JSONResponse(content={"ok": True}, headers=_portal_response_headers({}))
+    return _clear_buyer_session_cookie(resp)
+
+
+def _serialize_buyer_member(member: dict) -> dict:
+    return {
+        "id": member["id"],
+        "email": member["email"],
+        "role": member["role"],
+        "status": member["status"],
+        "created_at": member["created_at"],
+    }
+
+
+@app.get("/api/buyer/me", dependencies=_BUYER_NEW_ROUTE)
+def buyer_me(session: dict = Depends(_buyer_require(buyer_accounts_rbac.VIEW_COMPANY))):
+    """Who am I: the company (what the header shows, D7) and the member, with
+    the capabilities THE matrix grants them. The list is what the UI
+    reflects; it is not the control — every route re-checks."""
+    company, member = session["company"], session["member"]
+    return JSONResponse(content={
+        "company": {
+            "id": company["id"],
+            "name": company["name"],
+            "facility_ids": company["facility_ids"],
+        },
+        "member": {
+            **_serialize_buyer_member(member),
+            "permissions": buyer_accounts_rbac.permissions_for(member, company),
+        },
+    }, headers=_portal_response_headers({}))
