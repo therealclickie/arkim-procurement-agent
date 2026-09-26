@@ -239,6 +239,33 @@ def _sets_phase_to_sourcing(node: ast.AST) -> bool:
     return targets_phase and _is_sourcing_phase(node.value)
 
 
+def _is_any_sourcing_phase(node: ast.AST) -> bool:
+    """As ``_is_sourcing_phase``, but tolerant of how the enum is spelled at the
+    call site: ``Phase.SOURCING``, a local alias (``_P.SOURCING``, as api_server
+    imports it inside ``_transition_run``), a qualified path, ``.value``, or the
+    literal ``"sourcing"``."""
+    if isinstance(node, ast.Constant) and node.value == "sourcing":
+        return True
+    if isinstance(node, ast.Attribute) and node.attr == "value":
+        node = node.value
+    return isinstance(node, ast.Attribute) and node.attr == "SOURCING"
+
+
+def _transitions_to_sourcing(node: ast.AST) -> bool:
+    """A call ``_transition_run(run, Phase.SOURCING)`` (or ``target=``): the
+    state-machine route to the sourcing phase that phases.py permits and that
+    ``_sets_phase_to_sourcing`` does not see."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    name = func.id if isinstance(func, ast.Name) else (
+        func.attr if isinstance(func, ast.Attribute) else None)
+    if name != "_transition_run":
+        return False
+    args = list(node.args) + [kw.value for kw in node.keywords]
+    return any(_is_any_sourcing_phase(a) for a in args)
+
+
 def _names_background_sourcing(node: ast.AST) -> bool:
     return ((isinstance(node, ast.Name) and node.id == "_run_sourcing_background")
             or (isinstance(node, ast.Attribute) and node.attr == "_run_sourcing_background"))
@@ -252,6 +279,38 @@ class TestSingleChokePoint:
     def test_only_the_choke_point_advances_a_run_to_sourcing(self, api_tree):
         assert _functions_where(api_tree, _sets_phase_to_sourcing) == {
             "_commit_intake_to_sourcing"}
+
+    def test_nothing_transitions_a_run_to_sourcing_through_the_state_machine(self, api_tree):
+        # phases.py permits a legal move INTO sourcing, so _transition_run(run,
+        # Phase.SOURCING) would advance a run without the choke point's readiness
+        # check — and without the direct assignment the test above looks for.
+        # The choke point assigns directly; no call, anywhere, may take this route.
+        assert _functions_where(api_tree, _transitions_to_sourcing) == set()
+        offenders = []
+        for path in (_REPO_ROOT / "utils").rglob("*.py"):
+            if "tests" in path.parts:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            if any(_transitions_to_sourcing(n) for n in ast.walk(tree)):
+                offenders.append(str(path.relative_to(_REPO_ROOT)))
+        assert offenders == []
+
+    @pytest.mark.parametrize("call", [
+        "_transition_run(run, Phase.SOURCING)",
+        "_transition_run(run, Phase.SOURCING.value)",
+        "_transition_run(run, target=Phase.SOURCING)",
+        "_transition_run(run, _P.SOURCING)",
+        "api_server._transition_run(run, 'sourcing')",
+    ])
+    def test_the_transition_detector_sees_every_spelling(self, call):
+        # Positive control: the structural test above passes vacuously if the
+        # detector cannot see the call it exists to forbid.
+        tree = ast.parse(f"def rogue(run):\n    {call}\n")
+        assert _functions_where(tree, _transitions_to_sourcing) == {"rogue"}
+
+    def test_the_transition_detector_ignores_other_targets(self):
+        tree = ast.parse("def ok(run):\n    _transition_run(run, Phase.APPROVED)\n")
+        assert _functions_where(tree, _transitions_to_sourcing) == set()
 
     def test_only_the_choke_point_schedules_background_sourcing(self, api_tree):
         # _run_sourcing_background is the task that runs sourcing; only the choke
