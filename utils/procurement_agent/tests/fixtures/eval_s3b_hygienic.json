@@ -1,0 +1,45 @@
+{
+  "_source": [
+    "eval/e2e-post-hardening:eval/e2e/evidence/s3b_step1_chat.json",
+    "eval/e2e-post-hardening:eval/e2e/evidence/s3b_step3_answered.json",
+    "eval/e2e-post-hardening:eval/e2e/s3b_hygienic_gate.py (the user messages)"
+  ],
+  "_finding": "PH-01 - on both turns the chat replied 'Specs look complete' (proceed_full_confidence) while confirm-intake returned 422 hygienic_spec_incomplete; after the step-3 answer process_connection and hygienic_certification were still missing.",
+  "step1_user_message": "The pressure gauge on the CIP skid is reading wrong. Need a new one. It's an Ashcroft 1032, 0-60 psi, on the CIP return line.",
+  "step1_reply": "Specs look complete — review in the panel and confirm to start sourcing.",
+  "step1_specs": {
+    "manufacturer": "Ashcroft",
+    "model": "1032",
+    "category": "Part",
+    "description": "Ashcroft 1032 pressure gauge, 0-60 PSI range, for CIP return line",
+    "psi": "0-60 PSI",
+    "detected_type": "pressure gauge",
+    "use_case": "CIP skid return line pressure measurement",
+    "manufacturer_confidence": 95.0,
+    "part_id_confidence": 72.0,
+    "confidence_reasoning": "Manufacturer (Ashcroft) and model (1032) are explicitly stated, giving high manufacturer confidence. PSI range is known (0-60). Part ID confidence is moderate — the Ashcroft 1032 series has multiple configurations (dial size, connection size, connection type, glycerin fill, stem length) that affect the exact part number. Additional specs needed to source the precise gauge.",
+    "quantity": 1
+  },
+  "step3_user_message": "It's on a 1.5 inch Tri-Clamp connection, 316L stainless wetted parts, 3-A certified sanitary gauge.",
+  "step3_reply": "Specs look complete — review in the panel and confirm to start sourcing.",
+  "step3_specs": {
+    "manufacturer": "Ashcroft",
+    "model": "1032",
+    "category": "Part",
+    "description": "Ashcroft 1032 sanitary pressure gauge, 0-60 PSI, 1.5\" Tri-Clamp connection, 316L SS wetted parts, 3-A certified, for CIP return line",
+    "psi": "0-60 PSI",
+    "detected_type": "pressure gauge",
+    "use_case": "CIP skid return line pressure measurement",
+    "manufacturer_confidence": 95.0,
+    "part_id_confidence": 85.0,
+    "confidence_reasoning": "Manufacturer (Ashcroft) and model (1032) explicitly stated, with high confidence. New specs significantly narrow the configuration: 1.5\" Tri-Clamp connection, 316L SS wetted parts, and 3-A sanitary certification. The Ashcroft 1032 sanitary series maps well to these specs. Part ID confidence raised to 85 — dial size and glycerin/dry fill preference are the remaining unknowns that could affect the exact part number, but enough detail is now present to source confidently.",
+    "quantity": 1,
+    "connection_size": "1.5 inch Tri-Clamp",
+    "material_spec": "316L stainless steel wetted parts"
+  },
+  "step3_confirm_status": 422,
+  "step3_confirm_missing_attrs": [
+    "process_connection",
+    "hygienic_certification"
+  ]
+}

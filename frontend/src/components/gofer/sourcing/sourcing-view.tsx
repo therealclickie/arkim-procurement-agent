@@ -12,6 +12,7 @@ import { Dot } from "@/components/ui/pill";
 import { Warn } from "@/components/ui/icons";
 import { useGoferStore } from "@/store";
 import { BRAND_NAME } from "@/lib/brand";
+import { unverifiedBannerLines } from "@/lib/unverified";
 import type { SourcingRunDetail } from "@/types";
 
 interface SourcingViewProps {
@@ -47,6 +48,8 @@ export function SourcingView({ run, className }: SourcingViewProps) {
   const tier1 = results.tier1 ?? [];
   const tier2 = results.tier2 ?? [];
   const tier3 = results.tier3 ?? [];
+  // PH-01 round 3c: every line of the backend's unverified-requirements banner.
+  const bannerLines = unverifiedBannerLines(results);
 
   return (
     <div className={cn("flex flex-col h-full overflow-hidden", className)}>
@@ -56,13 +59,17 @@ export function SourcingView({ run, className }: SourcingViewProps) {
         </div>
       )}
 
-      {results.specIncompleteBanner && (
+      {bannerLines.length > 0 && (
         <div
           data-testid="spec-incomplete-banner"
           className="px-4 py-2.5 bg-amber-tint border-b border-amber-line shrink-0 flex items-start gap-2"
         >
           <Warn size={14} className="text-amber-fg mt-0.5 shrink-0" />
-          <p className="text-[12px] text-amber-fg">{results.specIncompleteBanner}</p>
+          <div>
+            {bannerLines.map((l) => (
+              <p key={l} className="text-[12px] text-amber-fg">{l}</p>
+            ))}
+          </div>
         </div>
       )}
 

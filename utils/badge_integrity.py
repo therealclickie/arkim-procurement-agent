@@ -150,13 +150,18 @@ SPEC_INCOMPLETE_REASON = ("the request was sourced without a manufacturer and mo
 
 def resolve(opt: dict[str, Any], *, advisory_level: str,
             searched_pn: Optional[str], manufacturer: Optional[str],
-            claims_exact: bool, spec_incomplete: bool = False) -> BadgeVerdict:
+            claims_exact: bool, spec_incomplete: bool = False,
+            unverified_reason: Optional[str] = None) -> BadgeVerdict:
     """Gate one candidate's badge.
 
     ``advisory_level`` is the extractor-derived level the caller would have shown
     (tier 1: "found a part number"; tiers 2/3: the mapped ``pn_match_status``).
     ``claims_exact`` is the extractor's own "Exact OEM" assertion. Neither can raise
     the badge above what ``classify`` grants.
+
+    ``spec_incomplete`` is True for a run sourced with ANY requirement group
+    overridden (``intake_readiness.unverified_requirements``); ``unverified_reason``
+    names which, defaulting to the identity reason.
     """
     found_pn = opt.get("found_part_number") or opt.get("foundPartNumber")
     snippet = opt.get("snippet") or opt.get("description") or ""
@@ -178,10 +183,11 @@ def resolve(opt: dict[str, Any], *, advisory_level: str,
         reason = _NO_LISTING_REASON
 
     # R4 (F-15): in a spec-incomplete run there is no requirement to have matched,
-    # so no row may carry an exact-grade badge whatever the strings say.
+    # so no row may carry an exact-grade badge whatever the strings say. PH-01 round
+    # 3c: the same cap for a run sourced past the hygienic questions.
     if spec_incomplete and level in EXACT_GRADE:
         level = _NO_LISTING_CAP
-        reason = SPEC_INCOMPLETE_REASON
+        reason = unverified_reason or SPEC_INCOMPLETE_REASON
 
     is_exact = bool(claims_exact) and level == "exact"
     return BadgeVerdict(level=level, is_exact=is_exact, reason=reason,

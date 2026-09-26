@@ -80,6 +80,11 @@ export interface AssetSpecs {
   impeller_size?: string;
   mech_seal?: string;
   material_spec?: string;
+  connection_size?: string;
+  // Hygienic-service fitment (backend AssetSpecs). Present once the buyer answers
+  // the hygienic confirm gate in chat; absent on every non-hygienic run.
+  process_connection?: string;
+  hygienic_certification?: string;
   gpm?: string;
   psi?: string;
   phase?: string;
@@ -255,6 +260,11 @@ export interface SourcingResults {
   // requirement, and no candidate in it is badged exact.
   specIncomplete?: boolean;
   specIncompleteBanner?: string;
+  // PH-01 round 3c: the same marking for ANY overridden requirement group. The
+  // banner's lines (identity-only: exactly [specIncompleteBanner]; a hygienic
+  // override names the unconfirmed hygienic items) and which groups were overridden.
+  specIncompleteBannerLines?: string[];
+  unverifiedRequirements?: ("identity" | "hygienic")[];
   tier3CapabilityPivot?: boolean;
   // RANKING_BANDS_V1: present ONLY when the stored result carries the
   // ranking_bands:v1 marker (the backend keys these off the result, not the env —
@@ -264,6 +274,16 @@ export interface SourcingResults {
   // carry these keys.
   findings?: Candidate[];
   outreachTargets?: OutreachTargets;
+}
+
+export interface IntakeReadiness {
+  ready: boolean;
+  missing_attrs: string[];
+  missing_labels: string[];
+  /** PH-01 round 3d: present only when not ready — the message confirm-intake's
+   *  refusal would carry, and "source_anyway" when that override is available. */
+  message?: string | null;
+  override?: string | null;
 }
 
 export interface SourcingRunDetail {
@@ -289,6 +309,9 @@ export interface SourcingRunDetail {
   messages?: ChatMessage[];
   /** True when T2+T3 have candidates but none are an exact PN match. Drives transparency banner. */
   no_exact_match?: boolean;
+  /** PH-01 round 3b: the backend's ONE readiness decision (intake_readiness.assess — what
+   *  confirm-intake refuses on). The intake card renders ready / Still needed from this only. */
+  intake_readiness?: IntakeReadiness;
   created_at: string;
   updated_at: string;
 }

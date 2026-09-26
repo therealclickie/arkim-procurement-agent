@@ -237,11 +237,19 @@ export async function confirmIntake(
   runId: string,
   exactOnly = false,
   openFamily = false,
+  sourceAnyway = false,
 ): Promise<{ run_id: string; phase: string }> {
-  // Both flags are backend query params (api_server.confirm_intake reads
-  // exact_only / open_family). open_family=true is the "I don't know the rating —
-  // source the family as-is" honest-escape opt-in (T5); inert for non-family runs.
-  const qs = [exactOnly && "exact_only=true", openFamily && "open_family=true"]
+  // All three flags are backend query params (api_server.confirm_intake reads
+  // exact_only / open_family / source_anyway). open_family=true is the "I don't know
+  // the rating — source the family as-is" honest-escape opt-in (T5); inert for
+  // non-family runs. source_anyway=true is the explicit, acknowledged override of the
+  // arc-5 readiness refusals (identity floor / hygienic questions): the backend
+  // records the acknowledgement on the run and marks its results unchecked.
+  const qs = [
+    exactOnly && "exact_only=true",
+    openFamily && "open_family=true",
+    sourceAnyway && "source_anyway=true",
+  ]
     .filter(Boolean)
     .join("&");
   return request(`/runs/${runId}/confirm-intake${qs ? `?${qs}` : ""}`, { method: "POST" });

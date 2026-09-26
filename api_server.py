@@ -647,6 +647,11 @@ class RunDetail(BaseModel):
     # True when T2+T3 have candidates but none have pnMatchLevel=="exact".
     # Suppressed when spec_based_sourcing or part_number is absent (not a typo case).
     no_exact_match: bool = False
+    # PH-01 round 3b: the ONE readiness decision (utils.intake_readiness.assess — the
+    # same one confirm_intake refuses on and the chat replies from), so the intake card
+    # renders "ready" / "Still needed" from the backend instead of guessing client-side.
+    # {"ready": bool, "missing_attrs": [...], "missing_labels": [...]}.
+    intake_readiness: Optional[Dict[str, Any]] = None
     created_at: str
     updated_at: str
 
@@ -919,15 +924,18 @@ def _transform_option(opt: dict, tier: int, idx: int, quote: Optional[dict] = No
     # also covers the cache-replay paths that re-derive pn_match_status from
     # match_type (gate finding F-B).
     _specs = specs or {}
+    from utils import intake_readiness
     _badge = badge_integrity.resolve(
         opt,
         advisory_level=_pn_match_level(opt, tier),
         searched_pn=_specs.get("part_number"),
         manufacturer=_specs.get("manufacturer"),
         claims_exact=(opt.get("match_type") == "Exact OEM"),
-        # R4 (F-15): no candidate in a spec-incomplete run may be badged exact —
-        # the request it would claim to match was never specified.
-        spec_incomplete=bool(_specs.get("spec_incomplete")),
+        # R4 (F-15) / PH-01 round 3c: no candidate in a run sourced with ANY
+        # requirement group overridden (identity and/or hygienic) may be badged
+        # exact. The same derived value drives the results banner.
+        spec_incomplete=bool(intake_readiness.unverified_requirements(_specs)),
+        unverified_reason=intake_readiness.unverified_badge_reason(_specs),
     )
     out = {
         "id":                    f"{opt.get('vendor_name','')}-t{tier}-{idx}",
@@ -1179,11 +1187,18 @@ def _transform_sourcing_results(raw: dict, quote_index: Optional[dict] = None,
     }
     # R4 (F-15): a run that reached sourcing on the explicit override says so, on
     # every read, above its results. Absent for every other run, so flag-off /
-    # sufficient runs are byte-identical.
-    if (specs or {}).get("spec_incomplete"):
-        from utils import intake_sufficiency
+    # sufficient runs are byte-identical. PH-01 round 3c: ONE marking for any
+    # overridden requirement group — the banner names what was not checked
+    # (identity-only keeps arc 5's text exactly), read from the same
+    # unverified_requirements the badge cap reads.
+    from utils import intake_readiness
+    _unverified = intake_readiness.unverified_requirements(specs)
+    if _unverified:
+        _lines = intake_readiness.unverified_banner_lines(specs)
         result["specIncomplete"] = True
-        result["specIncompleteBanner"] = intake_sufficiency.BANNER
+        result["specIncompleteBanner"] = _lines[0]
+        result["specIncompleteBannerLines"] = list(_lines)
+        result["unverifiedRequirements"] = list(_unverified)
     # RANKING_BANDS_V1 (spec §7) — a BANDED raw result additionally distinguishes
     # findings (Band A/B cards, banded order) from outreachTargets (the Band-C
     # ask-and-see block: onboarded supplier named first, capped seeds, provenance
@@ -1877,6 +1892,26 @@ def _redact_sourcing_error(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _intake_readiness_detail(specs: Dict[str, Any]) -> Dict[str, Any]:
+    """The run's readiness as the intake card reads it — ``intake_readiness.assess``
+    on the persisted specs (the unstripped dict confirm_intake reads)."""
+    from utils import intake_readiness
+    readiness = intake_readiness.assess(specs)
+    detail: Dict[str, Any] = {
+        "ready": readiness.ready,
+        "missing_attrs": list(readiness.missing_attrs),
+        "missing_labels": list(readiness.missing_labels),
+    }
+    if not readiness.ready:
+        # PH-01 round 3d: the refusal confirm-intake would return — its message and
+        # the source_anyway override — so the run page's spec panel can offer
+        # Source anyway without first provoking the 422.
+        refusal = readiness.refusal_detail() or {}
+        detail["message"] = refusal.get("message")
+        detail["override"] = refusal.get("override")
+    return detail
+
+
 def _orm_to_detail(run: SourcingRunORM) -> RunDetail:
     def _parse(col): return json.loads(col) if col else None
 
@@ -1943,6 +1978,7 @@ def _orm_to_detail(run: SourcingRunORM) -> RunDetail:
         rfq_draft_status=_rfq_draft_status_for_run(run.id),
         maintenance_handoff=_parse(run.maintenance_handoff_json),
         no_exact_match=no_exact_match,
+        intake_readiness=_intake_readiness_detail(_specs_for_badges),
         created_at=run.initiated_at.isoformat() if run.initiated_at else "",
         updated_at=run.updated_at.isoformat() if run.updated_at else "",
     )
@@ -2317,10 +2353,28 @@ def send_message(run_id: str, body: SendMessageRequest, request: Request):
 
     # Determine reply — do NOT auto-advance on sufficient=True.
     # The confirm-intake endpoint owns the intake → sourcing transition.
+    #
+    # PH-01: the chat may call the specs complete ONLY when intake_readiness — the
+    # same decision confirm_intake refuses on — says ready. Otherwise it asks for
+    # exactly the items confirm is missing (identity floor and/or hygienic set).
+    from utils import intake_readiness
     proceed_state = result.get("confidence_summary", {}).get("proceed_state", "")
-    if result["sufficient"]:
+    _specs_dict = result.get("asset_specs") or {}
+    readiness = intake_readiness.assess(_specs_dict)
+    # The intake agent withholds "sufficient" while the hygienic gate is open and
+    # hands back the hygienic question (missing_field "hygienic"); that is a
+    # readiness ask too, so it is phrased — and counted — here.
+    _hygienic_turn = (
+        result.get("confidence_summary", {}).get("missing_field") == "hygienic")
+    if (result["sufficient"] or _hygienic_turn) and not readiness.ready:
+        reply_text = intake_readiness.chat_ask(readiness, _specs_dict)
+        result["asset_specs"] = _specs_dict
+        if result.get("commit_message"):
+            # Intake cap / nothing-left-to-ask commit: keep the honest commit message,
+            # then say what confirm will still refuse without.
+            reply_text = f"{result['commit_message']} {reply_text}"
+    elif result["sufficient"]:
         _null_vals = {"", "N/A", "n/a", "null", "None", "UNKNOWN-PN", "Unknown", "unknown", None}
-        _specs_dict = result.get("asset_specs") or {}
         _has_model = _specs_dict.get("model") not in _null_vals
         _has_pn = _specs_dict.get("part_number") not in _null_vals
         _mfg_c = float(result.get("manufacturer_confidence") or 0)
@@ -2343,21 +2397,20 @@ def send_message(run_id: str, body: SendMessageRequest, request: Request):
                 "Verify the manufacturer in the panel before confirming."
             )
         else:
-            if not _has_model and not _has_pn:
-                _specs_dict["spec_based_sourcing"] = True
-                result["asset_specs"] = _specs_dict
-                reply_text = (
-                    "Sourcing by category — we have enough specs (manufacturer, type, key dimensions) "
-                    "to find functionally equivalent options. No specific part number or model is required."
-                )
-            else:
-                reply_text = "Specs look complete — review in the panel and confirm to start sourcing."
-        new_phase = current_phase
+            # (The pre-arc-5 "Sourcing by category — no specific part number or model
+            # is required" reply is gone: arc 5's identity floor refuses exactly those
+            # specs, so readiness routes them to the ask above.)
+            reply_text = "Specs look complete — review in the panel and confirm to start sourcing."
+    elif readiness.ready:
+        # PH-01 round 3c (finding 3): the agent's own sufficiency is False but the
+        # readiness decision confirm refuses on says ready — the buyer is NOT blocked.
+        # The agent may still ask, but only as an optional question.
+        reply_text = intake_readiness.ready_reply(result.get("follow_up_question"))
     else:
         reply_text = result.get("follow_up_question") or (
             "Can you provide more details? I need the manufacturer, model, and part number."
         )
-        new_phase = current_phase
+    new_phase = current_phase
 
     # Persist updated specs (and phase) back to the DB
     with _SessionFactory() as session:
@@ -2503,17 +2556,36 @@ async def upload_nameplate(
         # (a) High confidence — both thresholds met
         elif result.get("sufficient"):
             ident = " ".join(p for p in [mfg, pn or model] if p)
-            reply_text = (
-                f"Extracted: {ident} — specs are in the panel. "
-                "Review and confirm to start sourcing."
-            )
+            # PH-01: "confirm to start sourcing" only when confirm would proceed —
+            # the same readiness decision confirm_intake refuses on.
+            from utils import intake_readiness
+            readiness = intake_readiness.assess(specs)
+            if readiness.ready:
+                reply_text = (
+                    f"Extracted: {ident} — specs are in the panel. "
+                    "Review and confirm to start sourcing."
+                )
+            else:
+                reply_text = (
+                    f"Extracted: {ident} — specs are in the panel. "
+                    f"{intake_readiness.chat_ask(readiness, specs)}"
+                )
         # (b) Both confidences above threshold but a required field is still missing
         elif mfg_conf >= 70 and part_conf >= 70 and mfg and mfg not in ("Unknown", "N/A", "null", "unknown"):
             ident = " ".join(p for p in [mfg, pn or model] if p)
-            reply_text = (
-                f"Read the nameplate: {ident}. "
-                "Some required fields may still be missing — review the panel and fill in any gaps before confirming."
-            )
+            # PH-01 round 3d: "may still be missing" only when it is — when the
+            # readiness decision says ready, the same ready wording the chat uses.
+            from utils import intake_readiness
+            if intake_readiness.assess(specs).ready:
+                reply_text = (
+                    f"Read the nameplate: {ident}. "
+                    f"{intake_readiness.ready_reply(result.get('follow_up_question'))}"
+                )
+            else:
+                reply_text = (
+                    f"Read the nameplate: {ident}. "
+                    "Some required fields may still be missing — review the panel and fill in any gaps before confirming."
+                )
         # (c) Low confidence — something extracted but at least one threshold not met
         elif mfg and mfg not in ("Unknown", "N/A", "null", "unknown"):
             ident = " ".join(p for p in [mfg, model] if p)
@@ -3071,6 +3143,13 @@ def confirm_intake(
     anyway, but never silently: an acknowledgement is recorded on the run, the run is
     marked `spec_incomplete`, its results carry a banner saying they have NOT been
     checked against the requirement, and no candidate in it may be badged exact.
+    The same override exits the hygienic question set (R5, reason
+    "hygienic_spec_incomplete"); that records `hygienic_override_ack` on the run,
+    and the run is marked the same way (PH-01 round 3c): a banner naming the
+    unconfirmed hygienic items and no exact badge — both read from
+    `intake_readiness.unverified_requirements`.
+    Both refusals come from `intake_readiness.assess` — the decision the chat's
+    "Specs look complete" reply also reads (PH-01).
 
     Writes the inventory stub and transitions phase in a single DB commit so
     there is no window where the run is phase=sourcing without inventory_result.
@@ -3159,29 +3238,27 @@ def confirm_intake(
                     },
                 )
 
-        # Identity-sufficiency floor (R4, F-15) — AFTER the registry-driven family
-        # guard above, which already enforces required fields for the classes that
-        # define them. Where the registry defines none, R4's minimum applies: a
-        # manufacturer plus a model, or a manufacturer part number. Refuses back to
-        # clarification unless the buyer explicitly overrides.
-        from utils import intake_sufficiency
-        sufficiency = intake_sufficiency.identity_block(specs_dict)
-        if sufficiency is not None and not source_anyway:
-            raise HTTPException(status_code=422, detail=sufficiency.as_detail())
-        if sufficiency is not None:
-            intake_sufficiency.record_override(specs_dict, sufficiency)
+        # Readiness (PH-01): ONE decision over both arc-5 gates, the same one the
+        # chat's "Specs look complete" reply reads (send_message), so the chat never
+        # invites a confirm this refuses. AFTER the registry-driven family guard above.
+        #  - Identity floor (R4, F-15): where the registry defines no required fields,
+        #    a manufacturer plus a model, or a manufacturer part number.
+        #  - Hygienic question set (R5, F-16): an instrument or fitting in hygienic
+        #    context (CIP/SIP/sanitary/washdown/food/dairy/beverage/pharma/3-A/EHEDG/
+        #    tri-clamp) must answer process connection type and size, wetted material
+        #    and hygienic certification. Question-set only — no equivalence logic.
+        # Refused back to clarification (identity first) unless the buyer explicitly
+        # overrides with source_anyway, which records an acknowledgement per gate.
+        from utils import intake_readiness, intake_sufficiency
+        readiness = intake_readiness.assess(specs_dict)
+        if not readiness.ready and not source_anyway:
+            raise HTTPException(status_code=422, detail=readiness.refusal_detail())
+        if readiness.identity is not None:
+            intake_sufficiency.record_override(specs_dict, readiness.identity)
+        if readiness.hygienic is not None:
+            intake_readiness.record_hygienic_override(specs_dict, readiness.hygienic)
+        if not readiness.ready:
             run.asset_specs_json = json.dumps(specs_dict)
-
-        # Hygienic question set (R5, F-16) — a QUESTION-SET addition, nothing more.
-        # When intake context indicates hygienic service (CIP/SIP/sanitary/washdown/
-        # food/dairy/beverage/pharma/3-A/EHEDG/tri-clamp), an instrument or fitting
-        # must answer process connection type and size, wetted material and hygienic
-        # certification before confirm. The same explicit source_anyway override
-        # applies. No hygienic EQUIVALENCE logic anywhere in this arc.
-        from utils import hygienic_context
-        hygienic = hygienic_context.hygienic_block(specs_dict)
-        if hygienic is not None and not source_anyway:
-            raise HTTPException(status_code=422, detail=hygienic.as_detail())
 
         urgency_factor, warranty_status = _commit_intake_to_sourcing(
             session, run, specs_dict, exact_only=exact_only, open_family=open_family,
@@ -3192,7 +3269,7 @@ def confirm_intake(
     _run_capture.capture_user_action(
         run_id, "confirm_intake",
         detail={"exact_only": exact_only, "open_family": open_family,
-                "source_anyway": bool(sufficiency is not None or hygienic is not None)},
+                "source_anyway": not readiness.ready},
     )
     return {"run_id": run_id, "phase": Phase.SOURCING.value}
 
@@ -3218,11 +3295,23 @@ def _commit_intake_to_sourcing(
     the background task (confirm_intake schedules itself; the intake consumer
     lets this helper schedule).
 
+    Readiness IS here (PH-01 round 3d): this is the only function that starts a
+    sourcing run (pinned by test_ph01_round3d), so it refuses — raising
+    ``intake_readiness.IntakeNotReady`` BEFORE any mutation — unless
+    ``intake_readiness.assess`` says ready or a recorded ``source_anyway``
+    acknowledgement covers every missing group. confirm_intake records its
+    acknowledgements first, so its behaviour is unchanged; the channel consumer
+    never records one, so a not-ready email/SMS/voice request is refused and
+    clarified instead of sourced.
+
     The family-variant binding guard is NOT here — it is a pre-gate each caller
     runs (confirm_intake raises 422; the intake consumer replies
     NEEDS_CLARIFICATION). This helper assumes the family guard already passed.
     NEVER places/approves/advances an order — sourcing only (auto-order is out).
     """
+    from utils import intake_readiness
+    intake_readiness.ensure_ready_for_sourcing(specs_dict)
+
     if exact_only:
         specs_dict["exact_only"] = True
     if open_family:
@@ -3262,6 +3351,10 @@ def _fire_sourcing_run_for_intake(
     parser's proposed specs, and fires ``_commit_intake_to_sourcing`` (the same
     transition in-app confirm_intake uses) → Phase.SOURCING + the background
     sourcing task. Returns the run_id, or None on a missing tenant / store error.
+    Raises ``intake_readiness.IntakeNotReady`` when the transition refuses a
+    not-ready request (PH-01 round 3d) — the consumer turns that into its
+    clarification reply. A channel request never overrides, so no run row is left
+    behind: the new run is only flushed, and the refusal rolls it back.
 
     This is the EXISTING pipeline seam (I1) the channel-agnostic consumer feeds:
     create_run (bare, tenant-stamped) → seed specs → confirm-intake transition.
@@ -3290,16 +3383,18 @@ def _fire_sourcing_run_for_intake(
         initiated_at=now,
         updated_at=now,
     )
+    from utils import intake_readiness
     try:
         with _SessionFactory() as session:
             session.add(run)
-            session.commit()
-            session.refresh(run)
+            session.flush()
             _commit_intake_to_sourcing(
                 session, run, specs_dict, exact_only=False, open_family=False,
                 background_tasks=background_tasks,
             )
         return run.id
+    except intake_readiness.IntakeNotReady:
+        raise
     except Exception as exc:
         print(f"[Intake] _fire_sourcing_run_for_intake failed: {exc}")
         return None

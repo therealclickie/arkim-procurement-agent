@@ -240,3 +240,287 @@ class TestConfirmAsksBeforeSourcing:
         rid = _seed(api, S3_GAUGE)
         assert api.post(
             f"/api/runs/{rid}/confirm-intake?source_anyway=true").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# PH-01 — the gate has to be answerable in the chat
+# ---------------------------------------------------------------------------
+
+#: The post-hardening evaluation's own step-3 reply, which answered all four fields
+#: and still left the run blocked (``eval/e2e-post-hardening``,
+#: ``eval/e2e/evidence/s3b_step3_answered.json``).
+_ANSWER_TEXT = ("It's on a 1.5 inch Tri-Clamp connection, 316L stainless wetted "
+                "parts, 3-A certified sanitary gauge.")
+
+#: What a schema-compliant extractor returns for that reply: the connection TYPE and
+#: the certification land in their own fields, the SIZE stays in connection_size.
+_ANSWER_EXTRACTION = {
+    "manufacturer":            "Ashcroft",
+    "model":                   "1032",
+    "part_number":             None,
+    "category":                "Part",
+    "detected_type":           "pressure gauge",
+    "description":             ("Ashcroft 1032 sanitary pressure gauge, 1.5\" Tri-Clamp, "
+                                "316L wetted parts, 3-A certified, CIP return line"),
+    "connection_size":         "1.5 inch",
+    "process_connection":      "Tri-Clamp",
+    "material_spec":           "316L stainless steel",
+    "hygienic_certification":  "3-A",
+    "manufacturer_confidence": 95,
+    "part_id_confidence":      85,
+    "confidence_reasoning":    "Manufacturer and model stated; sanitary fitment answered.",
+}
+
+
+class TestTheGateIsAnswerableInChat:
+    """PH-01 — a required field the extractor cannot fill is an un-clearable gate.
+
+    The evaluation answered all four in chat and stayed blocked: the gate named
+    ``process_connection`` and ``hygienic_certification``, which existed neither on
+    ``AssetSpecs`` nor in the extractor's JSON schema, so the answers landed in
+    ``connection_size`` / ``material_spec`` / ``description`` and those two could
+    never clear — ``source_anyway`` was the only exit. These tests hold the
+    three-way contract (gate field <-> model field <-> extractor key) that broke.
+    """
+
+    def test_every_required_field_has_a_real_assetspecs_field(self):
+        import dataclasses
+        from utils.models import AssetSpecs
+
+        model_fields = {f.name for f in dataclasses.fields(AssetSpecs)}
+        for field in hygienic_context.REQUIRED_FIELDS:
+            sources = set(hygienic_context._FIELD_SOURCES[field])
+            assert sources & model_fields, (
+                f"{field} is required by the hygienic gate but no source key "
+                f"{sorted(sources)} exists on AssetSpecs — intake cannot store the "
+                f"answer, so the gate can only be exited by source_anyway (PH-01)")
+
+    def test_every_required_field_is_an_extractor_key(self):
+        from utils.procurement_agent.agents.intake_agent import _EXTRACTION_SYSTEM
+
+        for field in hygienic_context.REQUIRED_FIELDS:
+            sources = hygienic_context._FIELD_SOURCES[field]
+            assert any(f'"{key}"' in _EXTRACTION_SYSTEM for key in sources), (
+                f"{field} is required by the hygienic gate but none of {list(sources)} "
+                f"is a key in the intake extractor's JSON schema — the extractor has "
+                f"nowhere to put the user's answer (PH-01)")
+
+    def test_answering_all_four_in_chat_clears_the_gate(self, api):
+        """The evaluation's step 3, end to end: reply -> extraction -> confirm 200."""
+        from unittest.mock import MagicMock, patch
+
+        from utils.models import SourcingRun
+        from utils.procurement_agent.agents.intake_agent import IntakeAgent
+
+        prior = dict(S3_GAUGE, model="1032")
+        blocked = _seed(api, prior)
+        assert api.post(f"/api/runs/{blocked}/confirm-intake").status_code == 422
+
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = {"content": [{"text": json.dumps(_ANSWER_EXTRACTION)}]}
+        with patch("utils.procurement_agent.agents.intake_agent.requests.post",
+                   return_value=resp):
+            result = IntakeAgent(anthropic_api_key="test-key").run(
+                SourcingRun(asset_specs_json=prior),
+                {"text": _ANSWER_TEXT, "images": []})
+
+        specs = result["asset_specs"]
+        assert specs["process_connection"] == "Tri-Clamp"
+        assert specs["hygienic_certification"] == "3-A"
+        assert hygienic_context.missing_fields(specs) == ()
+
+        rid = _seed(api, specs)
+        answered = api.post(f"/api/runs/{rid}/confirm-intake")
+        assert answered.status_code == 200, answered.json()
+        assert answered.json()["phase"] == "sourcing"
+
+    def test_an_explicit_not_required_answers_the_certification(self):
+        """The one required field whose honest answer can be a negative."""
+        answered = dict(S3_GAUGE, process_connection="Tri-Clamp",
+                        connection_size='1.5"', wetted_material="316L",
+                        hygienic_certification="not required")
+        assert hygienic_context.hygienic_block(answered) is None
+
+
+# ---------------------------------------------------------------------------
+# PH-01 review — the chat's "complete" and the confirm gate are ONE check
+# ---------------------------------------------------------------------------
+
+#: The evaluation's own s3b run: the user messages, the specs the LIVE extractor
+#: actually produced on each turn, and the contradicting replies
+#: (``eval/e2e-post-hardening:eval/e2e/evidence/s3b_step{1_chat,3_answered}.json``).
+#: Unlike ``_ANSWER_EXTRACTION`` above, nothing here is hand-authored: step 3's specs
+#: are the pre-fix extractor's real output, with the type left inside
+#: ``connection_size`` and the certification only in ``description``.
+_S3B = json.loads(
+    (Path(__file__).parent / "fixtures" / "eval_s3b_hygienic.json").read_text(encoding="utf-8")
+)
+
+_COMPLETE = "Specs look complete"
+
+#: The step-3 gauge with its hygienic context removed, and nothing else changed.
+_NO_HYGIENIC_CONTEXT = {"description": "Ashcroft 1032 pressure gauge, 0-60 PSI",
+                        "use_case": "hydraulic press gauge",
+                        "confidence_reasoning": "Manufacturer and model stated.",
+                        "connection_size": "1/4 inch", "material_spec": None}
+
+
+def _chat(api, rid, text, extraction, monkeypatch):
+    """One chat turn through send_message with the extractor returning ``extraction``."""
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"content": [{"text": json.dumps(extraction)}]}
+    with patch("utils.procurement_agent.agents.intake_agent.requests.post",
+               return_value=resp):
+        sent = api.post(f"/api/runs/{rid}/messages", json={"content": text})
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    assert sent.status_code == 200, sent.text
+    return sent.json()["message"]["content"]
+
+
+def _specs(api, rid):
+    return api.get(f"/api/runs/{rid}").json()["asset_specs"]
+
+
+class TestTheChatAndTheGateAgree:
+    """Review finding 1: the reply "Specs look complete" came from the intake agent's
+    own sufficiency verdict while confirm-intake ran ``hygienic_block`` — two
+    independent checks, so the chat could say "confirm" to a run the gate refused.
+    The intake agent now runs the gate's function on the specs it persists."""
+
+    def test_the_evaluations_step1_is_asked_not_told_complete(self, api, monkeypatch):
+        assert _S3B["step1_reply"].startswith(_COMPLETE)       # what the eval saw
+        rid = api.post("/api/runs", json={}).json()["id"]
+        reply = _chat(api, rid, _S3B["step1_user_message"], _S3B["step1_specs"],
+                      monkeypatch)
+
+        refused = api.post(f"/api/runs/{rid}/confirm-intake")
+        assert refused.status_code == 422
+        assert reply == refused.json()["detail"]["message"]
+        assert not reply.startswith(_COMPLETE)
+
+    def test_the_evaluations_step3_answer_leaves_only_the_certification(
+            self, api, monkeypatch):
+        """The real pre-fix extraction of the step-3 reply: "1.5 inch Tri-Clamp" in
+        connection_size, "3-A certified" only in description."""
+        assert _S3B["step3_reply"].startswith(_COMPLETE)       # what the eval saw
+        rid = _seed(api, _S3B["step1_specs"])
+        reply = _chat(api, rid, _S3B["step3_user_message"], _S3B["step3_specs"],
+                      monkeypatch)
+
+        specs = _specs(api, rid)
+        assert specs["process_connection"] == "Tri-Clamp"      # finding 3 — derived
+        refused = api.post(f"/api/runs/{rid}/confirm-intake")
+        assert refused.status_code == 422
+        assert refused.json()["detail"]["missing_attrs"] == ["hygienic_certification"]
+        assert reply == refused.json()["detail"]["message"]
+
+        # Answering the one remaining question clears both, together.
+        reply = _chat(api, rid, "3-A", {"hygienic_certification": "3-A"}, monkeypatch)
+        assert reply.startswith(_COMPLETE)
+        assert api.post(f"/api/runs/{rid}/confirm-intake").status_code == 200
+
+    @pytest.mark.parametrize("case,overrides", [
+        ("step3 as extracted (no certification)", {}),
+        ("certification 3-A", {"hygienic_certification": "3-A"}),
+        ("certification EHEDG", {"hygienic_certification": "EHEDG"}),
+        ("certification 'none'", {"hygienic_certification": "none"}),
+        ("certification 'None'", {"hygienic_certification": "None"}),
+        ("certification 'not needed'", {"hygienic_certification": "not needed"}),
+        ("certification 'N/A' is not an answer", {"hygienic_certification": "N/A"}),
+        ("size without a type", {"connection_size": "1.5 inch",
+                                 "hygienic_certification": "3-A"}),
+        ("type as capitalised 'None'", {"connection_size": "1.5 inch",
+                                        "process_connection": "None",
+                                        "hygienic_certification": "3-A"}),
+        ("NPT in the size", {"connection_size": '1/4" NPT',
+                             "hygienic_certification": "3-A"}),
+        ("no wetted material", {"material_spec": None,
+                                "hygienic_certification": "3-A"}),
+        ("no hygienic context", _NO_HYGIENIC_CONTEXT),
+        # Round 2, findings 1-2: the arc-5 identity floor, which the chat used to
+        # call "complete" while confirm refused it 422 identity_insufficient. Each
+        # identity shape with the step-3 hygienic context (certification still open,
+        # so BOTH gates refuse) and without it (the identity floor alone).
+        ("model only, hygienic", {"manufacturer": None}),
+        ("model only, no hygienic context",
+         dict(_NO_HYGIENIC_CONTEXT, manufacturer=None)),
+        ("manufacturer only, hygienic", {"model": None}),
+        ("manufacturer only, no hygienic context",
+         dict(_NO_HYGIENIC_CONTEXT, model=None)),
+        ("no identity, hygienic", {"manufacturer": None, "model": None}),
+        ("no identity, no hygienic context",
+         dict(_NO_HYGIENIC_CONTEXT, manufacturer=None, model=None)),
+    ])
+    def test_the_panel_says_complete_iff_the_gate_confirms(
+            self, api, monkeypatch, case, overrides):
+        """Review finding 4: one table, both surfaces. For every spec state the chat
+        reply and confirm-intake agree — "complete" exactly when confirm returns
+        200, and otherwise the chat asks for exactly what the 422 says is missing:
+        the hygienic question verbatim when that is the only gate open, and every
+        missing item across both gates when the identity floor refuses."""
+        extraction = dict(_S3B["step3_specs"], **overrides)
+        rid = api.post("/api/runs", json={}).json()["id"]
+        reply = _chat(api, rid, _S3B["step3_user_message"], extraction, monkeypatch)
+        confirm = api.post(f"/api/runs/{rid}/confirm-intake")
+
+        assert reply.startswith(_COMPLETE) == (confirm.status_code == 200), (
+            case, reply, confirm.json())
+        identity_row = case.startswith(("model only", "manufacturer only", "no identity"))
+        if confirm.status_code == 200:
+            assert not identity_row, case
+            return
+        assert confirm.status_code == 422, case
+        detail = confirm.json()["detail"]
+        if not identity_row:
+            assert detail["reason"] == "hygienic_spec_incomplete", case
+            assert reply == detail["message"], case
+            return
+        assert detail["reason"] == "identity_insufficient", case
+        for label in detail["all_missing_labels"]:
+            assert label in reply, (case, label, reply)
+        hygienic_row = not case.endswith("no hygienic context")
+        assert ("hygienic_certification" in detail["all_missing_attrs"]) == hygienic_row
+
+
+class TestNormalise:
+    def test_a_negative_certification_survives_the_merge_as_not_required(self):
+        """Review finding 6: the question offers "none", which ``_NULL_VALUES`` drops."""
+        for said in ("none", "None", "NONE", "no", "not needed", "Not required."):
+            specs = hygienic_context.normalise({"hygienic_certification": said})
+            assert specs["hygienic_certification"] == hygienic_context.NOT_REQUIRED, said
+
+    def test_unknowns_are_not_negatives(self):
+        for said in ("N/A", "unknown", "", None):
+            specs = hygienic_context.normalise({"hygienic_certification": said})
+            assert specs["hygienic_certification"] == said
+        assert "hygienic_certification" in hygienic_context.missing_fields(
+            {"hygienic_certification": "N/A"})
+
+    @pytest.mark.parametrize("size,expected", [
+        ("1.5 inch Tri-Clamp", "Tri-Clamp"),
+        ('1.5" tri clamp', "Tri-Clamp"),
+        ('1/4" NPT', "NPT"),
+        ("DN40 DIN 11851", "DIN 11851"),
+        ("2 inch flanged", "flanged"),
+        ("1.5 inch", None),
+        ("SMSL-2", None),
+    ])
+    def test_the_type_is_derived_from_a_size_answer(self, size, expected):
+        specs = hygienic_context.normalise({"connection_size": size})
+        assert specs.get("process_connection") == expected
+
+    def test_a_stated_type_is_never_overwritten(self):
+        specs = hygienic_context.normalise({"connection_size": "1.5 inch Tri-Clamp",
+                                            "process_connection": "DIN 11851"})
+        assert specs["process_connection"] == "DIN 11851"
+
+    def test_a_run_persisted_before_the_fix_confirms_on_its_own_specs(self):
+        """Finding 3: the gate itself derives the type, so the evaluation's persisted
+        step-3 specs need only the certification, not a re-answer of the connection."""
+        assert hygienic_context.missing_fields(_S3B["step3_specs"]) == (
+            "hygienic_certification",)

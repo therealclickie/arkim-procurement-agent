@@ -74,6 +74,21 @@ FIELD_LABELS: dict[str, str] = {
 }
 
 #: Spec keys that already answer each required field, in preference order.
+#:
+#: EVERY required field must be reachable from the intake extractor — at least one of
+#: its source keys has to be a real ``AssetSpecs`` field AND a key in the extractor's
+#: JSON schema (``intake_agent._EXTRACTION_SYSTEM``), or the gate asks a question the
+#: chat can never answer and only ``source_anyway`` can exit it. That is exactly what
+#: evaluation finding PH-01 measured: ``process_connection`` and
+#: ``hygienic_certification`` were named here but existed nowhere else, so a user who
+#: answered all four verbatim stayed blocked. Both are now AssetSpecs fields and
+#: extractor keys; ``test_hygienic_context.TestTheGateIsAnswerableInChat`` holds the
+#: contract. Extending REQUIRED_FIELDS means extending both of those too.
+#:
+#: ``hygienic_certification`` is the one field whose honest answer can be a negative.
+#: The question itself offers "none", but the shared ``_NULL_VALUES`` set reads a bare
+#: "none" as *unanswered*, so :func:`normalise` rewrites any explicit negative to
+#: ``NOT_REQUIRED`` before intake's merge can drop it (PH-01 review, finding 6).
 _FIELD_SOURCES: dict[str, tuple[str, ...]] = {
     "process_connection":      ("process_connection", "connection", "connection_type"),
     "process_connection_size": ("process_connection_size", "connection_size"),
@@ -84,6 +99,67 @@ _FIELD_SOURCES: dict[str, tuple[str, ...]] = {
 _REASON = "hygienic_spec_incomplete"
 
 from utils.procurement_agent.agents.intake_agent import _NULL_VALUES
+
+#: Case-folded null tokens. ``_NULL_VALUES`` is case-sensitive ("none" is null but
+#: "None" is not); the gate must not read a capitalised null as an answer.
+_NULL_FOLDED: frozenset[str] = frozenset(
+    v.lower() for v in _NULL_VALUES if isinstance(v, str))
+
+#: The canonical explicit-negative certification answer.
+NOT_REQUIRED = "not required"
+
+#: What a buyer types when no hygienic certification is needed: "none", "no", "not
+#: required", "not needed", plus "none required" — the choice the question itself
+#: offers. Deliberately excludes "N/A" AND "not applicable" (one reading for both
+#: spellings, PH-01 review round 2 finding 6) and "unknown": those mean *not
+#: stated*, not *not needed*, and stay unanswered.
+_CERT_NEGATIVES: frozenset[str] = frozenset({
+    "none", "no", "not required", "not needed", "none required",
+})
+
+#: Trailing punctuation a typed answer may carry ("None.", "N/A.", "not applicable!").
+_TRAILING_PUNCT = ".,;:!?"
+
+
+def cert_token(value: Any) -> Optional[str]:
+    """THE token normaliser for every certification check (PH-01 round 3c, finding 4):
+    casefold, trim whitespace, strip trailing punctuation. None for a non-string.
+
+    Every certification set below is stored in this form and every value is compared
+    in it, so "None." is answered like "none" and "Not applicable." is unanswered
+    like "not applicable".
+    """
+    if not isinstance(value, str):
+        return None
+    return value.strip().casefold().rstrip(_TRAILING_PUNCT).strip()
+
+
+_CERT_NEGATIVES = frozenset(cert_token(v) for v in _CERT_NEGATIVES)
+
+#: Certification replies that are NOT answers: the shared null tokens ("N/A",
+#: "unknown", "none" is handled as a negative first) plus the long forms of "N/A"
+#: the null set does not list.
+_CERT_UNSTATED: frozenset[str] = frozenset(
+    {cert_token(v) for v in ("not applicable", "n.a.", "na")}
+    | {cert_token(v) for v in _NULL_VALUES if isinstance(v, str)})
+
+#: The certification choices the question offers, verbatim.
+CERT_CHOICES = "3-A, EHEDG, or none required"
+
+#: Connection TYPES a size answer commonly carries ("1.5 inch Tri-Clamp"), in match
+#: order, with the canonical name recorded as ``process_connection``. The evaluation's
+#: extractor stored exactly that string in ``connection_size`` (PH-01 review,
+#: finding 3); deriving the type from it means a run persisted before the extractor
+#: learned the split, or a turn where the model ignores it, is not left blocked.
+_CONNECTION_TYPES: tuple[tuple[str, str], ...] = (
+    (r"tri[\s-]?clamp", "Tri-Clamp"),
+    (r"din\s*11851", "DIN 11851"),
+    (r"(?<![a-z])sms(?![a-z])", "SMS"),
+    (r"butt[\s-]?weld", "butt weld"),
+    (r"(?<![a-z])n\.?p\.?t(?![a-z])", "NPT"),
+    (r"(?<![a-z])bsp[pt]?(?![a-z])", "BSP"),
+    (r"flange", "flanged"),
+)
 
 
 @dataclass(frozen=True)
@@ -146,13 +222,81 @@ def is_instrument_or_fitting(specs: Optional[dict[str, Any]]) -> bool:
     return any(t in kind for t in _INSTRUMENT_TOKENS)
 
 
-def _answered(specs: dict[str, Any], field: str) -> bool:
+def _is_null(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in _NULL_FOLDED
+    return False
+
+
+def _is_cert_negative(value: Any) -> bool:
+    return cert_token(value) in _CERT_NEGATIVES
+
+
+def _cert_stated(value: Any) -> bool:
+    """A certification answer: an explicit negative, or any other non-null string."""
+    token = cert_token(value)
+    if token is None:
+        return value is not None          # a non-string answer, as _is_null reads it
+    if token in _CERT_NEGATIVES:
+        return True
+    return token not in _CERT_UNSTATED
+
+
+def derived_process_connection(specs: Optional[dict[str, Any]]) -> Optional[str]:
+    """The connection TYPE carried inside a connection SIZE answer, if any."""
+    specs = specs or {}
+    for key in _FIELD_SOURCES["process_connection_size"]:
+        value = specs.get(key)
+        if not isinstance(value, str):
+            continue
+        text = value.lower()
+        for pattern, name in _CONNECTION_TYPES:
+            if re.search(pattern, text):
+                return name
+    return None
+
+
+def normalise(specs: dict[str, Any]) -> dict[str, Any]:
+    """Put the hygienic answers where the gate reads them. Mutates and returns ``specs``.
+
+    - an explicit certification negative ("none", "None", "no", "not needed") becomes
+      ``NOT_REQUIRED`` — run this on the extractor output BEFORE intake's merge, which
+      drops the ``_NULL_VALUES`` "none";
+    - an unanswered ``process_connection`` is derived from a connection-size answer
+      that names the type ("1.5 inch Tri-Clamp" -> "Tri-Clamp").
+
+    Never overwrites an answered field.
+    """
+    for key in _FIELD_SOURCES["hygienic_certification"]:
+        if _is_cert_negative(specs.get(key)):
+            specs[key] = NOT_REQUIRED
+    if not _stated(specs, "process_connection"):
+        derived = derived_process_connection(specs)
+        if derived:
+            specs["process_connection"] = derived
+    return specs
+
+
+def _stated(specs: dict[str, Any], field: str) -> bool:
+    """True iff one of the field's own source keys carries an answer."""
     for key in _FIELD_SOURCES[field]:
         value = specs.get(key)
-        if isinstance(value, str):
-            value = value.strip()
-        if value not in _NULL_VALUES:
+        if field == "hygienic_certification":
+            if _cert_stated(value):
+                return True
+            continue
+        if not _is_null(value):
             return True
+    return False
+
+
+def _answered(specs: dict[str, Any], field: str) -> bool:
+    if _stated(specs, field):
+        return True
+    if field == "process_connection":
+        return derived_process_connection(specs) is not None
     return False
 
 
@@ -168,15 +312,19 @@ def question(missing: Iterable[str]) -> str:
     Built by joining ``FIELD_LABELS`` for the missing fields, so the question can
     only ever name fields R5 defines.
     """
-    labels = [FIELD_LABELS[f] for f in missing if f in FIELD_LABELS]
+    missing = [f for f in missing if f in FIELD_LABELS]
+    labels = [FIELD_LABELS[f] for f in missing]
     if not labels:
         return ""
     if len(labels) == 1:
         phrase = labels[0]
     else:
         phrase = ", ".join(labels[:-1]) + " and " + labels[-1]
-    return (f"This is hygienic service, so the part has to match the skid: "
-            f"what {phrase}?")
+    ask = (f"This is hygienic service, so the part has to match the skid: "
+           f"what {phrase}?")
+    if "hygienic_certification" in missing:
+        ask += f" For the certification: {CERT_CHOICES}?"
+    return ask
 
 
 def hygienic_block(specs: Optional[dict[str, Any]],

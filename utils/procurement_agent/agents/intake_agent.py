@@ -566,6 +566,8 @@ Return ONLY valid JSON with exactly these keys — no additional keys, no markdo
   "seal_face_size": string or null,
   "connection_size": string or null,
   "material_spec": string or null,
+  "process_connection": string or null,
+  "hygienic_certification": string or null,
   "use_case": string or null,
   "manufacturer_confidence": integer 0-100,
   "part_id_confidence": integer 0-100,
@@ -595,6 +597,17 @@ Rules:
   - Set fields to null if not determinable — never invent or estimate values
   - description: one line summarizing what the item is, from the input
   - If prior specs are provided, merge carefully: only update fields with new information
+
+HYGIENIC / SANITARY SERVICE (CIP, SIP, washdown, food, dairy, beverage, pharma):
+  A sanitary instrument or fitting has to match the skid, so these answers get their own
+  fields — never leave them only inside `description`:
+  - process_connection: the connection TYPE alone — "Tri-Clamp", "NPT", "flanged",
+    "DIN 11851", "butt weld". The SIZE stays in connection_size. "1.5 inch Tri-Clamp"
+    therefore fills BOTH: connection_size "1.5 inch", process_connection "Tri-Clamp".
+  - material_spec: the WETTED material on a sanitary item — e.g. "316L stainless".
+  - hygienic_certification: the sanitary certification the part must carry — "3-A",
+    "EHEDG", or "3-A, EHEDG". When the user says none is needed, write "not required";
+    never the bare word "none", which reads as "not answered". null if not stated.
 
 COMPONENT-OF A PART (critical — do not attribute the parent's OEM to the component):
   When the input describes a COMPONENT of a named parent machine — a replacement
@@ -784,11 +797,17 @@ class IntakeAgent:
         elif not isinstance(extracted, dict):
             extracted = {}
 
+        # Hygienic answers go where the confirm gate reads them (PH-01). BEFORE the
+        # merge: a certification "none" is an answer here, but the merge drops it.
+        from utils import hygienic_context
+        hygienic_context.normalise(extracted)
+
         # Merge with prior specs — new non-null values win
         merged = dict(prior_specs)
         for k, v in extracted.items():
             if not isinstance(v, (list, dict)) and v not in _NULL_VALUES:
                 merged[k] = v
+        hygienic_context.normalise(merged)
 
         # Phase 1 — quantity capture (gated behind INTAKE_TYPE_AWARE). Inert when
         # the flag is off: zero new keys, byte-identical specs. When on, a stated
@@ -911,6 +930,23 @@ class IntakeAgent:
                 state = "forced_commit"
                 sufficient = True
                 follow_up = None
+
+        # PH-01 — "sufficient" drives the chat's "Specs look complete — confirm to
+        # start sourcing", so it must never be True while confirm_intake's hygienic
+        # gate would refuse the same specs. Same function, same input: the gate reads
+        # the persisted specs, which are exactly `merged`. The explicit override stays
+        # `source_anyway` on confirm (or force_proceed above), never the chat.
+        # Read through intake_readiness.assess — the ONE readiness call site
+        # (PH-01 round 3c, finding 5). Only its hygienic gate applies here: the
+        # identity floor is phrased by send_message, which re-assesses.
+        from utils import intake_readiness
+        hygienic = intake_readiness.assess(merged).hygienic
+        if sufficient and hygienic is not None:
+            state = "needs_clarification"
+            missing_field = "hygienic"
+            sufficient = False
+            follow_up = hygienic.message
+            commit_message = None
 
         # Carry the pending flag forward into the persisted specs. When the
         # variant ask is issued this turn, _next_clarification sets it True; when
