@@ -146,12 +146,18 @@ if (-not $SkipBaseline) {
 
     Write-Host "Baseline: frontend..." -ForegroundColor Cyan
     Push-Location (Join-Path $RepoPath "frontend")
+    # Vitest colours its summary even when piped, and PowerShell -match is
+    # case-insensitive, so strip ANSI codes and match the summary line exactly.
+    $env:NO_COLOR = '1'
     $fe = (npm test 2>&1 | Out-String)
+    $feExit = $LASTEXITCODE
+    Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue
     Pop-Location
-    $feLine = ($fe -split "`n" | Where-Object { $_ -match 'Tests\s+\d+ passed' } | Select-Object -Last 1)
-    if ($fe -match 'Tests\s+.*\d+ failed' -or -not $feLine) {
-        Write-Host "Frontend baseline is not green." -ForegroundColor Red
-        Write-Host (($fe -split "`n" | Where-Object { $_ -match 'Tests' }) -join "`n")
+    $fe = $fe -replace "\x1b\[[0-9;]*[A-Za-z]", ''
+    $feLine = ($fe -split "`n" | Where-Object { $_ -cmatch '^\s*Tests\s+.*\d+ passed' } | Select-Object -Last 1)
+    if ($feExit -ne 0 -or -not $feLine -or $feLine -cmatch '\d+ failed') {
+        Write-Host "Frontend baseline is not green (npm exit $feExit)." -ForegroundColor Red
+        Write-Host (($fe -split "`n" | Where-Object { $_ -cmatch '^\s*(Test Files|Tests)\s' }) -join "`n")
         throw "Frontend baseline failed."
     }
     $measuredFe = [int]([regex]::Match($feLine, '(\d+) passed').Groups[1].Value)
@@ -433,7 +439,9 @@ R1 FIRST: 'git diff --name-status $BranchPoint HEAD'. Every pre-existing test fi
 loop/AUTHORISED_TEST_EDITS.txt. Any other is an immediate CHANGES_REQUESTED.
 
 R2 is BLOCKER-class: enumerate the buyer-facing routes in the ACTUAL router yourself and compare with the
-report's K2 list and the isolation tests. A buyer endpoint with no isolation test is a BLOCKER.
+report's K2 list and the isolation tests. A buyer endpoint with no isolation test is a BLOCKER. Confirm the
+T4 structural guard enumerates app.routes at runtime rather than a hand-written list, and that every entry
+in its exemption allowlist is named and justified.
 
 R3: trace every attribution field. If any can still be set from request-body text, that is MAJOR.
 
@@ -567,9 +575,12 @@ Remove-Item Env:BUYER_ACCOUNTS_V1 -ErrorAction SilentlyContinue
 Write-Log ("Flags-off backend: " + (($off -split "`n" | Where-Object { $_ -match 'passed' }) -join ' '))
 
 Push-Location (Join-Path $RepoPath "frontend")
+$env:NO_COLOR = '1'
 $feOff = (npm test 2>&1 | Out-String)
+Remove-Item Env:NO_COLOR -ErrorAction SilentlyContinue
 Pop-Location
-Write-Log ("Frontend: " + (($feOff -split "`n" | Where-Object { $_ -match 'Tests' }) -join ' '))
+$feOff = $feOff -replace "\x1b\[[0-9;]*[A-Za-z]", ''
+Write-Log ("Frontend: " + (($feOff -split "`n" | Where-Object { $_ -cmatch '^\s*(Test Files|Tests)\s' }) -join ' '))
 
 Write-Host "`nMorning protocol:" -ForegroundColor Cyan
 Write-Host "  1. Read FINDINGS and the endpoint isolation table in $Report."
