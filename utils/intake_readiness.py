@@ -122,6 +122,42 @@ def assess(specs: Optional[dict[str, Any]]) -> Readiness:
                      hygienic=hygienic_context.hygienic_block(specs))
 
 
+class IntakeNotReady(Exception):
+    """``_commit_intake_to_sourcing`` refused: the request is not ready and no
+    recorded acknowledgement covers what it is missing (PH-01 round 3d).
+
+    ``readiness`` holds only the UNACKNOWLEDGED blocks, so its ``missing_labels``
+    are exactly what the caller must still ask for.
+    """
+
+    def __init__(self, readiness: Readiness) -> None:
+        self.readiness = readiness
+        super().__init__(f"intake not ready: missing {', '.join(readiness.missing_labels)}")
+
+
+def unacknowledged(specs: Optional[dict[str, Any]]) -> Readiness:
+    """:func:`assess`, less every group a recorded ``source_anyway`` acknowledgement
+    covers (:func:`unverified_requirements`). Ready means sourcing may start.
+
+    The single rule ``_commit_intake_to_sourcing`` enforces (PH-01 round 3d): the
+    in-app confirm records its acknowledgements before committing, so it passes; the
+    channel consumer never records one, so a not-ready channel request is refused.
+    """
+    readiness = assess(specs)
+    acknowledged = unverified_requirements(specs)
+    return Readiness(
+        identity=None if IDENTITY in acknowledged else readiness.identity,
+        hygienic=None if HYGIENIC in acknowledged else readiness.hygienic,
+    )
+
+
+def ensure_ready_for_sourcing(specs: Optional[dict[str, Any]]) -> None:
+    """Raise :class:`IntakeNotReady` unless :func:`unacknowledged` is ready."""
+    remaining = unacknowledged(specs)
+    if not remaining.ready:
+        raise IntakeNotReady(remaining)
+
+
 def record_hygienic_override(specs: dict[str, Any], block: HygienicBlock, *,
                              at: Optional[str] = None) -> dict[str, Any]:
     """Record a hygienic ``source_anyway`` on the run. Mutates and returns ``specs``.

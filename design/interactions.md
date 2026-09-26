@@ -187,7 +187,8 @@ evaluated in order:
 | Condition | Message |
 |---|---|
 | `sufficient=true` | "Extracted: {mfg} {pn\|model} — specs are in the panel. Review and confirm to start sourcing." |
-| Both confidences ≥ 70, mfg present, `sufficient=false` (required field missing) | "Read the nameplate: {ident}. Some required fields may still be missing — review the panel and fill in any gaps before confirming." |
+| Both confidences ≥ 70, mfg present, `sufficient=false`, readiness **ready** (PH-01 round 3d) | "Read the nameplate: {ident}. You have enough to find options now — confirm in the panel to start sourcing." — plus *"Optional, if you know it: {question}"* when the agent has one (the chat's ready wording, `intake_readiness.ready_reply`). |
+| Both confidences ≥ 70, mfg present, `sufficient=false`, readiness not ready (required field missing) | "Read the nameplate: {ident}. Some required fields may still be missing — review the panel and fill in any gaps before confirming." |
 | At least one confidence < 70, mfg present | "Read the nameplate: {ident} (manufacturer confidence N%). {Dimension-specific low-confidence phrase} — please verify the specs in the panel[ or provide the part number directly]." Low-confidence phrase: "Part identification confidence is low" when mfg ≥ 70 and part < 70; "Manufacturer confidence is low" when mfg < 70 and part ≥ 70; "Confidence is low" when both < 70. The PN suggestion is omitted when `part_number` is already populated. |
 | mfg absent or unreadable | Three-option recovery message (try clearer photo / type specs / continue with partial). |
 
@@ -894,6 +895,17 @@ route).**
   confidently-wrong request entering sourcing. A family-variant block (the
   existing `confirm_intake` guard) ⇒ NEEDS_CLARIFICATION naming the missing
   attrs. The existing intake clarification logic is fed AS IT IS (not fixed).
+- **Readiness is enforced at the sourcing transition (PH-01 round 3d).** The
+  intake agent's own `sufficient` flag is more permissive than readiness (a
+  bearing described by its dimensions, with no manufacturer or model, is
+  sufficient but not ready). `_commit_intake_to_sourcing` — the only function
+  that starts a sourcing run — refuses unless `intake_readiness.assess` says
+  ready or a recorded Source anyway acknowledgement covers every missing group.
+  A channel request never records one, so a not-ready email / SMS / voice
+  request starts no sourcing and leaves no run: it gets the clarify reply
+  *"We need a few more details before we can source this part. Please confirm:
+  {missing labels}."* (e.g. *manufacturer, model or part number*). Email never
+  overrides — Source anyway is an in-app, acknowledged action.
 - **Attachments (I4).** A nameplate photo in an email/MMS flows from the
   attachment bytes directly into the `IntakeAgent` `images` kwarg — the same
   image-handling the in-app upload path uses (no disk I/O).
@@ -1420,6 +1432,14 @@ designation"*. Cross-maker seal equivalence is **not** decided here.
   `missing_labels`. A reasoned confirm 422 there shows the backend's message,
   not *“Failed to confirm — is the backend running?”* (kept only for a request
   that got no response).
+- **Source anyway on the run page too (PH-01 round 3d).** The chat names
+  *Source anyway*, so the spec panel offers it the way the request card does.
+  When not ready, `intake_readiness` also carries the refusal's `message` and
+  `override`; the panel shows that message above the *Still needed* list and,
+  when `override` is `"source_anyway"`, an acknowledgement checkbox (*“I
+  understand the results will NOT be checked against my requirement …”*) and a
+  *Source anyway* button that stays disabled until it is ticked, then calls
+  confirm-intake with `source_anyway=true`.
 - **One marking for any sourcing with unmet requirements (PH-01 round 3c).**
   Source anyway past the identity floor, the hygienic questions, or both marks
   the run the same way: a banner above the results and no candidate badged

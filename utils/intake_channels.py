@@ -4,8 +4,8 @@ utils/intake_channels.py — the channel-agnostic intake spine (Night 8).
 Requests are born in email, texts, and phone calls — not in an app. This module
 is the ONE normalized intake event every channel adapter produces, plus the
 single consumer that feeds a valid event into the EXISTING intake pipeline seam
-(``api_server.confirm_intake`` → ``_run_sourcing_background``) and fires the
-sourcing run exactly as an in-app request does. A transport, never a parallel
+(``api_server._commit_intake_to_sourcing`` → ``_run_sourcing_background``) and
+fires the sourcing run through the same transition an in-app request uses. A transport, never a parallel
 pipeline, never an auto-purchase trigger.
 
 Built to the house standard as a standalone module: clean, typed, injector-DI,
@@ -33,7 +33,11 @@ Settled design (see NIGHT8_EMAIL_INTAKE_BRIEF.md):
      messages land as NEEDS_CLARIFICATION with a stubbed clarifying reply —
      never a confidently-wrong request entering sourcing. The existing intake
      clarification logic is fed AS IT IS (not fixed — Night 7's territory).
-  5. Fires the sourcing run through the existing seam (injected firer).
+  5. Fires the sourcing run through the existing seam (injected firer). The
+     seam's transition (``_commit_intake_to_sourcing``) refuses a request
+     ``intake_readiness.assess`` does not call ready (PH-01 round 3d); the
+     consumer replies NEEDS_CLARIFICATION naming the missing labels. A channel
+     request never overrides — Source anyway is an in-app, acknowledged action.
   6. Acknowledgement reply — stubbed under the send double-gate.
   7. AUTO-ORDER IS OUT — nothing here places, approves, or advances an order.
 
@@ -505,7 +509,8 @@ def parse_event_to_specs(
     commit_message, confidence_summary, ...}) or None on an extractor failure.
 
     Propose-don't-invent: the agent's ``sufficient`` flag + the caller's
-    family-variant check gate what enters sourcing. An ambiguous message yields
+    family-variant check gate what reaches the sourcing transition, which then
+    refuses anything intake_readiness does not call ready (PH-01 round 3d). An ambiguous message yields
     sufficient=False + a follow_up_question → the consumer replies NEEDS_CLARIFICATION,
     never a confidently-wrong request. The existing clarification logic is fed
     AS IT IS (not fixed — Night 7's territory).
@@ -576,9 +581,12 @@ def build_confirm_reply(sender: str, confirm_token: str) -> IntakeReply:
 # fire_sourcing_run(specs_dict, tenant_key) -> Optional[str]
 #   Creates a run (Phase.INTAKE, company_id/facility from the tenant map), seeds
 #   the specs, and fires the confirm-intake transition (Phase.SOURCING + the
-#   background sourcing task). Returns the run_id, or None if the transition
-#   refused (e.g. a family-variant block the consumer should surface as
-#   NEEDS_CLARIFICATION). NEVER places/approves/advances an order.
+#   background sourcing task). Returns the run_id, or None on a store/tenant
+#   failure. Raises ``intake_readiness.IntakeNotReady`` when the transition
+#   refuses a request intake_readiness.assess does not call ready (PH-01 round
+#   3d) — the consumer replies NEEDS_CLARIFICATION naming the missing labels.
+#   A channel request never records a source_anyway acknowledgement, so it
+#   never overrides. NEVER places/approves/advances an order.
 FireSourcingRun = Callable[[dict, str], Optional[str]]
 
 # reply_sink(reply: IntakeReply) -> None — sends (stubbed) / records the reply.
@@ -592,6 +600,47 @@ def _default_reply_sink(reply: IntakeReply) -> None:
     print(f"[IntakeChannels] STUBBED reply ({reply.kind}) -> {reply.to}: {reply.subject}")
 
 
+def _fire_or_clarify(
+    event: IntakeEvent,
+    specs: dict,
+    fire_sourcing_run: FireSourcingRun,
+    sink: ReplySink,
+) -> IntakeOutcome:
+    """The last gate both consumers share: fire the sourcing run, or reply
+    NEEDS_CLARIFICATION when it is refused.
+
+    Readiness is decided by the transition itself (``_commit_intake_to_sourcing``
+    runs ``intake_readiness`` — PH-01 round 3d), not here: the intake agent's own
+    ``sufficient`` flag is more permissive (a bearing with dimensions but no
+    manufacturer or model is sufficient but not ready). A refusal becomes the
+    clarification reply listing the labels assess says are missing. Email never
+    overrides — there is no source_anyway on a channel request.
+    """
+    from utils.intake_readiness import IntakeNotReady
+
+    try:
+        run_id = fire_sourcing_run(specs, event.tenant_key)
+    except IntakeNotReady as refused:
+        reply = build_clarify_reply(event.sender, "",
+                                    missing_labels=list(refused.readiness.missing_labels))
+        sink(reply)
+        return IntakeOutcome(status=IntakeOutcomeStatus.NEEDS_CLARIFICATION,
+                             reason="intake_not_ready",
+                             clarify_attrs=list(refused.readiness.missing_attrs),
+                             reply=reply)
+    if not run_id:
+        # The firer failed (store / tenant error). Treat as NEEDS_CLARIFICATION
+        # rather than fake success — surface honestly.
+        reply = build_clarify_reply(event.sender, "")
+        sink(reply)
+        return IntakeOutcome(status=IntakeOutcomeStatus.NEEDS_CLARIFICATION,
+                             reason="sourcing run not fired", reply=reply)
+
+    reply = build_ack_reply(event.sender)
+    sink(reply)
+    return IntakeOutcome(status=IntakeOutcomeStatus.RUN_CREATED, run_id=run_id, reply=reply)
+
+
 def consume_intake_event(
     event: IntakeEvent,
     *,
@@ -603,8 +652,8 @@ def consume_intake_event(
 ) -> IntakeOutcome:
     """The single consumer. Maps a valid, tenant-attributed, sender-verified
     intake event into the existing pipeline seam and fires the sourcing run
-    exactly as an in-app request does — or replies NEEDS_CLARIFICATION / a
-    confirm step / a safe rejection. NEVER creates a run from an unverified
+    through the same readiness-checked transition an in-app request uses — or
+    replies NEEDS_CLARIFICATION / a confirm step / a safe rejection. NEVER creates a run from an unverified
     stranger, an ambiguous message, or an unattributable tenant.
 
     Order of gates (each NO-run outcome is terminal):
@@ -612,8 +661,13 @@ def consume_intake_event(
       REJECTED_MALFORMED— malformed event (validate()).
       TENANT_UNKNOWN    — to-address tenant resolves to no known tenant.
       UNKNOWN_SENDER_.. — sender not recognized for the tenant → held + confirm.
-      NEEDS_CLARIFICATION — parser not sufficient, or a family-variant block.
-      RUN_CREATED       — parser sufficient + family-OK → fire_sourcing_run → ack.
+      NEEDS_CLARIFICATION — parser not sufficient, a family-variant block, or
+                          the sourcing transition refused the request as not
+                          ready (intake_readiness.assess: identity floor /
+                          hygienic set — the missing labels are named). Email
+                          never overrides.
+      RUN_CREATED       — parser sufficient + family-OK + ready →
+                          fire_sourcing_run → ack.
 
     AUTO-ORDER IS OUT: this consumer calls only fire_sourcing_run (run creation
     + the confirm-intake→sourcing transition) and reply_sink. It never places,
@@ -684,20 +738,10 @@ def consume_intake_event(
 
     # Gate 6 — fire the sourcing run through the existing seam (injected). The
     # firer creates the run + advances to SOURCING + schedules the background
-    # sourcing task — exactly as an in-app confirm-intake does. Same flags, same
-    # gates. NEVER orders/approves.
-    run_id = fire_sourcing_run(specs, event.tenant_key)
-    if not run_id:
-        # The firer refused (e.g. a guard the consumer didn't pre-check). Treat
-        # as NEEDS_CLARIFICATION rather than fake success — surface honestly.
-        reply = build_clarify_reply(event.sender, "")
-        sink(reply)
-        return IntakeOutcome(status=IntakeOutcomeStatus.NEEDS_CLARIFICATION,
-                             reason="sourcing run not fired", reply=reply)
-
-    reply = build_ack_reply(event.sender)
-    sink(reply)
-    return IntakeOutcome(status=IntakeOutcomeStatus.RUN_CREATED, run_id=run_id, reply=reply)
+    # sourcing task through the same transition an in-app confirm-intake uses,
+    # which refuses a not-ready request (PH-01 round 3d) — replied to as
+    # NEEDS_CLARIFICATION naming what is missing. NEVER orders/approves.
+    return _fire_or_clarify(event, specs, fire_sourcing_run, sink)
 
 
 def consume_confirmed_event(
@@ -711,7 +755,9 @@ def consume_confirmed_event(
 ) -> IntakeOutcome:
     """Replay a held event (advanced via the confirm step) as a CONFIRMED sender
     and run the consumer. The sender is now verified, so the unknown-sender gate
-    is skipped; the parser + family + firing gates run as normal. Builds the
+    is skipped; the parser + family + firing gates run as normal — including the
+    readiness refusal inside the sourcing transition (PH-01 round 3d), which is
+    replied to as NEEDS_CLARIFICATION naming the missing labels. Builds the
     IntakeEvent from the held payload (attachments are NOT replayed — held events
     serialize attachment metadata only, not bytes; a real confirm would re-fetch
     the original message. For the build, the confirm path re-parses text-only)."""
@@ -756,12 +802,4 @@ def consume_confirmed_event(
         return IntakeOutcome(status=IntakeOutcomeStatus.NEEDS_CLARIFICATION,
                              reason="family_variant_unconfirmed",
                              clarify_attrs=block.get("missing_attrs"), reply=reply)
-    run_id = fire_sourcing_run(specs, event.tenant_key)
-    if not run_id:
-        reply = build_clarify_reply(event.sender, "")
-        sink(reply)
-        return IntakeOutcome(status=IntakeOutcomeStatus.NEEDS_CLARIFICATION,
-                             reason="sourcing run not fired", reply=reply)
-    reply = build_ack_reply(event.sender)
-    sink(reply)
-    return IntakeOutcome(status=IntakeOutcomeStatus.RUN_CREATED, run_id=run_id, reply=reply)
+    return _fire_or_clarify(event, specs, fire_sourcing_run, sink)

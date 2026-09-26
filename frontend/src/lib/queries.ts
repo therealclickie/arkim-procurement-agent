@@ -201,7 +201,10 @@ export function useUploadNameplate(runId: string) {
 export function useConfirmIntake(runId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => confirmIntake(runId),
+    // sourceAnyway: the explicit, acknowledged override of a readiness refusal
+    // (PH-01 round 3d — the run page's spec panel offers it like the request card).
+    mutationFn: (opts: { sourceAnyway?: boolean } | void) =>
+      confirmIntake(runId, false, false, opts?.sourceAnyway ?? false),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.runs.detail(runId) });
       qc.invalidateQueries({ queryKey: queryKeys.runs.all() });

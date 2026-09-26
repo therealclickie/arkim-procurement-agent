@@ -280,6 +280,10 @@ export interface IntakeReadiness {
   ready: boolean;
   missing_attrs: string[];
   missing_labels: string[];
+  /** PH-01 round 3d: present only when not ready — the message confirm-intake's
+   *  refusal would carry, and "source_anyway" when that override is available. */
+  message?: string | null;
+  override?: string | null;
 }
 
 export interface SourcingRunDetail {

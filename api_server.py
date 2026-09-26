@@ -1897,11 +1897,19 @@ def _intake_readiness_detail(specs: Dict[str, Any]) -> Dict[str, Any]:
     on the persisted specs (the unstripped dict confirm_intake reads)."""
     from utils import intake_readiness
     readiness = intake_readiness.assess(specs)
-    return {
+    detail: Dict[str, Any] = {
         "ready": readiness.ready,
         "missing_attrs": list(readiness.missing_attrs),
         "missing_labels": list(readiness.missing_labels),
     }
+    if not readiness.ready:
+        # PH-01 round 3d: the refusal confirm-intake would return — its message and
+        # the source_anyway override — so the run page's spec panel can offer
+        # Source anyway without first provoking the 422.
+        refusal = readiness.refusal_detail() or {}
+        detail["message"] = refusal.get("message")
+        detail["override"] = refusal.get("override")
+    return detail
 
 
 def _orm_to_detail(run: SourcingRunORM) -> RunDetail:
@@ -2565,10 +2573,19 @@ async def upload_nameplate(
         # (b) Both confidences above threshold but a required field is still missing
         elif mfg_conf >= 70 and part_conf >= 70 and mfg and mfg not in ("Unknown", "N/A", "null", "unknown"):
             ident = " ".join(p for p in [mfg, pn or model] if p)
-            reply_text = (
-                f"Read the nameplate: {ident}. "
-                "Some required fields may still be missing — review the panel and fill in any gaps before confirming."
-            )
+            # PH-01 round 3d: "may still be missing" only when it is — when the
+            # readiness decision says ready, the same ready wording the chat uses.
+            from utils import intake_readiness
+            if intake_readiness.assess(specs).ready:
+                reply_text = (
+                    f"Read the nameplate: {ident}. "
+                    f"{intake_readiness.ready_reply(result.get('follow_up_question'))}"
+                )
+            else:
+                reply_text = (
+                    f"Read the nameplate: {ident}. "
+                    "Some required fields may still be missing — review the panel and fill in any gaps before confirming."
+                )
         # (c) Low confidence — something extracted but at least one threshold not met
         elif mfg and mfg not in ("Unknown", "N/A", "null", "unknown"):
             ident = " ".join(p for p in [mfg, model] if p)
@@ -3278,11 +3295,23 @@ def _commit_intake_to_sourcing(
     the background task (confirm_intake schedules itself; the intake consumer
     lets this helper schedule).
 
+    Readiness IS here (PH-01 round 3d): this is the only function that starts a
+    sourcing run (pinned by test_ph01_round3d), so it refuses — raising
+    ``intake_readiness.IntakeNotReady`` BEFORE any mutation — unless
+    ``intake_readiness.assess`` says ready or a recorded ``source_anyway``
+    acknowledgement covers every missing group. confirm_intake records its
+    acknowledgements first, so its behaviour is unchanged; the channel consumer
+    never records one, so a not-ready email/SMS/voice request is refused and
+    clarified instead of sourced.
+
     The family-variant binding guard is NOT here — it is a pre-gate each caller
     runs (confirm_intake raises 422; the intake consumer replies
     NEEDS_CLARIFICATION). This helper assumes the family guard already passed.
     NEVER places/approves/advances an order — sourcing only (auto-order is out).
     """
+    from utils import intake_readiness
+    intake_readiness.ensure_ready_for_sourcing(specs_dict)
+
     if exact_only:
         specs_dict["exact_only"] = True
     if open_family:
@@ -3322,6 +3351,10 @@ def _fire_sourcing_run_for_intake(
     parser's proposed specs, and fires ``_commit_intake_to_sourcing`` (the same
     transition in-app confirm_intake uses) → Phase.SOURCING + the background
     sourcing task. Returns the run_id, or None on a missing tenant / store error.
+    Raises ``intake_readiness.IntakeNotReady`` when the transition refuses a
+    not-ready request (PH-01 round 3d) — the consumer turns that into its
+    clarification reply. A channel request never overrides, so no run row is left
+    behind: the new run is only flushed, and the refusal rolls it back.
 
     This is the EXISTING pipeline seam (I1) the channel-agnostic consumer feeds:
     create_run (bare, tenant-stamped) → seed specs → confirm-intake transition.
@@ -3350,16 +3383,18 @@ def _fire_sourcing_run_for_intake(
         initiated_at=now,
         updated_at=now,
     )
+    from utils import intake_readiness
     try:
         with _SessionFactory() as session:
             session.add(run)
-            session.commit()
-            session.refresh(run)
+            session.flush()
             _commit_intake_to_sourcing(
                 session, run, specs_dict, exact_only=False, open_family=False,
                 background_tasks=background_tasks,
             )
         return run.id
+    except intake_readiness.IntakeNotReady:
+        raise
     except Exception as exc:
         print(f"[Intake] _fire_sourcing_run_for_intake failed: {exc}")
         return None

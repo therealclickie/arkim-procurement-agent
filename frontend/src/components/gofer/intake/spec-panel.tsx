@@ -59,11 +59,17 @@ export function SpecPanel({ run, className }: SpecPanelProps) {
               className="rounded-card border border-amber-line bg-amber-tint px-4 py-3 text-[11.5px] text-amber-fg"
               data-testid="spec-panel-still-needed"
             >
+              {run.intake_readiness?.message && (
+                <p className="mb-1.5 leading-snug">{run.intake_readiness.message}</p>
+              )}
               Still needed before sourcing — answer in the chat:
               <ul className="mt-1 ml-4 list-disc">
                 {stillNeeded.map((l) => <li key={l}>{l}</li>)}
               </ul>
             </div>
+          )}
+          {inIntake && !ready && run.intake_readiness?.override === "source_anyway" && (
+            <SourceAnyway runId={run.id} />
           )}
           <AssetPanel specs={specs} defaultExpanded />
         </>
@@ -170,6 +176,49 @@ function ConfirmCard({ runId, specs, onDismiss }: ConfirmCardProps) {
         </Button>
       </div>
 
+      {confirm.isError && (
+        <p className="text-[11px] text-red-fg text-center">
+          {confirmErrorMessage(confirm.error)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SourceAnyway — the explicit, labelled override (arc 5 / PH-01 round 3d)
+// ---------------------------------------------------------------------------
+
+// The chat names "Source anyway" once the buyer can't answer; this is that action on
+// the run page, matching the request card: enabled only once the buyer acknowledges
+// the results will not be checked, then confirm-intake?source_anyway=true records
+// that acknowledgement on the run and the backend marks its results unchecked.
+function SourceAnyway({ runId }: { runId: string }) {
+  const confirm = useConfirmIntake(runId);
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="spec-panel-source-anyway">
+      <label className="flex items-start gap-2 text-[11.5px] text-fg-2 leading-snug">
+        <input
+          type="checkbox"
+          checked={acknowledged}
+          onChange={(e) => setAcknowledged(e.target.checked)}
+        />
+        I understand the results will NOT be checked against my requirement — they
+        will carry a banner saying so, and none will be marked an exact match.
+      </label>
+      <Button
+        variant="secondary"
+        size="md"
+        disabled={!acknowledged || confirm.isPending}
+        loading={confirm.isPending}
+        onClick={() => {
+          if (acknowledged) confirm.mutate({ sourceAnyway: true });
+        }}
+      >
+        Source anyway
+      </Button>
       {confirm.isError && (
         <p className="text-[11px] text-red-fg text-center">
           {confirmErrorMessage(confirm.error)}
