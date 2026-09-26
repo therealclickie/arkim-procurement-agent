@@ -16,6 +16,8 @@ WHAT THE BRIEF ASKS FOR
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from utils import notifications, notifications_store as ns
@@ -25,6 +27,12 @@ from utils.procurement_agent.tests._arc4_notifications_fixtures import (  # noqa
 )
 
 ALERTS = "/api/admin/notification-alerts"
+
+# A fixed weekday instant. The ladder counts BUSINESS hours (arc 4b S3), so an
+# instant read off the wall clock makes these tests fail whenever "now + 30h"
+# lands on a weekend. The send is stamped at NOW too, so nothing here reads
+# the clock.
+NOW = datetime(2026, 9, 22, 20, 0, tzinfo=timezone.utc)      # Tue 13:00 PT
 
 
 def ack_path(alert_id: str) -> str:
@@ -145,13 +153,12 @@ def test_an_alert_carries_what_an_operator_needs_to_act(admin_api):
 
 def test_the_escalation_ladder_populates_this_queue(admin_api):
     """End to end: the thing the arc exists to produce is a row here."""
-    from datetime import datetime, timedelta, timezone
     n = ns.create_notification(kind=ns.KIND_RFQ_NEW, account_id="acct-1",
                                member_id="m-1", run_id="run-ladder",
                                supplier_domain="dxpe.com",
                                recipient="sales@dxpe.com", is_test=True)
-    ns.transition(n["id"], ns.STATE_SENT, event_type="Send")
-    notifications.run_escalations(datetime.now(timezone.utc) + timedelta(hours=30))
+    ns.transition(n["id"], ns.STATE_SENT, event_type="Send", at=NOW.isoformat())
+    notifications.run_escalations(NOW + timedelta(hours=30))
 
     body = admin_api.get(ALERTS, headers=admin_headers()).json()
     kinds = {a["kind"]: a for a in body["alerts"]}
@@ -225,13 +232,12 @@ def test_acknowledging_twice_is_a_409_not_a_silent_restamp(admin_api):
 def test_acknowledging_does_not_re_open_the_ladder(admin_api):
     """Acknowledging says a human has it — it must not reset the notification's
     escalated_at and start the mail sequence over."""
-    from datetime import datetime, timedelta, timezone
     n = ns.create_notification(kind=ns.KIND_RFQ_NEW, account_id="acct-1",
                                member_id="m-1", run_id="run-ack",
                                supplier_domain="dxpe.com",
                                recipient="sales@dxpe.com", is_test=True)
-    ns.transition(n["id"], ns.STATE_SENT, event_type="Send")
-    later = datetime.now(timezone.utc) + timedelta(hours=30)
+    ns.transition(n["id"], ns.STATE_SENT, event_type="Send", at=NOW.isoformat())
+    later = NOW + timedelta(hours=30)
     notifications.run_escalations(later)
     (alert,) = [a for a in ns.list_alerts(kind=ns.ALERT_RFQ_ESCALATION)]
     admin_api.post(ack_path(alert["id"]), headers=admin_headers())
