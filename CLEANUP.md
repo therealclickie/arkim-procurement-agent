@@ -422,6 +422,24 @@ Recorded after the intake/scoring redesigns landed behind flags (`INTAKE_TYPE_AW
 | **Why it exists** | Arc 6 enforces identity at the door (session, company scope by path parameter, the D2 matrix) without restructuring `api_server.py`. List endpoints and creation paths scope inside the handler with `if buyer:` branches so the flag-off path stays byte-identical. |
 | **Recommended action** | When `api_server.py` is decomposed into routers, move the buyer door onto the buyer router as a router-level dependency and delete the per-route declarations; keep `test_buyer_route_guard.py` as the invariant. |
 
+### 8.7 Buyer sign-in mail is governed but not ledgered, and has no SES boot guard
+
+| Field | Detail |
+|---|---|
+| **File** | `utils/buyer_accounts.py` `send_magic_link_email`; `api_server.py` `_assert_auth_mail_configured` |
+| **Kind** | Operational gap |
+| **Why it exists** | Buyer links go through `GmailSender().send` (suppression, allowlist, caps, delivery gate) with the same `auth_mail` / `message_class="auth"` markers as supplier links. But the supplier path also writes a `sent_messages` row (`notifications.record_auth_send`) and a tracked Notification; both are keyed on `supplier_domain`, so the buyer path does not call them. Consequences: buyer sign-in sends do not count toward the auth daily cap, and a bounce on a buyer link creates no Notification. Separately, the boot guard that refuses to start under SES without `SES_CONFIGURATION_SET_AUTH` checks only `SUPPLIER_ACCOUNTS_V1`. |
+| **Recommended action** | Give the auth ledger a buyer key (company id) and extend the boot guard to `BUYER_ACCOUNTS_V1` before buyer accounts run on SES. |
+
+### 8.8 Admin "mark purchased" overwrites the buyer's `placed_by`
+
+| Field | Detail |
+|---|---|
+| **File** | `api_server.py` admin mark-purchased (`place_order(placed_by="operator")`) |
+| **Kind** | Attribution overwrite |
+| **Why it exists** | Under `BUYER_ACCOUNTS_V1`, order-now and manual-fulfilment execute record the buyer member as `placed_by` at capture (arc 6 T5). When a Gofer operator later marks the order purchased, `place_order` sets `placed_by="operator"`, replacing the buyer's id. |
+| **Recommended action** | Arc 7 (order lifecycle): keep the requesting member (`ordered_by`) and the operator who fulfilled (`fulfilled_by`) as separate fields. |
+
 ---
 
 *Items are ordered by section, not by priority. All items are prototype-era technical debt �

@@ -92,6 +92,8 @@ When asked to "run tests," actually run them (`uv run pytest`) and report the re
 
 **Two flag-gated redesigns are in flight, both default-OFF:** `INTAKE_TYPE_AWARE` (intake redesign) and `SCORING_V2` (scoring redesign). The suite is green with them off; flip a flag to exercise its redesign path. **Night 11 added `QUOTE_SUBMIT_V1`** (supplier structured-quote submission: quote store + per-RFQ quote tokens + `/quote/{token}` form + portal open-requests + promotion via the existing quote index — see `QUOTE_SUBMISSION_SPEC.md` and `design/interactions.md`), also default-OFF and pinned off in the conftest flag list.
 
+**Arc 6 added buyer identity, default-OFF:** backend `BUYER_ACCOUNTS_V1` + frontend `NEXT_PUBLIC_BUYER_SESSION_V1`. With it on, every buyer-facing route stands behind one door (httpOnly `gofer_buyer_session` cookie, company scope on every path resource, the D2 matrix in `utils/buyer_accounts_rbac.py`); `test_buyer_route_guard.py` enumerates `app.routes` and fails on any unscoped buyer route. A NEW buyer endpoint must depend on a `_DOOR_*` (see `api_server.py`) or it fails that test. See `BUYER_IDENTITY_REPORT.md`.
+
 ### Next hardening steps
 With a green baseline and the API characterization net, structural refactors are substantially unblocked — but verify per-area coverage first. Priority (see `docs/arkim_procurement_code_standard.md` §2):
 1. Sourcing-quality fixes (Tier 2/3 leakage) — in well-covered `utils/`, safe.
@@ -120,7 +122,7 @@ With a green baseline and the API characterization net, structural refactors are
 - **`EMAIL_SEND_ENABLED = False`** — Tier 3 outreach emails are never sent. The "Confirm outreach" flow marks vendors "Awaiting" with no real communication. Don't assume email send works. (CLEANUP §2.2)
 - **Highest-risk debt items** (CLEANUP §4.1):
   - `price_db.py` cache PN-collision is **fixed** — keyed on `(manufacturer, part_number)`; old PN-only on-disk entries cleanly miss and re-populate (verified, no migration needed). Keep the composite key when touching this.
-  - **RBAC is not enforced** — any caller can supply any `approver_role`; `approve` also ignores approval-rule thresholds. Acceptable for prototype, not production. (Needs auth infra — Arc 1.)
+  - **RBAC is not enforced with `BUYER_ACCOUNTS_V1` off** — any caller can supply any `approver_role`. With it on (arc 6), buyer routes require a session, are company-scoped, check the role matrix, and attribution comes from the session. In both modes `approve` still ignores approval thresholds (the stored company policy is enforced in arc 7).
 - **One shipping front end over the FastAPI surface** (§2) — `api_server.py` validation/auth is the single gate for the React path. (The retired Streamlit surface used to bypass it; that surface is gone — §8.)
 
 ---
