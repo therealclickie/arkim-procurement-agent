@@ -67,3 +67,4 @@ scripts/harness_results_*.json
 *.pre-t4
 desktop.ini
 loop/SCOPE_NOTES.txt
+loop/BASELINE.txt
