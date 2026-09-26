@@ -79,6 +79,11 @@ CAPABILITY_MATRIX: dict[str, frozenset[str]] = {
     ROLE_ADMIN: frozenset(CAPABILITIES),
 }
 
+# D3: the role a Gofer operator's bootstrap invitation grants — a company's
+# first member must be able to manage the rest. Named here so the admin route
+# never names a role.
+BOOTSTRAP_ROLE = ROLE_ADMIN
+
 # Capabilities that hold only while a company setting allows them (footnote ¹).
 _CONDITIONAL_ON_OVERRIDE_SETTING = frozenset({OVERRIDE_LIMIT})
 

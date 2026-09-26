@@ -8609,3 +8609,219 @@ def buyer_me(session: dict = Depends(_buyer_require(buyer_accounts_rbac.VIEW_COM
             "permissions": buyer_accounts_rbac.permissions_for(member, company),
         },
     }, headers=_portal_response_headers({}))
+
+
+# ===========================================================================
+# Arc 6 T6 — COMPANY BOOTSTRAP (Gofer operator) and MEMBER MANAGEMENT (D3).
+#
+# Buyer customers are sold by a rep, never self-serve: a Gofer operator creates
+# the company through the existing admin API (require_admin) and invites its
+# first Admin. From then on the company's own Admins invite (default
+# Requester), change roles and revoke — through THE matrix module, which owns
+# every rule (no route names a role). Every action is audited.
+#
+# Admin routes follow the flag-first convention: the BUYER_ACCOUNTS_V1 check
+# runs BEFORE require_admin, so flag-off the routes are absent (404) for any
+# caller — a 401/403 would reveal that they exist.
+# ===========================================================================
+
+def _buyer_error(exc: buyer_accounts.BuyerAccountsError):
+    """Map a policy violation to its HTTP response — codes only, no role
+    knowledge here."""
+    status = {
+        "forbidden": 403,
+        "invalid_role": 422,
+        "invalid_email": 422,
+        "invalid_limit": 422,
+        "invalid_override": 422,
+        "already_member": 409,
+        "company_exists": 409,
+        "last_admin": 409,
+        "member_not_active": 409,
+        "member_not_found": 404,
+        "store_error": 500,
+    }.get(exc.code, 400)
+    raise HTTPException(status_code=status, detail=exc.message)
+
+
+def _send_buyer_sign_in_link(member: dict) -> Optional[str]:
+    """Mint and send a sign-in link to a newly invited member (the invitation
+    IS their first sign-in link). Returns the send status; None if minting
+    failed. The raw token exists only in the delivered message."""
+    link = buyer_accounts.mint_magic_link(member["id"])
+    if link is None:
+        return None
+    return buyer_accounts.send_magic_link_email(
+        member["email"], link["token"], company_id=member["company_id"],
+        member_id=member["id"])
+
+
+def _serialize_buyer_company(company: dict) -> dict:
+    return {
+        "id": company["id"],
+        "name": company["name"],
+        "facility_ids": company["facility_ids"],
+        "email_domains": company["email_domains"],
+        "auto_approval_limit": company["auto_approval_limit"],
+        "allow_admin_override": company["allow_admin_override"],
+        "status": company["status"],
+        "created_at": company["created_at"],
+    }
+
+
+class AdminBuyerCompanyBody(BaseModel):
+    company_id: str = Field(..., min_length=1, max_length=36)
+    name: str = Field(..., min_length=1, max_length=200)
+    facility_ids: List[str] = Field(default_factory=list, max_length=50)
+    email_domains: List[str] = Field(default_factory=list, max_length=20)
+
+
+@app.post("/api/admin/buyer-companies", status_code=201, dependencies=_BUYER_NEW_ROUTE)
+def admin_create_buyer_company(body: AdminBuyerCompanyBody,
+                               authorization: Optional[str] = Header(default=None)):
+    """Create a buyer company keyed by the existing company id string (gate
+    ruling Q1: ``company-bayfoods``), with its facilities and email domains.
+    Gofer operator only. 409 if the company already exists.
+
+    F7: buyer sign-in mail rides the SAME governed send path supplier mail
+    does, whose allowlist is fail-closed. The email domains the operator gives
+    here are added to the send allowlist — explicitly, by this operator, and
+    audited on both sides — so the company's people can receive their links.
+    No new governance class or exemption."""
+    role = require_admin(authorization)
+    try:
+        company = buyer_accounts.create_company(
+            body.company_id, body.name, facility_ids=body.facility_ids,
+            email_domains=body.email_domains, created_by=role, is_test=False)
+    except buyer_accounts.BuyerAccountsError as exc:
+        _buyer_error(exc)
+    if company is None:
+        raise HTTPException(status_code=422, detail="company could not be created")
+    from utils import send_governance
+    for domain in company["email_domains"]:
+        try:
+            send_governance.allowlist_add(
+                domain, added_by=role, note=f"buyer company {company['id']} sign-in mail")
+        except Exception as exc:   # an unusable domain must not undo the company
+            print(f"[BuyerAccounts] allowlist_add failed for {domain!r}: {exc}")
+            continue
+        buyer_accounts.audit("send_allowlist_add", company_id=company["id"], actor=role,
+                             detail={"domain": domain})
+    return {"ok": True, "company": _serialize_buyer_company(company)}
+
+
+@app.get("/api/admin/buyer-companies", dependencies=_BUYER_NEW_ROUTE)
+def admin_list_buyer_companies(authorization: Optional[str] = Header(default=None)):
+    """Every buyer company (the Gofer operator read)."""
+    require_admin(authorization)
+    rows = buyer_accounts.list_companies()
+    return {"count": len(rows), "companies": [_serialize_buyer_company(c) for c in rows]}
+
+
+class AdminInviteAdminBody(BaseModel):
+    email: str
+
+
+@app.post("/api/admin/buyer-companies/{company_id}/invite-admin", status_code=201,
+          dependencies=_BUYER_NEW_ROUTE)
+def admin_invite_first_admin(company_id: str, body: AdminInviteAdminBody,
+                             authorization: Optional[str] = Header(default=None)):
+    """Invite a company's Admin (the first one, at bootstrap). Gofer operator
+    only — this is the ONE path that creates an Admin without an existing
+    Admin, which is why it lives behind require_admin and nowhere else. The
+    invitation is a sign-in link. Audited. 404 unknown company."""
+    role = require_admin(authorization)
+    if buyer_accounts.get_company(company_id) is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    email = buyer_accounts.normalize_email(body.email)
+    if not email:
+        raise HTTPException(status_code=422, detail="not a usable email")
+    try:
+        member = buyer_accounts.add_member(
+            company_id, email, role=buyer_accounts_rbac.BOOTSTRAP_ROLE,
+            invited_by=role, is_test=False)
+    except buyer_accounts.BuyerAccountsError as exc:
+        _buyer_error(exc)
+    if member is None:
+        raise HTTPException(status_code=500, detail="member could not be created")
+    send_status = _send_buyer_sign_in_link(member)
+    buyer_accounts.audit("member_invited", company_id=company_id, member_id=member["id"],
+                         email=email, actor=role,
+                         detail={"role": member["role"], "via": "gofer_admin",
+                                 "send_status": send_status})
+    return {"ok": True, "member": _serialize_buyer_member(member)}
+
+
+# --- the company's own Admins manage members (MANAGE_MEMBERS) ---------------------
+
+_BUYER_MANAGE = _buyer_require(buyer_accounts_rbac.MANAGE_MEMBERS)
+
+
+@app.get("/api/buyer/members", dependencies=_BUYER_NEW_ROUTE)
+def buyer_list_members(session: dict = Depends(_BUYER_MANAGE)):
+    """The session company's members (any status) — the Team screen."""
+    rows = buyer_accounts.list_members(session["company_id"])
+    return {"count": len(rows), "members": [_serialize_buyer_member(m) for m in rows]}
+
+
+class BuyerInviteBody(BaseModel):
+    email: str
+    role: Optional[str] = None      # None ⇒ the matrix module's default (Requester)
+
+
+@app.post("/api/buyer/members", status_code=201, dependencies=_BUYER_NEW_ROUTE)
+def buyer_invite_member(body: BuyerInviteBody, request: Request,
+                        session: dict = Depends(_BUYER_MANAGE)):
+    """Invite a person into the session company. Membership is always an
+    explicit invitation (no domain auto-join); the default role is Requester.
+    The invitation is a sign-in link. Audited."""
+    try:
+        member = buyer_accounts_rbac.invite_member(session["member"], body.email, body.role)
+    except buyer_accounts.BuyerAccountsError as exc:
+        _buyer_error(exc)
+    send_status = _send_buyer_sign_in_link(member)
+    buyer_accounts.audit("member_invited", company_id=session["company_id"],
+                         member_id=member["id"], email=member["email"],
+                         actor=session["member_id"], ip=_client_ip(request),
+                         detail={"role": member["role"], "via": "company_admin",
+                                 "send_status": send_status})
+    return {"ok": True, "member": _serialize_buyer_member(member)}
+
+
+class BuyerRoleBody(BaseModel):
+    role: str
+
+
+@app.post("/api/buyer/members/{member_id}/role", dependencies=_BUYER_NEW_ROUTE)
+def buyer_change_member_role(member_id: str, body: BuyerRoleBody, request: Request,
+                             session: dict = Depends(_BUYER_MANAGE)):
+    """Change a member's role. The last Admin cannot be demoted — by anyone,
+    themselves included. A member of another company is a 404. Audited with
+    the old and new role."""
+    before = buyer_accounts.get_member(member_id) or {}
+    try:
+        member = buyer_accounts_rbac.change_member_role(session["member"], member_id, body.role)
+    except buyer_accounts.BuyerAccountsError as exc:
+        _buyer_error(exc)
+    buyer_accounts.audit("member_role_changed", company_id=session["company_id"],
+                         member_id=member_id, email=member["email"],
+                         actor=session["member_id"], ip=_client_ip(request),
+                         detail={"old": before.get("role"), "new": member["role"]})
+    return {"ok": True, "member": _serialize_buyer_member(member)}
+
+
+@app.post("/api/buyer/members/{member_id}/revoke", dependencies=_BUYER_NEW_ROUTE)
+def buyer_revoke_member(member_id: str, request: Request,
+                        session: dict = Depends(_BUYER_MANAGE)):
+    """Revoke a member and every session they hold. The last Admin cannot be
+    revoked — by anyone, themselves included. A member of another company is a
+    404. Audited."""
+    try:
+        member = buyer_accounts_rbac.revoke_member(session["member"], member_id)
+    except buyer_accounts.BuyerAccountsError as exc:
+        _buyer_error(exc)
+    buyer_accounts.audit("member_revoked", company_id=session["company_id"],
+                         member_id=member_id, email=member["email"],
+                         actor=session["member_id"], ip=_client_ip(request),
+                         detail={"status": member["status"]})
+    return {"ok": True, "member": _serialize_buyer_member(member)}
