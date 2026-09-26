@@ -1491,3 +1491,76 @@ designation"*. Cross-maker seal equivalence is **not** decided here.
   backend serves on. A fresh clone needs no `.env.local`.
 - `GOFER_DATA_DIR` relocates every store. Unset, every path is byte-identical
   to today.
+
+## Buyer sign-in, company isolation and roles (Arc 6 — `BUYER_ACCOUNTS_V1` + `NEXT_PUBLIC_BUYER_SESSION_V1`, both default OFF)
+
+With both flags off, the buyer UI and API behave exactly as before: no login,
+the "Northgate Manufacturing" fixture header, typed approver names.
+
+### Signing in
+
+- `/login`: enter a work email, get a sign-in link. The page shows ONE
+  confirmation ("Check your email") for every outcome — a member, a stranger, a
+  revoked member, a throttled request. Accounts are by invitation only; there
+  is no sign-up and no domain auto-join.
+- The link goes to `/verify?token=…`. Nothing happens until the person presses
+  **Continue to sign in** (link scanners cannot click). Success lands on `/`;
+  every failure shows one "This sign-in link is no longer valid" screen.
+- The session is the httpOnly `gofer_buyer_session` cookie (Secure,
+  SameSite=Lax, 24 h). No token is ever returned to the page or stored in
+  localStorage / sessionStorage. **Sign out** in the header revokes it.
+- Every buyer page (`/`, `/request`, `/approvals`, `/history`, `/impact`,
+  `/settings`, `/parts/*`, `/runs/*`, `/team`) sends a signed-out visitor to
+  `/login`.
+
+### What the header and nav show
+
+- The header shows the signed-in **company's name** and the member's email and
+  role — never the fixture.
+- Nav items follow the member's permissions: **Team** and **Approval policy**
+  (Admin only) appear; **Delivery settings** is shown only to Admins.
+
+### Roles (the permission matrix)
+
+| Can… | Requester | Buyer | Approver | Admin |
+|---|---|---|---|---|
+| Raise a request, chat intake, view the company's runs and orders | ✓ | ✓ | ✓ | ✓ |
+| Select / order / request quotes / place orders | — | ✓ | ✓ | ✓ |
+| Approve or reject | — | ✓ | ✓ | ✓ |
+| Manage the team, the approval policy, delivery settings | — | — | — | ✓ |
+
+- A Requester sees options and approval status but no Order, Get quote, Place
+  order, Approve or Reject controls ("Waiting for someone with approval rights
+  to decide"). The server refuses those calls with 403 regardless.
+- Approving shows "Approving as <email>" — there is no name to type; the
+  approval is recorded against the signed-in member.
+
+### Team (`/team`, Admin)
+
+- Invite by email; the default role is **Requester**. The invitation is a
+  sign-in link. Change a member's role or revoke them (revoking signs them out
+  everywhere). The last Admin cannot demote or revoke themselves. Someone who
+  already belongs to another company cannot be invited.
+
+### Approval policy (`/settings/approval-policy`, Admin)
+
+- Auto-approval limit (USD, default $2,500; $0 means every order needs a second
+  approval) and "Allow an admin to approve alone above the limit" (default on).
+  Every change is audited with the old value, the new value and who made it.
+- The policy is **recorded, not yet enforced**: ordering and approval routing
+  are unchanged until the order-lifecycle arc; the screen says so.
+
+### Company isolation
+
+- A member sees only their company's runs, baskets, orders, events, reorder
+  forecast, impact and ship-to. Another company's run, basket, draft, quote or
+  facility answers exactly like one that does not exist.
+
+### Operator (Gofer admin, `ARKIM_ADMIN_TOKEN`)
+
+- `POST /api/admin/buyer-companies` creates a company keyed by its existing id
+  (e.g. `company-bayfoods`) with its facilities and email domains; the domains
+  are added to the send allowlist so sign-in links can be delivered.
+- `POST /api/admin/buyer-companies/{id}/invite-admin` invites its first Admin.
+- Under `BUYER_ACCOUNTS_V1`, `/api/runs/from-maintenance`, `/api/debug/llm` and
+  `/api/dev/reseed-handoffs` return 404.

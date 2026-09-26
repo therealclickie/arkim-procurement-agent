@@ -8,6 +8,9 @@ import { GoferMark } from "./gofer-mark";
 import { PROC_TENANT, PRIMARY_SITE } from "@/lib/proc-config";
 import { BRAND_NAME } from "@/lib/brand";
 import { useEvents } from "@/lib/queries";
+import { buyerSessionEnabled } from "@/lib/flags";
+import { BuyerSessionGuard, useBuyerSession, type BuyerSession } from "@/lib/buyer-session";
+import { roleLabel, type BuyerCapability } from "@/lib/buyer-api";
 import type { EventItem } from "@/types";
 
 // Tenant / site framing comes from proc-config (fixture until customer auth + a real
@@ -59,18 +62,68 @@ function eventRelTime(iso?: string | null): string {
 // Nav
 // ---------------------------------------------------------------------------
 
-type NavItem = { key: string; label: string; icon: ProcIconName; href?: string; soon?: boolean };
+type NavItem = {
+  key: string; label: string; icon: ProcIconName; href?: string; soon?: boolean;
+  /** Arc 6: shown only to a signed-in member holding this capability. */
+  needs?: BuyerCapability;
+  /** Arc 6: an Admin screen that exists only with a buyer session. */
+  sessionOnly?: boolean;
+};
 
 const NAV: NavItem[] = [
   { key: "home", label: "What needs me", icon: "box", href: "/" },
   { key: "request", label: "New request", icon: "plus", href: "/request" },
   { key: "approvals", label: "Approvals", icon: "checkCircle", href: "/approvals" },
   { key: "history", label: "History & prices", icon: "receipt", href: "/history" },
-  { key: "settings", label: "Delivery settings", icon: "building", href: "/settings" },
+  { key: "settings", label: "Delivery settings", icon: "building", href: "/settings",
+    needs: "set_approval_limit" },
+  { key: "team", label: "Team", icon: "building", href: "/team",
+    needs: "manage_members", sessionOnly: true },
+  { key: "policy", label: "Approval policy", icon: "checkCircle", href: "/settings/approval-policy",
+    needs: "set_approval_limit", sessionOnly: true },
 ];
 
+/** The nav a viewer sees. No session (flag off): today's list. A session: the
+ *  items their permissions reach — display only, the server enforces. */
+export function visibleNav(session: BuyerSession | null): NavItem[] {
+  if (!session) return NAV.filter((item) => !item.sessionOnly);
+  return NAV.filter((item) => !item.needs || session.can(item.needs));
+}
+
+/** The one nav item a path lights up: the longest href the path sits under, so
+ *  /settings/approval-policy lights "Approval policy", not "Delivery settings".
+ *  With the flag off no two hrefs nest, so this is the old startsWith rule. */
+function activeNavKey(nav: NavItem[], pathname: string): string | undefined {
+  const hits = nav.filter((i) => i.href && (i.href === "/" ? pathname === "/" : pathname.startsWith(i.href)));
+  hits.sort((a, b) => b.href!.length - a.href!.length);
+  return hits[0]?.key;
+}
+
+/** Initials for the avatar from the member's email ("dana.lee@…" → "DL"). */
+function initialsFor(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  const parts = local.split(/[._-]+/).filter(Boolean);
+  const letters = (parts.length >= 2 ? parts[0][0] + parts[1][0] : local.slice(0, 2)) || "?";
+  return letters.toUpperCase();
+}
+
+/**
+ * The buyer frame. With NEXT_PUBLIC_BUYER_SESSION_V1 on, every route inside it
+ * stands behind the buyer session guard (signed out ⇒ /login); off, it renders
+ * exactly as before arc 6.
+ */
 export function ProcShell({ children }: { children: ReactNode }) {
+  if (!buyerSessionEnabled()) return <ProcShellFrame>{children}</ProcShellFrame>;
+  return (
+    <BuyerSessionGuard>
+      <ProcShellFrame>{children}</ProcShellFrame>
+    </BuyerSessionGuard>
+  );
+}
+
+function ProcShellFrame({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const session = useBuyerSession();
   const pathname = usePathname();
 
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -178,8 +231,8 @@ export function ProcShell({ children }: { children: ReactNode }) {
             <div className="proc-navlabel">Parts &amp; Orders</div>
 
             <div className="proc-navlist">
-              {NAV.map((item) => {
-                const active = item.href === "/" ? pathname === "/" : Boolean(item.href) && pathname.startsWith(item.href!);
+              {visibleNav(session).map((item) => {
+                const active = item.key === activeNavKey(visibleNav(session), pathname);
                 return (
                   <button
                     key={item.key}
@@ -200,8 +253,14 @@ export function ProcShell({ children }: { children: ReactNode }) {
           <div className="proc-dmain">
             <div className="proc-dtop">
               <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                <span className="dt-tenant">{PROC_TENANT.name}</span>
-                <span className="dt-sub">{PROC_TENANT.sub}</span>
+                {/* Arc 6 D7: the AUTHENTICATED company, never a fixture, once a buyer
+                    session is in force. Flag off: the demo fixture, as before. */}
+                <span className="dt-tenant" data-testid="proc-tenant">
+                  {session ? session.company.name : PROC_TENANT.name}
+                </span>
+                <span className="dt-sub">
+                  {session ? `${session.member.email} · ${roleLabel(session.member.role)}` : PROC_TENANT.sub}
+                </span>
               </div>
               <div className="dt-spacer" />
               <button className="proc-iconbtn" onClick={toggleTheme} title="Toggle theme">
@@ -248,9 +307,20 @@ export function ProcShell({ children }: { children: ReactNode }) {
                   </div>
                 )}
               </div>
-              <button className="proc-avatar" onClick={() => fire("Account")}>
-                CS
-              </button>
+              {session ? (
+                <>
+                  <span className="proc-avatar" title={session.member.email} aria-hidden="true">
+                    {initialsFor(session.member.email)}
+                  </span>
+                  <button className="proc-btn" data-kind="quiet" onClick={() => void session.logout()}>
+                    Sign out
+                  </button>
+                </>
+              ) : (
+                <button className="proc-avatar" onClick={() => fire("Account")}>
+                  CS
+                </button>
+              )}
             </div>
 
             <div className="proc-dbody">{children}</div>

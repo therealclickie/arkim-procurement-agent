@@ -53,3 +53,17 @@ export function supplierSessionEnabled(): boolean {
 export function notificationsEnabled(): boolean {
   return isOn(process.env.NEXT_PUBLIC_NOTIFICATIONS_V1);
 }
+
+/**
+ * NEXT_PUBLIC_BUYER_SESSION_V1 — arc 6's buyer identity surface: /login and
+ * /verify, the session guard on every buyer route, the company name in the
+ * header, the Team and Approval policy screens, and controls hidden by
+ * permission.
+ *
+ * Paired with, and independent of, the backend's BUYER_ACCOUNTS_V1: the
+ * backend flag makes the API demand a session, this one makes the UI obtain
+ * and reflect one. Off ⇒ the buyer UI is exactly today's, with no login.
+ */
+export function buyerSessionEnabled(): boolean {
+  return isOn(process.env.NEXT_PUBLIC_BUYER_SESSION_V1);
+}

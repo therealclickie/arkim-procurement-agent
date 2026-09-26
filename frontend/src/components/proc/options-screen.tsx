@@ -15,6 +15,7 @@ import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useRunLive, useOrderNow, useOrders, useGroup, useDemoMode } from "@/lib/queries";
+import { BuyerCan } from "@/lib/buyer-session";
 import { ProcIcon } from "./proc-icon";
 import { UnverifiedBanner } from "./unverified-banner";
 import { ProcHead, SecHead, procMoney } from "./proc-ui";
@@ -367,7 +368,10 @@ export function OptionsScreen({ runId }: { runId: string }) {
                             <ProcIcon name="checkCircle" size={12} />Selected
                           </span>
                         ) : null
-                      ) : c.price != null ? (
+                      ) : (
+                        // Arc 6: ordering and quoting are select_and_order — hidden from a
+                        // Requester (display only; the server's matrix refuses them anyway).
+                        <BuyerCan capability="select_and_order">{c.price != null ? (
                         // Any PRICED candidate orders through Arkim (marketplace OR reference)
                         // via an unconditional confirm step. Price-less rows below → Get quote.
                         confirmMktId === c.id ? (
@@ -397,6 +401,7 @@ export function OptionsScreen({ runId }: { runId: string }) {
                         >
                           Get quote
                         </button>
+                      )}</BuyerCan>
                       )}
                       <button className="o-why" onClick={() => setWhyOpen((s) => ({ ...s, [c.id]: !s[c.id] }))}>
                         Why?<ProcIcon name={whyOpen[c.id] ? "chevD" : "chevR"} size={12} />

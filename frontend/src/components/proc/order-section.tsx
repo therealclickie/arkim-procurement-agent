@@ -14,6 +14,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useOrders, useExecuteOrder, useMarkDelivered, useRunLive, useSiteShipTo } from "@/lib/queries";
+import { BuyerCan } from "@/lib/buyer-session";
 import { ProcIcon } from "./proc-icon";
 import { procMoney } from "./proc-ui";
 import { ApprovalActions, deriveApproval, approvalStatusLine } from "./approval-actions";
@@ -77,6 +78,8 @@ export function OrderSection({ runId }: { runId: string }) {
       ) : cancelled && !canPlace ? (
         <div className="rc-note">This order was cancelled.</div>
       ) : (
+        // Arc 6: placing is select_and_order (display only; the server enforces).
+        <BuyerCan capability="select_and_order" fallback={<div className="rc-note" data-testid="order-no-rights">Someone with ordering rights can place this order.</div>}>
         <PlaceOrderCard
           partName={[run?.asset_specs?.manufacturer, run?.asset_specs?.model || run?.asset_specs?.part_number].filter(Boolean).join(" ") || "the selected part"}
           supplier={run?.selected_candidate?.vendorName ?? "the selected supplier"}
@@ -86,6 +89,7 @@ export function OrderSection({ runId }: { runId: string }) {
           errored={execute.isError}
           onPlace={() => execute.mutate()}
         />
+        </BuyerCan>
       )}
     </section>
   );

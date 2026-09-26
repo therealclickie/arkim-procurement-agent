@@ -19,6 +19,7 @@
 
 import { useState } from "react";
 import { useApproveRun, useRejectRun } from "@/lib/queries";
+import { useBuyerSession } from "@/lib/buyer-session";
 import { ApiError } from "@/lib/query-client";
 import { ProcIcon } from "./proc-icon";
 import type { Candidate, SourcingRunDetail } from "@/types";
@@ -99,10 +100,25 @@ export function ApprovalActions({ run }: { run: SourcingRunDetail }) {
   const roleLabel = approverRoleLabel(stepRole);
   const approve = useApproveRun(run.id);
   const reject = useRejectRun(run.id);
-  const [name, setName] = useState("");
+  // Arc 6 D7: with a buyer session the approver IS the signed-in member — the server
+  // records their id from the session and ignores any name in the body, so there is
+  // no name to type. Without a session (flag off) the typed name is today's field.
+  const session = useBuyerSession();
+  const [typedName, setTypedName] = useState("");
+  const name = session ? session.member.email : typedName;
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const busy = approve.isPending || reject.isPending;
+
+  // Display only: a member without approval rights sees the state, not the buttons.
+  // The server's matrix refuses the call regardless (403).
+  if (session && !session.can("approve_within_limit")) {
+    return (
+      <span className="note" data-testid="approval-no-rights" style={{ fontSize: 12.5, color: "var(--muted)" }}>
+        Waiting for someone with approval rights to decide.
+      </span>
+    );
+  }
 
   const onApprove = () => {
     if (!name.trim() || busy) return;
@@ -125,12 +141,18 @@ export function ApprovalActions({ run }: { run: SourcingRunDetail }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {session ? (
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>
+          Approving as <strong>{session.member.email}</strong>
+          {roleLabel ? <> <span style={{ color: "var(--muted-2)" }}>({roleLabel})</span></> : null}
+        </span>
+      ) : (
       <label style={{ fontSize: 12, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 5 }}>
         Approving{roleLabel ? <> as <span style={{ color: "var(--muted-2)" }}>({roleLabel})</span></> : null}
         <input
           type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+          value={typedName}
+          onChange={(e) => setTypedName(e.target.value)}
           placeholder="Your name"
           disabled={busy}
           style={{
@@ -142,6 +164,7 @@ export function ApprovalActions({ run }: { run: SourcingRunDetail }) {
           Recorded as the approver for this run.
         </span>
       </label>
+      )}
 
       {rejecting ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

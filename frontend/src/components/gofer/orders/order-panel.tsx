@@ -17,6 +17,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useOrders, useExecuteOrder, useMarkDelivered } from "@/lib/queries";
+import { BuyerCan } from "@/lib/buyer-session";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/ui/pill";
 import type { Order, OrderStatus, SourcingRunDetail } from "@/types";
@@ -68,6 +69,7 @@ export function OrderPanel({ run }: { run: SourcingRunDetail }) {
       ) : cancelled && !canPlace ? (
         <p className="text-[12px] text-fg-3">This order was cancelled.</p>
       ) : (
+        <BuyerCan capability="select_and_order">
         <PlaceOrderCard
           run={run}
           noPrice={noPrice}
@@ -75,6 +77,7 @@ export function OrderPanel({ run }: { run: SourcingRunDetail }) {
           errored={execute.isError}
           onPlace={() => execute.mutate()}
         />
+        </BuyerCan>
       )}
     </section>
   );

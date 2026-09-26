@@ -8,6 +8,7 @@ import { PnMatch, MatchBar } from "@/components/ui/match";
 import { External, Clock, Dollar } from "@/components/ui/icons";
 import { LeadTime } from "./lead-time";
 import { useSelectCandidate, useRequestConfirmation } from "@/lib/queries";
+import { BuyerCan } from "@/lib/buyer-session";
 import { useGoferStore } from "@/store";
 import { BRAND_NAME } from "@/lib/brand";
 import type { Candidate } from "@/types";
@@ -181,6 +182,7 @@ export function VendorCard({ candidate, runId, className }: VendorCardProps) {
               )}
 
               {!isRequestMode && (
+                <BuyerCan capability="select_and_order">
                 <Button
                   variant={candidate.tier === 1 ? "primary" : "secondary"}
                   size="sm"
@@ -190,6 +192,7 @@ export function VendorCard({ candidate, runId, className }: VendorCardProps) {
                 >
                   {hasPrice ? "Buy Now" : "Request Quote"}
                 </Button>
+                </BuyerCan>
               )}
 
               <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-fg-4 text-center">

@@ -19,6 +19,7 @@ import {
   useRejectReviewItem,
   usePlaceOrderFromQuote,
 } from "@/lib/queries";
+import { BuyerCan } from "@/lib/buyer-session";
 import { ProcIcon } from "./proc-icon";
 import { procMoney } from "./proc-ui";
 import type { ReviewItem } from "@/types";
@@ -106,6 +107,7 @@ export function QuotesSection({ runId }: { runId: string }) {
               <ProcIcon name="checkCircle" size={14} />Order placed
             </span>
           ) : (
+            <BuyerCan capability="select_and_order">
             <button
               className="proc-btn"
               data-kind="primary"
@@ -115,6 +117,7 @@ export function QuotesSection({ runId }: { runId: string }) {
             >
               <ProcIcon name="box" size={14} />{placeOrder.isPending ? "Placing…" : "Place order"}
             </button>
+            </BuyerCan>
           )}
         </div>
       )}

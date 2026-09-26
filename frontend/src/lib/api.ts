@@ -88,6 +88,12 @@ async function request<T>(
     // cache and never observe the run advancing sourcing -> comparison — the run
     // stays stuck on "finding your best options" until a full browser reload.
     cache: "no-store",
+    // Arc 6 (gate finding F11): send the httpOnly buyer session cookie on every call.
+    // Set HERE, in the defaults, because a caller that passes `headers` replaces the
+    // default headers wholesale (the spread below) — a per-call credentials flag
+    // would be one forgotten call away from an unauthenticated request. The cookie
+    // is never read by script; with no cookie in the jar this sends nothing extra.
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       // Attach the per-browser session id so DEMO_MODE can scope this visitor's runs.
