@@ -215,3 +215,145 @@ PROPOSED TEST EDIT: utils/procurement_agent/tests/conftest.py :: 71-75 (and 77-8
 
 GATE STOP (RESOLVED 26 Sep - rulings in brief): The brief says the buyer side has no identity, but a ported Cognito buyer identity (`utils/auth`, `get_caller`) already sets `runs.company_id` and `approver_id` on six buyer routes. Please rule on three points. (Q1) Under `BUYER_ACCOUNTS_V1`, is the new magic-link `gofer_buyer_session` the ONLY accepted buyer identity, so the Cognito bearer path is ignored or refused? Or must a valid Cognito caller also be accepted, mapped to a buyer member by `company_id` PIN plus email? And is the buyer company key the existing company PIN string (e.g. `company-bayfoods`)? (Q2) `POST /api/runs/from-maintenance` is a service-to-service ingress from core (Cognito JWT plus `X-Arkim-Service-Signature`), not a browser call. Under the flag, should it be exempt from the buyer-session requirement and keep its service authentication (added to the T4 allowlist with that reason)? Or should it require a buyer session like the other buyer routes? (Q3) Under the flag, should `/api/debug/llm` and `/api/dev/reseed-handoffs` be moved behind `require_admin`, disabled (404), or exempted as named dev routes? Each fails the brief's buyer-facing rule, but neither is a buyer surface.
 
+
+
+---
+
+# BUILD — Arc 6 T1–T8 (builder report, appended after the gate)
+
+**Branch:** `arc6/buyer-identity`. No task had been committed when this session started; T1–T8 were built in order, one commit each. Not pushed.
+
+| Task | Commit |
+|---|---|
+| T1 Models and flag | `b5f2a9e` |
+| T2 Permission matrix | `3ad136b` |
+| T3 Buyer login and sessions | `2d320ef` |
+| T4 Company isolation | `2712480` |
+| T5 Attribution | `278aebd` |
+| T6 Company bootstrap and member management | `5b09372` |
+| T7 Approval policy settings | `5244743` |
+| T8 Frontend | `499dcc2` |
+| (fix-up) LF line endings restored in `api_server.py` | `f5cbee9` |
+| (docs) CLAUDE.md notes, CLEANUP 8.7–8.8 | `4e09c61` |
+
+## Final test counts (as observed, flags off, HEAD `4e09c61`)
+
+- **Backend `uv run pytest -q`: 3584 passed, 73 skipped, 1 warning** (335 s). The previous full run at the same HEAD gave **1 failed, 3583 passed, 73 skipped**. The failure was `test_notifications_admin_alerts.py::test_the_list_is_newest_first`, which passed 5/5 when run alone and passed in the rerun. It is a pre-existing timing flake (FINDINGS F-H), not caused by this arc.
+- **Frontend `npm test`: 34 files, 259 tests passed.**
+- Gate baseline for comparison: 3322 passed / 73 skipped; 33 files / 246 tests.
+
+## Pre-existing test files modified
+
+- `utils/procurement_agent/tests/conftest.py`: the one approved edit (K7, listed in `loop/AUTHORISED_TEST_EDITS.txt`). It appends `"BUYER_ACCOUNTS_V1"` to `_FEATURE_FLAG_ENVS` and changes no existing entry. The flag is read live, so it has no module-attribute binding.
+- No other pre-existing test file was modified. Every arc 2/3 supplier test passes unmodified.
+- `utils/supplier_accounts.py`, `utils/supplier_accounts_rbac.py`, `utils/send_governance.py`, `utils/auth/` and `frontend/src/app/supplier/**` are unchanged since `7916215`. No removed line in the `api_server.py` diff mentions a supplier.
+
+## How isolation is enforced (T4)
+
+Every buyer-facing route declares `dependencies=[Depends(_DOOR_<CAP>)]`. Each door runs `_buyer_session_in_force`, which does three things before the handler runs:
+
+1. Authenticates the `gofer_buyer_session` cookie, which is the only credential. It also applies the arc 3 origin check.
+2. Scopes every path resource (`run_id`, `group_id`, `draft_id`, `item_id`, `facility_id`) to the session company. A resource that belongs to another company gets the same 404 as a missing one.
+3. Checks the D2 matrix.
+
+`site_id` is scoped by construction: rows are keyed by company. With the flag off, the door returns `None` and every route behaves as before. Lists, creation, events, reorder, impact and ship-to also filter or stamp by the session company inside the handler.
+
+**Q2 (from-maintenance): service auth is NOT verified in code.** The route `api_server.py:2468-2469` depends on the optional `get_caller`. That function returns `None` when no bearer is present (`utils/auth/dependencies.py:111-112`). It computes `service_authenticated` (`:122`), but nothing requires it. So under the flag the route returns 404. It is allowlisted with the reason "disabled under BUYER_ACCOUNTS_V1 until service auth is enforced", the 404 is pinned by a test, and CLEANUP 8.2 records it. **Q3:** `/api/debug/llm` and `/api/dev/reseed-handoffs` return 404 under the flag (allowlisted and pinned), and CLEANUP 8.3 records the key-prefix echo.
+
+**Structural guard** (`test_buyer_route_guard.py`):
+- It enumerates `api_server.app.routes` at runtime and classifies each route with the approved rule (`_buyer_fixtures.NON_BUYER_PREFIXES`).
+- It fails if any buyer-facing route lacks the session door plus a capability dependency.
+- The `EXEMPT` allowlist has five named entries, each with a reason:
+  - request-link and verify: public by design.
+  - from-maintenance, debug/llm and dev/reseed: disabled under the flag.
+- Every path parameter must be one the door knows how to scope.
+- A runtime sweep calls every buyer route with the flag on, no session and an admin bearer. Each must return 401, or 404 for the disabled routes.
+
+## Endpoint isolation table (every K2 endpoint → the test that proves it is scoped)
+
+Abbreviations: `ISO` = `utils/procurement_agent/tests/test_buyer_isolation.py`; `FvM[Bn]` = `ISO::TestForeignIsIndistinguishableFromMissing::test_member_of_a_gets_the_missing_response_for_b[Bn]` (a member of A gets byte-identical status and body for B's id and for a missing id, and B's data is unchanged); `GUARD` = `test_buyer_route_guard.py`. Every row is also covered by `GUARD::TestStructuralGuard::test_every_buyer_facing_route_has_the_door` and `GUARD::TestRuntimeNoSessionNoEntry::test_no_buyer_route_is_reachable_without_a_session`.
+
+| # | Endpoint | Scoping proof |
+|---|---|---|
+| B1 | POST /api/runs | `ISO::TestCreationIsScoped::test_b1_create_run_belongs_to_the_session_company`, `::test_b1_foreign_facility_equals_nonexistent_facility`, `::test_b1_cannot_join_another_companys_basket` |
+| B2 | PUT /api/runs/{run_id}/asset-specs | `FvM[B2]` |
+| B3 | POST /api/requests | `ISO::TestCreationIsScoped::test_b3_single_and_fan_out_requests_belong_to_the_session_company`, `::test_b3_foreign_facility_equals_nonexistent_facility` |
+| B4 | GET /api/runs | `ISO::TestListsAreScoped::test_b4_list_runs`; `ISO::…::test_legacy_null_company_runs_are_invisible_under_the_flag` |
+| B5 | POST /api/runs/from-maintenance | disabled: `GUARD::TestRuntimeNoSessionNoEntry::test_disabled_routes_are_the_plain_404_under_the_flag`, `::test_from_maintenance_unsigned_call_is_refused_under_the_flag` |
+| B6 | GET /api/runs/{run_id} | `FvM[B6]` (+ owner positive control `ISO::…::test_the_owner_still_reaches_it[B6]`) |
+| B7 | POST …/open-from-pending | `FvM[B7]` |
+| B8 | POST …/reject-submission | `FvM[B8]` |
+| B9 | POST …/messages | `FvM[B9]` |
+| B10 | POST …/upload | `FvM[B10]` |
+| B11 | POST …/request-confirmation | `FvM[B11]` |
+| B12 | POST …/select-candidate | `FvM[B12]` |
+| B13 | POST …/order-now | `FvM[B13]` |
+| B14 | POST …/approve | `FvM[B14]`; `ISO::…::test_a_requester_gets_404_not_403_on_a_foreign_run` |
+| B15 | POST …/reject | `FvM[B15]` |
+| B16 | POST …/confirm-intake | `FvM[B16]` |
+| B17 | POST …/outreach | `FvM[B17]` |
+| B18 | POST …/save-outreach | `FvM[B18]` |
+| B19 | GET /api/facilities | `ISO::TestListsAreScoped::test_b19_facilities` |
+| B20 | GET /api/approval-rules/{facility_id} | `FvM[B20]` (+ `test_the_owner_still_reaches_it[B20]`) |
+| B21 | POST /api/approval-rules | `ISO::TestListsAreScoped::test_b21_approval_rule_on_a_foreign_facility_equals_a_nonexistent_one` |
+| B22 | POST …/execute | `FvM[B22]` |
+| B23 | POST …/mark-delivered | `FvM[B23]` |
+| B24 | GET …/orders | `FvM[B24]` |
+| B25 | GET /api/orders | `ISO::TestListsAreScoped::test_b25_orders` |
+| B26 | GET /api/reorder | `ISO::TestListsAreScoped::test_b26_reorder` |
+| B27 | GET /api/events | `ISO::TestListsAreScoped::test_b27_events` |
+| B28 | GET /api/groups/{group_id} | `FvM[B28]`; `ISO::TestCreationIsScoped::test_b1_cannot_join_another_companys_basket` |
+| B29 | POST /api/groups/{group_id}/approve | `FvM[B29]` |
+| B30 | POST /api/groups/{group_id}/reject | `FvM[B30]` |
+| B31 | POST …/rfq-draft | `FvM[B31]` |
+| B32 | GET /api/rfq-drafts/{draft_id} | `FvM[B32]` |
+| B33 | GET …/rfq-drafts | `FvM[B33]` |
+| B34 | POST /api/rfq-drafts/{draft_id}/approve | `FvM[B34]` |
+| B35 | POST /api/rfq-drafts/{draft_id}/reject | `FvM[B35]` |
+| B36 | POST /api/rfq-drafts/{draft_id}/send | `FvM[B36]` |
+| B37 | GET /api/sites/{site_id}/ship-to | `ISO::TestListsAreScoped::test_b37_b38_ship_to` |
+| B38 | PUT /api/sites/{site_id}/ship-to | `ISO::TestListsAreScoped::test_b37_b38_ship_to` |
+| B39 | GET …/review-items | `FvM[B39]` |
+| B40 | POST …/process-replies | `FvM[B40]` |
+| B41 | POST /api/review-items/{item_id}/confirm | `FvM[B41]` |
+| B42 | POST /api/review-items/{item_id}/reject | `FvM[B42]` |
+| B43 | POST /api/review-items/{item_id}/place-order | `FvM[B43]` |
+| B44 | GET …/impact | `FvM[B44]`; `ISO::TestListsAreScoped::test_b44_saving_is_never_measured_against_another_companys_price` |
+| B45 | GET /api/impact | `ISO::TestListsAreScoped::test_b45_impact` |
+| B46 | GET /api/buyer/me (new) | company taken from the session only: `test_buyer_auth.py::TestVerifyAndCookie::test_me_returns_company_member_and_permissions` |
+| B47 | /api/buyer/members* (new) | `test_buyer_members.py::TestOnlyAdminManagesMembers::test_admin_lists_only_their_company`, `TestInviteChangeRevoke::test_cross_company_member_is_indistinguishable_from_missing` |
+| B48 | /api/buyer/settings* (new) | `test_buyer_settings.py::TestChanges::test_changes_are_company_scoped` |
+| B49 | GET /api/debug/llm | disabled: `GUARD::TestRuntimeNoSessionNoEntry::test_disabled_routes_are_the_plain_404_under_the_flag` |
+| B50 | POST /api/dev/reseed-handoffs | disabled: same test |
+
+Other invariants and the tests that hold them:
+- **D7 attribution:** `test_buyer_attribution.py`. Each action records the session member and ignores a typed "Dana Plant-Manager". M1 compares member ids. `acknowledged_by` is recorded for both overrides. `placed_by` holds a member id and orders carry `company_id`. Channel runs record `acting_member: null` plus the channel.
+- **D2 matrix:** `test_buyer_accounts_rbac.py` has the role × capability table and a source scan over every buyer handler taken from `app.routes`.
+- **Hidden controls return 403 when called directly:** `test_buyer_hidden_controls.py`.
+- **D5 policy:** `test_buyer_settings.py`. The policy is stored and audited, and `TestNotEnforcedYet` shows order routing is unchanged.
+- **Flag off:**
+  - `test_buyer_auth.py::TestFlagOff` checks that every new route returns 404 regardless of body.
+  - `GUARD::TestFlagOffUnchanged` checks that pre-existing routes behave as before.
+  - `test_buyer_attribution.py::TestFlagOffAttributionUnchanged` checks that typed approver names are still recorded.
+  - The frontend flag-off cases in `buyer-session.test.tsx` check that today's UI renders.
+
+## FINDINGS
+
+- **F-A — Two settings routes use the Admin capability `set_approval_limit`.** D2 names no "company settings" capability. Following the gate's K2 proposal, `PUT /api/sites/{site_id}/ship-to` (B38) and `POST /api/approval-rules` (B21) require `set_approval_limit`, so only Admins can use them (F3 ruling: B21 gets nothing beyond D2's Admin capability). The frontend shows "Delivery settings" only to Admins. If a separate capability is wanted, it is one new row in `utils/buyer_accounts_rbac.py`.
+- **F-B — Joining another company's basket is refused with a 422 that a brand-new id does not get.** Basket ids are minted by the client (`frontend/src/components/proc/request-screen.tsx:200,231,268`). With the flag on, `POST /api/runs` with another company's `group_id` returns 422 "group_id is not available" (`api_server.py` `_buyer_check_group_join`). A new id is accepted. So the endpoint technically reveals that a random UUID is in use. The alternative, accepting the join, would put a foreign run under the victim's basket approval record. The ids are unguessable v4 UUIDs and leak only through their owner. Minting basket ids on the server would remove the difference.
+- **F-C — Buyer sign-in mail skips two parts of the supplier mail path, and the SES boot guard ignores the buyer flag.** Buyer mail goes through the same governed `GmailSender().send` seam, with the same `auth_mail` / `message_class="auth"` markers. But it writes no `sent_messages` ledger row and no tracked Notification. The supplier helpers for those are keyed on `supplier_domain`, and supplier code was not to be changed. As a result, buyer sends do not count toward the auth daily cap, and a bounce raises nothing. Separately, the SES boot guard (`api_server.py` `_assert_auth_mail_configured`) checks only `SUPPLIER_ACCOUNTS_V1`. Recorded as CLEANUP 8.7.
+- **F-D — "Mark purchased" overwrites the buyer's `placed_by`.** The admin action calls `place_order(placed_by="operator")`, which replaces the buyer member id captured at order-now or manual execute. This is pre-existing admin behaviour. Recorded as CLEANUP 8.8 for arc 7.
+- **F-E — Any approver can give the second approval.** D2 reserves the second approval above the limit for Approver and Admin. Nothing enforces that yet (arc 7), so the server accepts a second approval from any `approve_within_limit` holder, and the UI shows the "Approve (2nd)" button to Buyers as well. M1 now makes sure the two approvals come from distinct members.
+- **F-F — `GET /api/buyer/settings` is Admin-only**, following the brief ("Admin-only settings screen and API"). Arc 7 approvers will probably need to read the limit. Opening the read to `view_company` would be a one-line change.
+- **F-G — A malformed Cognito bearer can still produce a 401 under the flag.** `get_caller` still runs on B1, B3, B14, B29 and B30. The door runs first, so a request without a valid cookie gets the door's 401. A request with a valid cookie and a malformed Cognito bearer gets `get_caller`'s own 401 "Invalid or expired token". The Cognito identity is never used under the flag (Q1). This was left in place because changing `get_caller` wiring would change the flag-off Cognito path, which Q1 says must stay as it is.
+- **F-H — Pre-existing flaky test, not edited (not in the approval list).** `utils/procurement_agent/tests/test_notifications_admin_alerts.py:169-175` raises three alerts back-to-back and expects newest-first order. The alert list sorts by `created_at` alone, with no tiebreaker (`utils/notifications_store.py:1221`), so equal timestamps come back in insertion order. It failed once in a full run at HEAD, then passed alone 5/5 and in a full rerun. Nothing in this arc touches it.
+- **F-I — Pre-existing frontend type errors in test files.** `npx tsc --noEmit` reports errors only in test files this arc did not touch:
+  - `src/app/portal/[token]/__tests__/portal-route.test.ts:17`
+  - `src/app/portal/[token]/__tests__/security.test.tsx:45,51,54`
+  - `src/app/quote/[token]/__tests__/quote-route.test.ts:15`
+  - `src/components/gofer/__tests__/asset-panel-hygienic.test.tsx:45`
+
+  No non-test source has type errors.
+- **F-J — Line-ending churn in the T3 to T8 commits.** The T3 patch script wrote `api_server.py` in Windows text mode. That committed the whole file as CRLF in `2d320ef` and it stayed that way through T8. `f5cbee9` restores LF with no content change. **Review against `7916215..HEAD` or `--ignore-cr-at-eol`.** Per-commit diffs from T3 to T8 show whole-file churn in `api_server.py`.
+- **F-K — The legacy `/runs` frame is guarded but shows no company header.** It sits behind the session guard (`frontend/src/app/runs/layout.tsx`), but the company header lives only in `ProcShell`. The `SidebarNav` frame shows no company.
+- **F-L — `/settings` (Delivery settings) is still reachable by URL for non-Admins.** The nav hides it, reads still work, and saving returns 403, which the page reports as its own generic error.
