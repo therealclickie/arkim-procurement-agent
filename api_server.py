@@ -2224,6 +2224,15 @@ def _buyer_company_id(buyer: Optional[dict]) -> Optional[str]:
     return buyer["company_id"] if buyer else None
 
 
+def _buyer_actor_labels(buyer: Optional[dict], body: Any) -> tuple:
+    """(approver_name, approver_role) for a decision record. Flag off: the body's
+    typed values, exactly as before. Flag on: the session member's email and role —
+    request-body text never reaches an attribution field (D7)."""
+    if buyer:
+        return buyer["member"]["email"], buyer["member"]["role"]
+    return body.approver_name, body.approver_role
+
+
 def _buyer_record_action(buyer: Optional[dict], action: str, *,
                          run_id: Optional[str] = None,
                          detail: Optional[dict] = None) -> None:
@@ -2250,6 +2259,7 @@ def _new_run_orm(
     group_id: Optional[str] = None,
     asset_specs: Optional[Dict[str, Any]] = None,
     session_id: Optional[str] = None,
+    initiated_by: Optional[str] = None,
 ) -> SourcingRunORM:
     """Build (do not persist) a fresh run at phase=intake — the SINGLE construction the
     create path uses. Shared by create_run (commits one) and _fan_out_intake (commits N in
@@ -2268,6 +2278,7 @@ def _new_run_orm(
         warranty_status=warranty_status,
         asset_specs_json=json.dumps(asset_specs) if asset_specs else None,
         session_id=session_id,
+        initiated_by_user_id=initiated_by,   # Arc 6 D7: the session member; None flag-off
         initiated_at=now,
         updated_at=now,
     )
@@ -2316,16 +2327,19 @@ def create_run(
         group_id=body.group_id,   # opt-in basket label; None -> group-less (legacy, unchanged)
         asset_specs=seeded_specs,   # opt-in seed; None -> bare intake run (legacy, unchanged)
         session_id=demo_sid or None,   # DEMO_MODE visitor token; None when off/absent
+        initiated_by=_acting_member_id(buyer),
     )
     with _SessionFactory() as session:
         session.add(run)
         session.commit()
         session.refresh(run)
-        return CreateRunResponse(
+        response = CreateRunResponse(
             id=run.id,
             phase=run.current_phase,
             created_at=run.initiated_at.isoformat(),
         )
+    _buyer_record_action(buyer, "create_run", run_id=response.id)
+    return response
 
 
 @app.put("/api/runs/{run_id}/asset-specs", dependencies=[Depends(_DOOR_RAISE)])
@@ -2387,6 +2401,7 @@ def _fan_out_intake(body: IntakeRequest, caller: Optional[Caller],
             warranty_status=body.warranty_status,
             company_id=company_id,
             group_id=group_id,
+            initiated_by=_acting_member_id(buyer),
         )
         for _ in body.parts
     ]
@@ -2394,6 +2409,8 @@ def _fan_out_intake(body: IntakeRequest, caller: Optional[Caller],
     with _SessionFactory() as session:
         session.add_all(runs)
         session.commit()  # single atomic commit — all N or none
+    for rid in run_ids:
+        _buyer_record_action(buyer, "create_run", run_id=rid, detail={"group_id": group_id})
     return {"group_id": group_id, "run_ids": run_ids}
 
 
@@ -3034,7 +3051,8 @@ def _selected_candidate_total(sourcing_results_json: Optional[str], candidate_id
 
 
 @app.post("/api/runs/{run_id}/select-candidate", dependencies=[Depends(_DOOR_ORDER)])
-def select_candidate(run_id: str, body: SelectCandidateRequest):
+def select_candidate(run_id: str, body: SelectCandidateRequest,
+                     buyer: Optional[dict] = Depends(_DOOR_ORDER)):
     """Lock in a candidate and advance the run to pending_first_approval.
 
     H1: evaluate the facility's approval rules against the selected candidate's total and
@@ -3052,7 +3070,7 @@ def select_candidate(run_id: str, body: SelectCandidateRequest):
         facility_id = run.facility_id or "00000000-0000-0000-0000-000000000000"
         approvers_required, approver_roles = determine_approval_path(facility_id, total_usd)
 
-        run.selected_candidate_json = json.dumps({
+        selection = {
             "candidate_id": body.candidate_id,
             "tier": body.tier,
             "selected_at": datetime.now(timezone.utc).isoformat(),
@@ -3061,7 +3079,10 @@ def select_candidate(run_id: str, body: SelectCandidateRequest):
                 "approver_roles":     approver_roles,
                 "grand_total_usd":    total_usd,
             },
-        })
+        }
+        if buyer:   # Arc 6 D7: who selected, from the session (key absent flag-off)
+            selection["selected_by"] = _acting_member_id(buyer)
+        run.selected_candidate_json = json.dumps(selection)
         run.current_phase = Phase.PENDING_FIRST_APPROVAL.value
         run.updated_at = datetime.now(timezone.utc)
         session.commit()
@@ -3069,6 +3090,8 @@ def select_candidate(run_id: str, body: SelectCandidateRequest):
     # Night 1 — capture the select-candidate user action (RUN_CAPTURE-gated, fail-soft).
     _run_capture.capture_user_action(run_id, "select_candidate",
                                      detail={"candidate_id": body.candidate_id, "tier": body.tier})
+    _buyer_record_action(buyer, "select_candidate", run_id=run_id,
+                         detail={"candidate_id": body.candidate_id, "tier": body.tier})
     return {"run_id": run_id, "phase": Phase.PENDING_FIRST_APPROVAL.value}
 
 
@@ -3130,7 +3153,8 @@ def _reconstruct_candidate(sourcing_results_json: Optional[str], candidate_id: s
 
 
 @app.post("/api/runs/{run_id}/order-now", dependencies=[Depends(_DOOR_ORDER)])
-def create_order_now(run_id: str, body: OrderNowRequest):
+def create_order_now(run_id: str, body: OrderNowRequest,
+                     buyer: Optional[dict] = Depends(_DOOR_ORDER)):
     """Manual fulfilment "Order" / "Order through Arkim" on ANY PRICED candidate. Buying
     => selecting — the candidate becomes the run's selection — and the spend routes
     through the SAME approval path as everything else (NOT exempt: "available
@@ -3219,6 +3243,8 @@ def create_order_now(run_id: str, body: OrderNowRequest):
                 "grand_total_usd":    total_usd,
             },
         }
+        if buyer:   # Arc 6 D7: who selected, from the session (key absent flag-off)
+            selected["selected_by"] = _acting_member_id(buyer)
 
         if approvers_required >= 1:
             # At/above threshold: run-phase approval; NO order yet (Model A). Route the
@@ -3233,6 +3259,8 @@ def create_order_now(run_id: str, body: OrderNowRequest):
                                              detail={"candidate_id": body.candidate_id, "tier": body.tier,
                                                      "quantity": qty, "channel": channel,
                                                      "pending_approval": True})
+            _buyer_record_action(buyer, "order_now", run_id=run_id,
+                                 detail={"candidate_id": body.candidate_id, "pending_approval": True})
             return {"pending_approval": True, "order": None, "phase": phase}
 
         # Sub-threshold (auto-approved, 0 approvers): advance the run THROUGH approval so
@@ -3265,7 +3293,8 @@ def create_order_now(run_id: str, body: OrderNowRequest):
         order_quote.apply_to_selection(selection, _quote)
         selection["quantity"] = qty
     order = orders.create_order(selection, quantity=qty, company_id=company_id,
-                                initial_status=orders.STATUS_PENDING_FULFILMENT)
+                                initial_status=orders.STATUS_PENDING_FULFILMENT,
+                                captured_by=_acting_member_id(buyer))
     if not order:
         raise HTTPException(status_code=500, detail="Order capture failed")
     _persist_order_on_run(run_id, order)
@@ -3274,11 +3303,14 @@ def create_order_now(run_id: str, body: OrderNowRequest):
     _run_capture.capture_user_action(run_id, "order_now",
                                      detail={"candidate_id": body.candidate_id, "tier": body.tier,
                                              "quantity": qty, "channel": channel})
+    _buyer_record_action(buyer, "order_now", run_id=run_id,
+                         detail={"candidate_id": body.candidate_id, "order_id": order.get("id")})
     return {"pending_approval": False, "order": order, "phase": phase}
 
 
 @app.post("/api/runs/{run_id}/approve", dependencies=[Depends(_DOOR_APPROVE)])
-def approve_run(run_id: str, body: ApproveRequest, caller: Optional[Caller] = Depends(get_caller)):
+def approve_run(run_id: str, body: ApproveRequest, caller: Optional[Caller] = Depends(get_caller),
+                buyer: Optional[dict] = Depends(_DOOR_APPROVE)):
     """
     Record an approval action and route by the persisted approval path (H1) with
     distinct-approver enforcement (M1).
@@ -3296,7 +3328,10 @@ def approve_run(run_id: str, body: ApproveRequest, caller: Optional[Caller] = De
     forwards identity. D2 tenant-scoping is deferred (no tenant key in the stores yet;
     needs core's assigned_sites — see CLEANUP §4.1).
     """
-    approver_id = caller.user_id if caller else None
+    # Arc 6 (gate ruling Q1): under BUYER_ACCOUNTS_V1 the approver is the SESSION member —
+    # their id drives M1 and their name/role come from the member record, never the body.
+    approver_id = _acting_member_id(buyer) if buyer else (caller.user_id if caller else None)
+    approver_name, approver_role = _buyer_actor_labels(buyer, body)
     with _SessionFactory() as session:
         run = session.get(SourcingRunORM, run_id)
         if not run:
@@ -3323,8 +3358,8 @@ def approve_run(run_id: str, body: ApproveRequest, caller: Optional[Caller] = De
         history.append({
             "sequence": len(history) + 1,
             "approver_id": approver_id,
-            "approver_name": body.approver_name,
-            "approver_role": body.approver_role,
+            "approver_name": approver_name,
+            "approver_role": approver_role,
             "action": "approved",
             "notes": body.notes,
             "acted_at": datetime.now(timezone.utc).isoformat(),
@@ -3351,12 +3386,14 @@ def approve_run(run_id: str, body: ApproveRequest, caller: Optional[Caller] = De
 
     # Night 1 — capture the approve user action (RUN_CAPTURE-gated, fail-soft).
     _run_capture.capture_user_action(run_id, "approve",
-                                     detail={"approver_role": body.approver_role, "next_phase": next_phase.value})
+                                     detail={"approver_role": approver_role, "next_phase": next_phase.value})
+    _buyer_record_action(buyer, "approve", run_id=run_id, detail={"next_phase": next_phase.value})
     return {"run_id": run_id, "phase": next_phase.value}
 
 
 @app.post("/api/runs/{run_id}/reject", dependencies=[Depends(_DOOR_APPROVE)])
-def reject_run(run_id: str, body: RejectRequest):
+def reject_run(run_id: str, body: RejectRequest,
+               buyer: Optional[dict] = Depends(_DOOR_APPROVE)):
     """
     Record a rejection, unselect the candidate, and return to comparison.
     Notes are required (enforced by the Pydantic model).
@@ -3371,14 +3408,18 @@ def reject_run(run_id: str, body: RejectRequest):
             if isinstance(run.approval_history_json, str) and run.approval_history_json
             else (run.approval_history_json or [])
         )
-        history.append({
+        approver_name, approver_role = _buyer_actor_labels(buyer, body)
+        entry = {
             "sequence": len(history) + 1,
-            "approver_name": body.approver_name,
-            "approver_role": body.approver_role,
+            "approver_name": approver_name,
+            "approver_role": approver_role,
             "action": "rejected",
             "notes": body.notes,
             "acted_at": datetime.now(timezone.utc).isoformat(),
-        })
+        }
+        if buyer:   # Arc 6 F5: a rejection carries the session member (key absent flag-off)
+            entry["approver_id"] = _acting_member_id(buyer)
+        history.append(entry)
         run.approval_history_json = json.dumps(history)
         run.selected_candidate_json = None
         run.current_phase = Phase.COMPARISON.value
@@ -3386,7 +3427,8 @@ def reject_run(run_id: str, body: RejectRequest):
         session.commit()
 
     # Night 1 — capture the reject user action (RUN_CAPTURE-gated, fail-soft).
-    _run_capture.capture_user_action(run_id, "reject", detail={"approver_role": body.approver_role})
+    _run_capture.capture_user_action(run_id, "reject", detail={"approver_role": approver_role})
+    _buyer_record_action(buyer, "reject", run_id=run_id)
     return {"run_id": run_id, "phase": Phase.COMPARISON.value}
 
 
@@ -3398,6 +3440,7 @@ def confirm_intake(
     exact_only: bool = False,
     open_family: bool = False,
     source_anyway: bool = False,
+    buyer: Optional[dict] = Depends(_DOOR_RAISE),
 ):
     """
     Confirm intake specs and atomically advance to sourcing.
@@ -3519,10 +3562,13 @@ def confirm_intake(
         readiness = intake_readiness.assess(specs_dict)
         if not readiness.ready and not source_anyway:
             raise HTTPException(status_code=422, detail=readiness.refusal_detail())
+        # Arc 6 D7: the acknowledgement names the session member (None flag-off).
         if readiness.identity is not None:
-            intake_sufficiency.record_override(specs_dict, readiness.identity)
+            intake_sufficiency.record_override(specs_dict, readiness.identity,
+                                               acknowledged_by=_acting_member_id(buyer))
         if readiness.hygienic is not None:
-            intake_readiness.record_hygienic_override(specs_dict, readiness.hygienic)
+            intake_readiness.record_hygienic_override(specs_dict, readiness.hygienic,
+                                                      acknowledged_by=_acting_member_id(buyer))
         if not readiness.ready:
             run.asset_specs_json = json.dumps(specs_dict)
 
@@ -3537,6 +3583,8 @@ def confirm_intake(
         detail={"exact_only": exact_only, "open_family": open_family,
                 "source_anyway": not readiness.ready},
     )
+    _buyer_record_action(buyer, "confirm_intake", run_id=run_id,
+                         detail={"source_anyway": not readiness.ready})
     return {"run_id": run_id, "phase": Phase.SOURCING.value}
 
 
@@ -3611,6 +3659,7 @@ def _fire_sourcing_run_for_intake(
     *,
     background_tasks: Optional[BackgroundTasks] = None,
     is_test: bool = True,
+    channel: Optional[str] = None,
 ) -> Optional[str]:
     """The injected ``fire_sourcing_run`` for the intake consumer — creates a
     sourcing run (Phase.INTAKE) attributed to the resolved tenant, seeds the
@@ -3658,6 +3707,11 @@ def _fire_sourcing_run_for_intake(
                 session, run, specs_dict, exact_only=False, open_family=False,
                 background_tasks=background_tasks,
             )
+        # Arc 6 gate ruling: a channel-originated run has NO authenticated member —
+        # attributed to the tenant's company with acting_member null and the channel.
+        buyer_accounts.audit("action:create_run", company_id=tenant["company_id"],
+                             run_id=run.id, actor=None,
+                             detail={"channel": channel, "acting_member": None})
         return run.id
     except intake_readiness.IntakeNotReady:
         raise
@@ -4750,15 +4804,21 @@ def _persist_order_on_run(run_id: str, order: Optional[dict]) -> None:
 
 
 @app.post("/api/runs/{run_id}/execute", dependencies=[Depends(_DOOR_ORDER)])
-def execute_order(run_id: str):
+def execute_order(run_id: str, buyer: Optional[dict] = Depends(_DOOR_ORDER)):
     """Confirmed commit (post-approval): capture + place a durable order from the
     approved selection. Run-scoped (matches approve/select). No external actions."""
     from utils.procurement_agent.agents.procurement_agent import ProcurementAgent
     run_model = _run_model_for(run_id)
     if run_model is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    result = ProcurementAgent().run(run_model, "execute")
+    if buyer:   # Arc 6 D7: the order is placed by the session member, not a typed name
+        result = ProcurementAgent().run(run_model, "execute",
+                                        acting_member=_acting_member_id(buyer))
+    else:
+        result = ProcurementAgent().run(run_model, "execute")
     _persist_order_on_run(run_id, result.get("order"))
+    _buyer_record_action(buyer, "execute", run_id=run_id,
+                         detail={"order_id": (result.get("order") or {}).get("id")})
     return result
 
 
@@ -5163,7 +5223,8 @@ def approve_group(group_id: str, body: ApproveRequest, caller: Optional[Caller] 
     basket_total = _basket_total(runs)
     facility_id = runs[0].get("facility_id") or "00000000-0000-0000-0000-000000000000"
     approvers_required, _roles = determine_approval_path(facility_id, basket_total)
-    approver_id = caller.user_id if caller else None
+    approver_id = _acting_member_id(buyer) if buyer else (caller.user_id if caller else None)
+    approver_name, approver_role = _buyer_actor_labels(buyer, body)
 
     with _SessionFactory() as session:
         rec = session.query(RequestGroupApprovalORM).filter_by(group_id=group_id).first()
@@ -5183,8 +5244,8 @@ def approve_group(group_id: str, body: ApproveRequest, caller: Optional[Caller] 
             raise HTTPException(status_code=409, detail="A second, distinct approver is required — you have already approved this basket.")
         received.append({
             "approver_id": approver_id,
-            "approver_name": body.approver_name,
-            "approver_role": body.approver_role,
+            "approver_name": approver_name,
+            "approver_role": approver_role,
             "at": datetime.now(timezone.utc).isoformat(),
         })
         # Re-route on the current total each call (a child's selection may have changed).
@@ -5229,6 +5290,7 @@ def reject_group(group_id: str, body: RejectRequest, caller: Optional[Caller] = 
     if not runs:
         raise HTTPException(status_code=404, detail="Basket not found")
     now = datetime.now(timezone.utc)
+    approver_name, approver_role = _buyer_actor_labels(buyer, body)
 
     with _SessionFactory() as session:
         rec = session.query(RequestGroupApprovalORM).filter_by(group_id=group_id).first()
@@ -5250,15 +5312,18 @@ def reject_group(group_id: str, body: RejectRequest, caller: Optional[Caller] = 
             if child is None:
                 continue
             history = json.loads(child.approval_history_json) if child.approval_history_json else []
-            history.append({
+            entry = {
                 "sequence": len(history) + 1,
                 "action": "rejected",
-                "approver_name": body.approver_name,
-                "approver_role": body.approver_role,
+                "approver_name": approver_name,
+                "approver_role": approver_role,
                 "notes": f"Basket rejected ({rec.id}): {body.notes}",
                 "basket_approval_id": rec.id,
                 "acted_at": now.isoformat(),
-            })
+            }
+            if buyer:   # Arc 6 F5 (key absent flag-off)
+                entry["approver_id"] = _acting_member_id(buyer)
+            history.append(entry)
             child.approval_history_json = json.dumps(history)
             child.selected_candidate_json = None
             child.current_phase = Phase.COMPARISON.value
@@ -5367,7 +5432,8 @@ def list_rfq_drafts(run_id: str):
 
 
 @app.post("/api/rfq-drafts/{draft_id}/approve", dependencies=[Depends(_DOOR_ORDER)])
-def approve_rfq_draft(draft_id: str, body: RfqDraftApproveRequest):
+def approve_rfq_draft(draft_id: str, body: RfqDraftApproveRequest,
+                      buyer: Optional[dict] = Depends(_DOOR_ORDER)):
     """Record a human approval against a STORED draft. The approval is stamped on the A0
     lifecycle transition (drafted -> approved). NO send. 404 unknown draft; 409 illegal
     transition (re-approve / already sent / rejected) — surfaced honestly, never a 500."""
@@ -5375,20 +5441,26 @@ def approve_rfq_draft(draft_id: str, body: RfqDraftApproveRequest):
     if persistence.get_draft(draft_id) is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     try:
-        draft = persistence.transition_draft(draft_id, "approved", approved_by=body.approved_by)
+        # Arc 6 D7: the approver is the session member, never the typed body name.
+        draft = persistence.transition_draft(
+            draft_id, "approved",
+            approved_by=_acting_member_id(buyer) if buyer else body.approved_by)
     except persistence.DraftTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"draft_id": draft["id"], "status": draft["status"], "approved_by": draft["approved_by"]}
 
 
 @app.post("/api/rfq-drafts/{draft_id}/reject", dependencies=[Depends(_DOOR_ORDER)])
-def reject_rfq_draft(draft_id: str, body: RfqDraftRejectRequest):
+def reject_rfq_draft(draft_id: str, body: RfqDraftRejectRequest,
+                     buyer: Optional[dict] = Depends(_DOOR_ORDER)):
     """Reject a STORED draft (drafted -> rejected, terminal). NO send. 404 unknown; 409 illegal."""
     from utils.procurement_agent.state import persistence
     if persistence.get_draft(draft_id) is None:
         raise HTTPException(status_code=404, detail="Draft not found")
     try:
-        draft = persistence.transition_draft(draft_id, "rejected", rejected_by=body.rejected_by)
+        draft = persistence.transition_draft(
+            draft_id, "rejected",
+            rejected_by=_acting_member_id(buyer) if buyer else body.rejected_by)
     except persistence.DraftTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"draft_id": draft["id"], "status": draft["status"], "rejected_by": draft["rejected_by"]}
@@ -5591,7 +5663,7 @@ def reject_review_item(item_id: str):
 
 
 @app.post("/api/review-items/{item_id}/place-order", dependencies=[Depends(_DOOR_ORDER)])
-def place_order_from_quote(item_id: str):
+def place_order_from_quote(item_id: str, buyer: Optional[dict] = Depends(_DOOR_ORDER)):
     """Place a durable order directly from a CONFIRMED quote (the RFQ path: Tier 3 RFQ ->
     quote -> confirm -> order). The double gate holds: the quote must already be
     human-confirmed (its price is written), AND this is a separate deliberate action —
@@ -5623,11 +5695,15 @@ def place_order_from_quote(item_id: str):
         with _SessionFactory() as session:
             _run = session.get(SourcingRunORM, item["run_id"])
             order_company_id = _run.company_id if _run else None
+    # Arc 6 D7: under the flag the placer is the session member, not the constant "buyer".
+    placed_by = _acting_member_id(buyer) if buyer else "buyer"
     order = orders.create_order(selection, quantity=int(payload.get("quantity") or 1),
-                                placed_by="buyer", company_id=order_company_id)
+                                placed_by=placed_by, company_id=order_company_id)
     if not order:
         raise HTTPException(status_code=500, detail="Order capture failed")
-    placed = orders.place_order(order["id"], placed_by="buyer")
+    placed = orders.place_order(order["id"], placed_by=placed_by)
+    _buyer_record_action(buyer, "place_order_from_quote", run_id=item.get("run_id"),
+                         detail={"order_id": order["id"], "item_id": item_id})
     final = placed or order
     _persist_order_on_run(item.get("run_id"), final)
     return {
@@ -6339,7 +6415,8 @@ def intake_email(body: IntakeEmailInbound, request: Request, background_tasks: B
     outcome = intake_channels.consume_intake_event(
         event,
         fire_sourcing_run=lambda specs, tk: _fire_sourcing_run_for_intake(
-            specs, tk, background_tasks=background_tasks, is_test=True),
+            specs, tk, background_tasks=background_tasks, is_test=True,
+            channel="email"),
         reply_sink=_intake_reply_sink,
         anthropic_api_key=api_key,
     )
@@ -6368,7 +6445,8 @@ def intake_confirm_sender(token: str, request: Request, background_tasks: Backgr
     outcome = intake_channels.consume_confirmed_event(
         payload,
         fire_sourcing_run=lambda specs, tk: _fire_sourcing_run_for_intake(
-            specs, tk, background_tasks=background_tasks, is_test=True),
+            specs, tk, background_tasks=background_tasks, is_test=True,
+            channel="email"),
         reply_sink=_intake_reply_sink,
         anthropic_api_key=api_key,
     )
@@ -6432,7 +6510,8 @@ def intake_sms(body: IntakeSmsInbound, request: Request, background_tasks: Backg
     outcome = intake_channels.consume_intake_event(
         event,
         fire_sourcing_run=lambda specs, tk: _fire_sourcing_run_for_intake(
-            specs, tk, background_tasks=background_tasks, is_test=True),
+            specs, tk, background_tasks=background_tasks, is_test=True,
+            channel="sms"),
         reply_sink=_intake_reply_sink,
         anthropic_api_key=api_key,
     )
@@ -6493,7 +6572,8 @@ def intake_voice(body: IntakeVoiceInbound, request: Request, background_tasks: B
     outcome = intake_channels.consume_intake_event(
         event,
         fire_sourcing_run=lambda specs, tk: _fire_sourcing_run_for_intake(
-            specs, tk, background_tasks=background_tasks, is_test=True),
+            specs, tk, background_tasks=background_tasks, is_test=True,
+            channel="voice"),
         reply_sink=_intake_reply_sink,
         anthropic_api_key=api_key,
     )

@@ -39,16 +39,20 @@ class ProcurementAgent:
     orchestrator / api_server.
     """
 
-    def run(self, run: SourcingRun, action: str) -> dict:
+    def run(self, run: SourcingRun, action: str, *,
+            acting_member: Optional[str] = None) -> dict:
         """Process an action against the run.
 
           "execute"        -> create_order (draft) + place_order (placed) from the
                               approved selection; returns the durable order.
           "mark_delivered" -> update_order_status(order, received) via the machine.
           other actions    -> acknowledged no-op (the approval flow lives elsewhere).
+
+        ``acting_member`` (arc 6, D7): the authenticated buyer member executing. When
+        given, it IS the order's placed_by — never the last approver's typed name.
         """
         if action == "execute":
-            return self._execute(run)
+            return self._execute(run, acting_member=acting_member)
         if action == "mark_delivered":
             return self._mark_delivered(run)
         return {
@@ -63,7 +67,7 @@ class ProcurementAgent:
     # "execute" — order capture (create + deliberate place)
     # ------------------------------------------------------------------
 
-    def _execute(self, run: SourcingRun) -> dict:
+    def _execute(self, run: SourcingRun, acting_member: Optional[str] = None) -> dict:
         from utils import orders
         from utils.procurement_agent.state.phases import Phase
 
@@ -92,7 +96,7 @@ class ProcurementAgent:
             return {"success": False, "action": "execute", "order": None, "placed": False,
                     "message": refusal, "next_phase": None}
 
-        placed_by = self._latest_approver(run)
+        placed_by = acting_member or self._latest_approver(run)
         # Manual-fulfilment selection (the "order-now" button, marketplace OR reference):
         # the order is captured POST-approval in pending_manual_fulfilment and is NOT
         # auto-placed — an operator buys/sources it and "marks purchased" (increment 2).
@@ -106,6 +110,7 @@ class ProcurementAgent:
             selection, quantity=selection.get("quantity", 1), placed_by=placed_by,
             company_id=getattr(run, "company_id", None),
             initial_status=(orders.STATUS_PENDING_FULFILMENT if is_manual else orders.STATUS_DRAFT),
+            captured_by=acting_member,
         )
         if not order:
             return {"success": False, "action": "execute", "order": None, "placed": False,

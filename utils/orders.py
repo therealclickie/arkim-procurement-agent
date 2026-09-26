@@ -188,7 +188,8 @@ def _resolve_price(selection: dict, manufacturer: Optional[str],
 def create_order(selection: dict, quantity: int = 1,
                  placed_by: Optional[str] = None,
                  company_id: Optional[str] = None,
-                 initial_status: str = STATUS_DRAFT) -> Optional[dict]:
+                 initial_status: str = STATUS_DRAFT,
+                 captured_by: Optional[str] = None) -> Optional[dict]:
     """CAPTURE an order from a selected candidate. status=initial_status (default
     "draft" — back-compat for all existing callers). NOT placed.
 
@@ -199,6 +200,11 @@ def create_order(selection: dict, quantity: int = 1,
 
     company_id is the tenant key (D2 prereq #1): the caller passes the run's company_id;
     falls back to selection["company_id"]; NULL when neither is set (the current demo).
+
+    captured_by (arc 6, gate finding F4): the authenticated buyer member who caused the
+    capture. When given it is recorded as placed_by AT CAPTURE — the order-now and
+    manual-fulfilment paths never call place_order, so without this their orders carry
+    no buyer at all. None (every pre-arc-6 caller) keeps placed_by unset until placement.
     """
     from utils import supplier_registry
 
@@ -232,7 +238,7 @@ def create_order(selection: dict, quantity: int = 1,
         "status": initial_status,
         "created_at": now,
         "updated_at": now,
-        "placed_by": None,           # set on place_order, not on capture
+        "placed_by": captured_by,    # set on place_order, not on capture (unless captured_by)
         "notes": selection.get("notes"),
         # R1: provenance — the accepted quote this price came from, when there was one.
         "quote_id": selection.get("quote_id"),

@@ -159,7 +159,8 @@ def ensure_ready_for_sourcing(specs: Optional[dict[str, Any]]) -> None:
 
 
 def record_hygienic_override(specs: dict[str, Any], block: HygienicBlock, *,
-                             at: Optional[str] = None) -> dict[str, Any]:
+                             at: Optional[str] = None,
+                             acknowledged_by: Optional[str] = None) -> dict[str, Any]:
     """Record a hygienic ``source_anyway`` on the run. Mutates and returns ``specs``.
 
     Deliberately NOT ``intake_sufficiency.record_override``: that marks the run
@@ -177,6 +178,10 @@ def record_hygienic_override(specs: dict[str, Any], block: HygienicBlock, *,
         "missing_labels": list(block.missing_labels),
         "acknowledged_at": at or datetime.now(timezone.utc).isoformat(),
     }
+    # Arc 6 D7: the authenticated member who overrode. Only written when known, so
+    # the acknowledgement recorded without buyer identity keeps its exact shape.
+    if acknowledged_by is not None:
+        specs[HYGIENIC_OVERRIDE_ACK]["acknowledged_by"] = acknowledged_by
     return specs
 
 
