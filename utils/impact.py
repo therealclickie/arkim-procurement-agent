@@ -233,7 +233,8 @@ _PURCHASED_STATUSES = ("placed", "confirmed", "shipped", "received")
 
 
 def _last_paid_price(manufacturer: Optional[str], part_number: Optional[str],
-                     exclude_run_id: Optional[str], before: Optional[str] = None) -> Optional[float]:
+                     exclude_run_id: Optional[str], before: Optional[str] = None,
+                     company_id: Optional[str] = None) -> Optional[float]:
     """The customer's most recent prior PURCHASE price of this exact part (their own
     order history), or None when there's no prior purchase. Never a market price.
 
@@ -245,7 +246,10 @@ def _last_paid_price(manufacturer: Optional[str], part_number: Optional[str],
     if not (manufacturer and part_number):
         return None
     from utils import orders as orders_store
-    rows = orders_store.get_orders()  # newest-first
+    # Arc 6: a company's saving is measured against ITS OWN purchase history only —
+    # another company's paid price is neither its baseline nor its business.
+    rows = (orders_store.get_orders(company_id=company_id) if company_id is not None
+            else orders_store.get_orders())  # newest-first
     for o in rows:
         if o.get("run_id") == exclude_run_id:
             continue
@@ -257,7 +261,8 @@ def _last_paid_price(manufacturer: Optional[str], part_number: Optional[str],
     return None
 
 
-def gather_run_decision(run_id: str, *, before: Optional[str] = None) -> dict:
+def gather_run_decision(run_id: str, *, before: Optional[str] = None,
+                        company_id: Optional[str] = None) -> dict:
     """Assemble one decision's calc inputs for a run from the stores, then compute.
 
     chosen_price = the confirmed/selected quote (the rfq price the buyer took); quotes =
@@ -299,7 +304,8 @@ def gather_run_decision(run_id: str, *, before: Optional[str] = None) -> dict:
             specs = {}
     manufacturer, part_number = specs.get("manufacturer"), specs.get("part_number")
 
-    last_paid = _last_paid_price(manufacturer, part_number, exclude_run_id=run_id, before=before)
+    last_paid = _last_paid_price(manufacturer, part_number, exclude_run_id=run_id, before=before,
+                                 company_id=company_id)
 
     sent = supplier_registry.get_sent_messages(run_id=run_id)
     counts = {
@@ -318,7 +324,8 @@ def gather_run_decision(run_id: str, *, before: Optional[str] = None) -> dict:
     return out
 
 
-def gather_cumulative(version: str = ESTIMATE_MODEL_VERSION) -> dict:
+def gather_cumulative(version: str = ESTIMATE_MODEL_VERSION,
+                      company_id: Optional[str] = None) -> dict:
     """Cumulative impact over the customer's REAL orders: one decision per run that
     produced a purchased order, aggregated by cumulative_impact. Month comes from the
     order's created_at; the per-run measured saving comes from gather_run_decision.
@@ -329,7 +336,9 @@ def gather_cumulative(version: str = ESTIMATE_MODEL_VERSION) -> dict:
     stay measured from the customer's own orders only (never an external baseline)."""
     from utils import orders as orders_store
 
-    purchased = [o for o in orders_store.get_orders() if o.get("status") in _PURCHASED_STATUSES]
+    source = (orders_store.get_orders(company_id=company_id) if company_id is not None
+              else orders_store.get_orders())
+    purchased = [o for o in source if o.get("status") in _PURCHASED_STATUSES]
     decisions: list[dict] = []
     seen_runs: set[str] = set()
     for o in purchased:
@@ -337,7 +346,8 @@ def gather_cumulative(version: str = ESTIMATE_MODEL_VERSION) -> dict:
         if not rid or rid in seen_runs:
             continue
         seen_runs.add(rid)
-        dec = gather_run_decision(rid, before=o.get("created_at"))
+        dec = (gather_run_decision(rid, before=o.get("created_at"), company_id=company_id)
+               if company_id is not None else gather_run_decision(rid, before=o.get("created_at")))
         part = " ".join(str(o.get(k)) for k in ("manufacturer", "part_number") if o.get(k)) or None
         decisions.append({
             "order_id": o.get("id"),

@@ -100,7 +100,10 @@ def _note(weeks: int, days_until: int, status: str) -> str:
     return f"{cadence} Still have time — due in about {days_until} days."
 
 
-def gather_reorder() -> list[dict]:
-    """Build the reorder forecast from the orders store. Store-only; no external calls."""
+def gather_reorder(company_id: Optional[str] = None) -> list[dict]:
+    """Build the reorder forecast from the orders store. Store-only; no external calls.
+    ``company_id`` (arc 6) limits it to one buyer company's orders; None = all."""
     from utils import orders as orders_store
+    if company_id is not None:
+        return reorder_forecast(orders_store.get_orders(company_id=company_id))
     return reorder_forecast(orders_store.get_orders())

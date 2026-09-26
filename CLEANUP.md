@@ -366,6 +366,62 @@ Recorded after the intake/scoring redesigns landed behind flags (`INTAKE_TYPE_AW
 | **Risk / impact** | A test that asserts on seeding/sourcing behavior is non-deterministic in any working copy that has run live sourcing (harness, dev UI). Masked as "green" only on a pristine DB. |
 | **Recommended action** | Structural: add `brand_intelligence._DB_PATH` (and audit other non-isolated on-disk stores tests may read � `run_capture.sqlite`, `price_db.json`) to the conftest isolation set alongside `supplier_registry`/`known_parts`, so the suite is hermetic regardless of dev working-copy state. The per-test monkeypatch in `test_capability_pivot_tags_results` is a band-aid for one test; the conftest fix covers the class. |
 
+## 8. Arc 6 - buyer identity (deferred decisions and refactor boundary)
+
+### 8.1 Cognito identity is not mapped to buyer members (gate ruling Q1)
+
+| Field | Detail |
+|---|---|
+| **File** | `utils/auth/` (Cognito `get_caller`), `api_server.py` buyer door (`_buyer_session_in_force`) |
+| **Kind** | Future decision, not a pilot need |
+| **Why it exists** | Under `BUYER_ACCOUNTS_V1` the `gofer_buyer_session` cookie is the ONLY buyer identity. A Cognito bearer alone authenticates no buyer route. With the flag off, the Cognito path behaves exactly as before. |
+| **Recommended action** | When the core platform needs to call buyer routes as a user, decide how a Cognito identity maps to a buyer member (company PIN + email). Until then, do not add a second buyer identity. |
+
+### 8.2 `POST /api/runs/from-maintenance` is disabled under the flag - service auth is not enforced (gate ruling Q2)
+
+| Field | Detail |
+|---|---|
+| **File** | `api_server.py` `create_run_from_maintenance`; `utils/auth/dependencies.py` `get_caller` |
+| **Kind** | Security gap (service ingress) |
+| **Why it exists** | The docstring says core calls with a Cognito JWT plus `X-Arkim-Service-Signature`, but the route depends on the OPTIONAL `get_caller`, which returns `None` without a bearer (`utils/auth/dependencies.py:110-112`), and nothing requires `service_authenticated`. So anyone can create a run. Under `BUYER_ACCOUNTS_V1` the route returns 404 (pinned by `test_buyer_route_guard.py`). |
+| **Recommended action** | Enforce service authentication (require the Cognito caller AND a valid service signature), then re-enable the route under the flag as service-to-service ingress, allowlisted in the T4 guard with that reason. |
+
+### 8.3 `/api/debug/llm` echoes an API key prefix (gate ruling Q3)
+
+| Field | Detail |
+|---|---|
+| **File** | `api_server.py` `debug_llm` |
+| **Kind** | Information leak on a dev route |
+| **Why it exists** | The smoke test returns `key_prefix` (the first 14 characters of `ANTHROPIC_API_KEY`). Under `BUYER_ACCOUNTS_V1` both `/api/debug/llm` and `/api/dev/reseed-handoffs` return 404; with the flag off they are unchanged. |
+| **Recommended action** | Remove the key-prefix echo entirely in a later arc (and consider moving both dev routes behind `require_admin`). |
+
+### 8.4 Two approval-policy stores (gate finding F3) - reconcile in arc 7
+
+| Field | Detail |
+|---|---|
+| **File** | `utils/procurement_agent/state/approval_rules.py` + `approval_rules` table (facility thresholds that drive routing); `utils/buyer_accounts.py` `buyer_companies.auto_approval_limit` / `allow_admin_override` (company policy, D5) |
+| **Kind** | Two sources of truth |
+| **Why it exists** | Arc 6 stores the D5 company policy and audits changes but does not enforce it. `determine_approval_path` still routes on the facility `approval_rules`. |
+| **Recommended action** | Arc 7 (order lifecycle) decides which store governs, or how they compose, before enforcing the limit, second approval and override at order time. |
+
+### 8.5 Inbound intake webhooks do not authenticate the sender (gate finding F6)
+
+| Field | Detail |
+|---|---|
+| **File** | `api_server.py` `/api/intake/email`, `/api/intake/sms`, `/api/intake/voice` |
+| **Kind** | Security gap (out of scope for arc 6) |
+| **Why it exists** | The routes are flag-gated only. Anyone who can reach the API can create a run for tenant `bayfoods` by posting to `intake+bayfoods@...`. Channel runs carry `company_id` from the tenant map and no acting member (`channel` marker, gate ruling). |
+| **Recommended action** | Authenticate inbound senders in the email intake arc (provider signature on the webhook plus known-sender mapping to members). |
+
+### 8.6 Refactor boundary: the buyer door on pre-existing routes
+
+| Field | Detail |
+|---|---|
+| **File** | `api_server.py` (every buyer-facing route carries `dependencies=[Depends(_DOOR_*)]`) |
+| **Kind** | New clean code abutting old non-compliant code |
+| **Why it exists** | Arc 6 enforces identity at the door (session, company scope by path parameter, the D2 matrix) without restructuring `api_server.py`. List endpoints and creation paths scope inside the handler with `if buyer:` branches so the flag-off path stays byte-identical. |
+| **Recommended action** | When `api_server.py` is decomposed into routers, move the buyer door onto the buyer router as a router-level dependency and delete the per-route declarations; keep `test_buyer_route_guard.py` as the invariant. |
+
 ---
 
 *Items are ordered by section, not by priority. All items are prototype-era technical debt �

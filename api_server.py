@@ -384,6 +384,9 @@ _migrate_schema()
 
 # R10 (arc 5, F-04): resolved through the one helper, like every store.
 _HANDOFFS_PATH = _data_dir.data_path("mock_maintenance_handoffs.json")
+# The buyer company the seeded handoffs belong to — the same key the intake
+# tenant map uses (utils/intake_channels._TENANT_MAP["bayfoods"]).
+_SEED_COMPANY_ID = "company-bayfoods"
 
 def _seed_demo_maintenance_run() -> None:
     """Seed pending_intake runs from data/mock_maintenance_handoffs.json (idempotent per submission_id)."""
@@ -414,6 +417,10 @@ def _seed_demo_maintenance_run() -> None:
             run = SourcingRunORM(
                 id=str(uuid.uuid4()),
                 facility_id=handoff["facility_id"],
+                # Arc 6 F2: the seeded handoffs are Bay Foods'. Stamped only under
+                # BUYER_ACCOUNTS_V1 so the flag-off seed is byte-identical (D8).
+                company_id=(_SEED_COMPANY_ID if buyer_accounts.buyer_accounts_active()
+                            else None),
                 current_phase=Phase.PENDING_INTAKE.value,
                 urgency_factor=_urgency_map.get(urgency, 0.3),
                 warranty_status="unknown",
@@ -2154,6 +2161,59 @@ def _buyer_disabled_under_flag() -> None:
 
 _buyer_disabled_under_flag.buyer_disabled = True  # the T4 guard's marker
 
+_DEFAULT_FACILITY_ID = "00000000-0000-0000-0000-000000000000"
+
+
+def _buyer_birth_facility(buyer: Optional[dict], facility_id: Optional[str]) -> Optional[str]:
+    """The facility a new run is born on. Flag off: the body's, unchanged. Flag
+    on: one of the session company's facilities — the body's if it is one, the
+    company's first when the client sent none (the React flow never sends one,
+    K1), else 422. A foreign facility and a nonexistent one get the same 422."""
+    if not buyer:
+        return facility_id
+    company = buyer["company"]
+    if buyer_accounts.company_owns_facility(company, facility_id):
+        return facility_id
+    if facility_id in (None, "", _DEFAULT_FACILITY_ID):
+        return (company.get("facility_ids") or [facility_id])[0]
+    raise HTTPException(status_code=422,
+                        detail="facility_id is not a facility of your company")
+
+
+def _buyer_check_group_join(buyer: Optional[dict], group_id: Optional[str]) -> None:
+    """Basket ids are client-minted labels. Under the flag a run may start a
+    NEW basket or join its own company's, never another company's — joining
+    would put a foreign run under the victim's basket approval record."""
+    if not buyer or not group_id:
+        return
+    with _SessionFactory() as session:
+        foreign = session.query(SourcingRunORM).filter(
+            SourcingRunORM.group_id == group_id,
+            (SourcingRunORM.company_id != buyer["company_id"])
+            | SourcingRunORM.company_id.is_(None),
+        ).first()
+    if foreign is not None:
+        raise HTTPException(status_code=422, detail="group_id is not available")
+
+
+def _buyer_filter_runs(buyer: Optional[dict], runs: list) -> list:
+    """Flag on: keep only the session company's runs (dicts). Flag off: as-is."""
+    if not buyer:
+        return runs
+    return [r for r in runs if r.get("company_id") == buyer["company_id"]]
+
+
+# One door per capability, built once: a route lists its door in
+# ``dependencies=[...]`` (so it runs before anything else) and a handler that
+# needs the acting member names the SAME door as a parameter — FastAPI caches a
+# dependency per request, so the door runs exactly once.
+_DOOR_RAISE = _buyer_door(buyer_accounts_rbac.RAISE_REQUEST)
+_DOOR_VIEW = _buyer_door(buyer_accounts_rbac.VIEW_COMPANY)
+_DOOR_ORDER = _buyer_door(buyer_accounts_rbac.SELECT_AND_ORDER)
+_DOOR_APPROVE = _buyer_door(buyer_accounts_rbac.APPROVE_WITHIN_LIMIT)
+_DOOR_SETTINGS = _buyer_door(buyer_accounts_rbac.SET_APPROVAL_LIMIT)
+_BUYER_DISABLED = [Depends(_buyer_disabled_under_flag)]
+
 
 def _acting_member_id(buyer: Optional[dict]) -> Optional[str]:
     """The acting member's id from the session (D7) — None with the flag off."""
@@ -2213,11 +2273,12 @@ def _new_run_orm(
     )
 
 
-@app.post("/api/runs", response_model=CreateRunResponse, status_code=201)
+@app.post("/api/runs", response_model=CreateRunResponse, status_code=201, dependencies=[Depends(_DOOR_RAISE)])
 def create_run(
     body: CreateRunRequest,
     request: Request,
     caller: Optional[Caller] = Depends(get_caller),
+    buyer: Optional[dict] = Depends(_DOOR_RAISE),
 ):
     """Create a new sourcing run and return it in intake phase.
 
@@ -2243,11 +2304,15 @@ def create_run(
     seeded_specs = body.asset_specs
     if DEMO_MODE:
         seeded_specs = None   # forced bare intake — the bypass can't skip the intake gate
+    # Arc 6 D6: under BUYER_ACCOUNTS_V1 the run belongs to the SESSION's company, on
+    # one of its facilities, and may only join a basket of that company.
+    facility_id = _buyer_birth_facility(buyer, body.facility_id)
+    _buyer_check_group_join(buyer, body.group_id)
     run = _new_run_orm(
-        facility_id=body.facility_id,
+        facility_id=facility_id,
         urgency_factor=body.urgency_factor,
         warranty_status=body.warranty_status,
-        company_id=caller.company_id if caller else None,
+        company_id=_buyer_company_id(buyer) if buyer else (caller.company_id if caller else None),
         group_id=body.group_id,   # opt-in basket label; None -> group-less (legacy, unchanged)
         asset_specs=seeded_specs,   # opt-in seed; None -> bare intake run (legacy, unchanged)
         session_id=demo_sid or None,   # DEMO_MODE visitor token; None when off/absent
@@ -2263,7 +2328,7 @@ def create_run(
         )
 
 
-@app.put("/api/runs/{run_id}/asset-specs")
+@app.put("/api/runs/{run_id}/asset-specs", dependencies=[Depends(_DOOR_RAISE)])
 def seed_asset_specs(run_id: str, body: AssetSpecsSeedRequest):
     """Write pre-extracted specs onto an EXISTING run — the post-birth equivalent of the
     createRun birth-seed (multi-part fan-out seeds part 1 onto the already-created run 0).
@@ -2296,7 +2361,8 @@ def route_intake(part_count: int) -> str:
     return "multi" if part_count >= 2 else "single"
 
 
-def _fan_out_intake(body: IntakeRequest, caller: Optional[Caller]) -> Dict[str, Any]:
+def _fan_out_intake(body: IntakeRequest, caller: Optional[Caller],
+                    buyer: Optional[dict] = None) -> Dict[str, Any]:
     """Fan a >=2-part request into N independent single-part runs under ONE shared group_id.
 
     Each run is constructed EXACTLY as the single create_run does (same bare intake shell;
@@ -2312,10 +2378,11 @@ def _fan_out_intake(body: IntakeRequest, caller: Optional[Caller]) -> Dict[str, 
     ambiguous partial basket. (Atomic birth only — it adds no shared runtime state; once
     committed the runs are fully independent.)"""
     group_id = str(uuid.uuid4())
-    company_id = caller.company_id if caller else None
+    company_id = _buyer_company_id(buyer) if buyer else (caller.company_id if caller else None)
+    facility_id = _buyer_birth_facility(buyer, body.facility_id)
     runs = [
         _new_run_orm(
-            facility_id=body.facility_id,
+            facility_id=facility_id,
             urgency_factor=body.urgency_factor,
             warranty_status=body.warranty_status,
             company_id=company_id,
@@ -2330,18 +2397,19 @@ def _fan_out_intake(body: IntakeRequest, caller: Optional[Caller]) -> Dict[str, 
     return {"group_id": group_id, "run_ids": run_ids}
 
 
-@app.post("/api/requests", status_code=201)
+@app.post("/api/requests", status_code=201, dependencies=[Depends(_DOOR_RAISE)])
 def create_request(
     body: IntakeRequest,
     request: Request,
     caller: Optional[Caller] = Depends(get_caller),
+    buyer: Optional[dict] = Depends(_DOOR_RAISE),
 ):
     """Intake front door: route a request to the single-run path (<=1 part) or the fan-out
     path (>=2 parts). The single branch DELEGATES to the unchanged create_run — byte-for-byte
     the existing path; part contents (if any) are filled via intake chat exactly as today.
     The multi branch fans out into N grouped independent runs (one shared group_id)."""
     if route_intake(len(body.parts)) == "multi":
-        return _fan_out_intake(body, caller)
+        return _fan_out_intake(body, caller, buyer)
     return create_run(
         CreateRunRequest(
             facility_id=body.facility_id,
@@ -2350,21 +2418,26 @@ def create_request(
         ),
         request,
         caller,
+        buyer,
     )
 
 
-@app.get("/api/runs", response_model=List[RunListItem])
+@app.get("/api/runs", response_model=List[RunListItem], dependencies=[Depends(_DOOR_VIEW)])
 def list_runs(
     facility_id: Optional[str] = None,
     phase: Optional[str] = None,
     group_id: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
+    buyer: Optional[dict] = Depends(_DOOR_VIEW),
 ):
     """List sourcing runs with optional filtering. `group_id` returns only the runs in one
-    basket; absent, the result is unchanged (no filtering, same ordering)."""
+    basket; absent, the result is unchanged (no filtering, same ordering). Under
+    BUYER_ACCOUNTS_V1 only the session company's runs are listed (D6)."""
     with _SessionFactory() as session:
         q = session.query(SourcingRunORM)
+        if buyer:
+            q = q.filter(SourcingRunORM.company_id == buyer["company_id"])
         if facility_id:
             q = q.filter(SourcingRunORM.facility_id == facility_id)
         if phase:
@@ -2375,7 +2448,7 @@ def list_runs(
         return [_orm_to_list_item(r) for r in runs]
 
 
-@app.post("/api/runs/from-maintenance", status_code=201)
+@app.post("/api/runs/from-maintenance", status_code=201, dependencies=_BUYER_DISABLED)
 def create_run_from_maintenance(body: MaintenanceSubmission, caller: Optional[Caller] = Depends(get_caller)):
     """Create a sourcing run in pending_intake from a maintenance handoff payload.
 
@@ -2409,7 +2482,7 @@ def create_run_from_maintenance(body: MaintenanceSubmission, caller: Optional[Ca
     }
 
 
-@app.get("/api/runs/{run_id}", response_model=RunDetail)
+@app.get("/api/runs/{run_id}", response_model=RunDetail, dependencies=[Depends(_DOOR_VIEW)])
 def get_run(run_id: str, request: Request):
     """Fetch full run state by ID.
 
@@ -2428,7 +2501,7 @@ def get_run(run_id: str, request: Request):
         return detail
 
 
-@app.post("/api/runs/{run_id}/open-from-pending")
+@app.post("/api/runs/{run_id}/open-from-pending", dependencies=[Depends(_DOOR_RAISE)])
 def open_from_pending(run_id: str):
     """Transition pending_intake → intake and seed chat with the maintenance summary."""
     with _SessionFactory() as session:
@@ -2456,7 +2529,7 @@ def open_from_pending(run_id: str):
     return {"run_id": run_id, "phase": Phase.INTAKE.value}
 
 
-@app.post("/api/runs/{run_id}/reject-submission")
+@app.post("/api/runs/{run_id}/reject-submission", dependencies=[Depends(_DOOR_RAISE)])
 def reject_submission(run_id: str):
     """Transition pending_intake → cancelled (maintenance handoff declined)."""
     with _SessionFactory() as session:
@@ -2474,7 +2547,7 @@ def reject_submission(run_id: str):
     return {"run_id": run_id, "phase": Phase.CANCELLED.value}
 
 
-@app.post("/api/runs/{run_id}/messages", response_model=SendMessageResponse)
+@app.post("/api/runs/{run_id}/messages", response_model=SendMessageResponse, dependencies=[Depends(_DOOR_RAISE)])
 def send_message(run_id: str, body: SendMessageRequest, request: Request):
     """
     Send a chat message to the live IntakeAgent.
@@ -2645,7 +2718,7 @@ def send_message(run_id: str, body: SendMessageRequest, request: Request):
     )
 
 
-@app.post("/api/runs/{run_id}/upload")
+@app.post("/api/runs/{run_id}/upload", dependencies=[Depends(_DOOR_RAISE)])
 async def upload_nameplate(
     run_id: str,
     request: Request,
@@ -2901,7 +2974,7 @@ def _mock_confirmation_response(run_id: str, candidate_ids: list) -> None:
         session.commit()
 
 
-@app.post("/api/runs/{run_id}/request-confirmation")
+@app.post("/api/runs/{run_id}/request-confirmation", dependencies=[Depends(_DOOR_RAISE)])
 def request_confirmation(run_id: str, body: ConfirmationRequest, background_tasks: BackgroundTasks):
     """Request price and availability confirmation from Tier 1 vendors.
 
@@ -2960,7 +3033,7 @@ def _selected_candidate_total(sourcing_results_json: Optional[str], candidate_id
     return 0.0
 
 
-@app.post("/api/runs/{run_id}/select-candidate")
+@app.post("/api/runs/{run_id}/select-candidate", dependencies=[Depends(_DOOR_ORDER)])
 def select_candidate(run_id: str, body: SelectCandidateRequest):
     """Lock in a candidate and advance the run to pending_first_approval.
 
@@ -3056,7 +3129,7 @@ def _reconstruct_candidate(sourcing_results_json: Optional[str], candidate_id: s
     return None
 
 
-@app.post("/api/runs/{run_id}/order-now")
+@app.post("/api/runs/{run_id}/order-now", dependencies=[Depends(_DOOR_ORDER)])
 def create_order_now(run_id: str, body: OrderNowRequest):
     """Manual fulfilment "Order" / "Order through Arkim" on ANY PRICED candidate. Buying
     => selecting — the candidate becomes the run's selection — and the spend routes
@@ -3204,7 +3277,7 @@ def create_order_now(run_id: str, body: OrderNowRequest):
     return {"pending_approval": False, "order": order, "phase": phase}
 
 
-@app.post("/api/runs/{run_id}/approve")
+@app.post("/api/runs/{run_id}/approve", dependencies=[Depends(_DOOR_APPROVE)])
 def approve_run(run_id: str, body: ApproveRequest, caller: Optional[Caller] = Depends(get_caller)):
     """
     Record an approval action and route by the persisted approval path (H1) with
@@ -3282,7 +3355,7 @@ def approve_run(run_id: str, body: ApproveRequest, caller: Optional[Caller] = De
     return {"run_id": run_id, "phase": next_phase.value}
 
 
-@app.post("/api/runs/{run_id}/reject")
+@app.post("/api/runs/{run_id}/reject", dependencies=[Depends(_DOOR_APPROVE)])
 def reject_run(run_id: str, body: RejectRequest):
     """
     Record a rejection, unselect the candidate, and return to comparison.
@@ -3317,7 +3390,7 @@ def reject_run(run_id: str, body: RejectRequest):
     return {"run_id": run_id, "phase": Phase.COMPARISON.value}
 
 
-@app.post("/api/runs/{run_id}/confirm-intake")
+@app.post("/api/runs/{run_id}/confirm-intake", dependencies=[Depends(_DOOR_RAISE)])
 def confirm_intake(
     run_id: str,
     request: Request,
@@ -3593,7 +3666,7 @@ def _fire_sourcing_run_for_intake(
         return None
 
 
-@app.post("/api/runs/{run_id}/outreach")
+@app.post("/api/runs/{run_id}/outreach", dependencies=[Depends(_DOOR_ORDER)])
 def initiate_outreach(run_id: str, body: OutreachRequest):
     """Mark Tier 3 vendors as contacted and persist sent timestamps.
 
@@ -3625,7 +3698,7 @@ def initiate_outreach(run_id: str, body: OutreachRequest):
     }
 
 
-@app.post("/api/runs/{run_id}/save-outreach")
+@app.post("/api/runs/{run_id}/save-outreach", dependencies=[Depends(_DOOR_ORDER)])
 def save_outreach_selection(run_id: str, body: SaveOutreachRequest):
     """Persist vendor selection without sending — user can resume later."""
     with _SessionFactory() as session:
@@ -3658,17 +3731,22 @@ _MOCK_FACILITIES: List[FacilityOut] = [
 ]
 
 
-@app.get("/api/facilities", response_model=List[FacilityOut])
-def list_facilities():
-    """List all facilities. Stubbed in Phase 1."""
-    return _MOCK_FACILITIES
+@app.get("/api/facilities", response_model=List[FacilityOut], dependencies=[Depends(_DOOR_VIEW)])
+def list_facilities(buyer: Optional[dict] = Depends(_DOOR_VIEW)):
+    """List all facilities. Stubbed in Phase 1. Under BUYER_ACCOUNTS_V1, only the
+    session company's facilities (named from the mock table where it knows them)."""
+    if not buyer:
+        return _MOCK_FACILITIES
+    known = {f.id: f for f in _MOCK_FACILITIES}
+    return [known.get(fid) or FacilityOut(id=fid, name=fid, state="")
+            for fid in buyer["company"].get("facility_ids") or []]
 
 
 # ---------------------------------------------------------------------------
 # Approval rule endpoints (delegating to the existing approval_rules module)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/approval-rules/{facility_id}", response_model=List[ApprovalRuleOut])
+@app.get("/api/approval-rules/{facility_id}", response_model=List[ApprovalRuleOut], dependencies=[Depends(_DOOR_VIEW)])
 def get_approval_rules(facility_id: str):
     """
     Approval tiers that GOVERN routing for a facility — read from the approval_rules table
@@ -3707,8 +3785,9 @@ def get_approval_rules(facility_id: str):
     return out
 
 
-@app.post("/api/approval-rules", response_model=ApprovalRuleOut, status_code=201)
-def upsert_approval_rule(body: ApprovalRuleIn):
+@app.post("/api/approval-rules", response_model=ApprovalRuleOut, status_code=201, dependencies=[Depends(_DOOR_SETTINGS)])
+def upsert_approval_rule(body: ApprovalRuleIn,
+                         buyer: Optional[dict] = Depends(_DOOR_SETTINGS)):
     """
     Create or update a single buy-approval tier for a facility, PERSISTED to the
     approval_rules table — so `determine_approval_path` reads the change on the next order
@@ -3727,6 +3806,10 @@ def upsert_approval_rule(body: ApprovalRuleIn):
         raise HTTPException(status_code=422, detail="approvers_required must be >= 0")
     if body.applies_to != "buy":
         raise HTTPException(status_code=422, detail="only 'buy' approval rules are persisted")
+    # Arc 6 D6: the body names the facility, so the door cannot scope it -- check here,
+    # with the same not-found the door gives a foreign facility in a path.
+    if buyer and not buyer_accounts.company_owns_facility(buyer["company"], body.facility_id):
+        raise HTTPException(status_code=404, detail="Facility not found")
 
     rule = persistence.upsert_approval_rule(
         facility_id=body.facility_id,
@@ -3771,7 +3854,7 @@ def health():
     return body
 
 
-@app.get("/api/debug/llm")
+@app.get("/api/debug/llm", dependencies=_BUYER_DISABLED)
 def debug_llm():
     """Smoke-test: confirms the API key loads and the LLM responds from this process."""
     import requests as _req
@@ -3800,7 +3883,7 @@ def debug_llm():
         return {"ok": False, "error": str(exc), "key_prefix": key[:14] + "..."}
 
 
-@app.post("/api/dev/reseed-handoffs")
+@app.post("/api/dev/reseed-handoffs", dependencies=_BUYER_DISABLED)
 def dev_reseed_handoffs():
     """Delete seeded demo handoff runs and re-seed from fixture JSON. Dev/testing only."""
     try:
@@ -4666,7 +4749,7 @@ def _persist_order_on_run(run_id: str, order: Optional[dict]) -> None:
             session.commit()
 
 
-@app.post("/api/runs/{run_id}/execute")
+@app.post("/api/runs/{run_id}/execute", dependencies=[Depends(_DOOR_ORDER)])
 def execute_order(run_id: str):
     """Confirmed commit (post-approval): capture + place a durable order from the
     approved selection. Run-scoped (matches approve/select). No external actions."""
@@ -4679,7 +4762,7 @@ def execute_order(run_id: str):
     return result
 
 
-@app.post("/api/runs/{run_id}/mark-delivered")
+@app.post("/api/runs/{run_id}/mark-delivered", dependencies=[Depends(_DOOR_ORDER)])
 def mark_delivered(run_id: str):
     """Confirm receipt — advances the run's order to received via the state machine."""
     from utils.procurement_agent.agents.procurement_agent import ProcurementAgent
@@ -4691,7 +4774,7 @@ def mark_delivered(run_id: str):
     return result
 
 
-@app.get("/api/runs/{run_id}/orders")
+@app.get("/api/runs/{run_id}/orders", dependencies=[Depends(_DOOR_VIEW)])
 def list_run_orders(run_id: str):
     """Orders captured for this run (run-scoped view)."""
     from utils import orders
@@ -4699,24 +4782,25 @@ def list_run_orders(run_id: str):
     return {"run_id": run_id, "count": len(rows), "orders": rows}
 
 
-@app.get("/api/orders")
-def list_all_orders():
+@app.get("/api/orders", dependencies=[Depends(_DOOR_VIEW)])
+def list_all_orders(buyer: Optional[dict] = Depends(_DOOR_VIEW)):
     """All captured orders — the customer History feed (orders table, spend, supplier
     reliability, price intelligence). Ungated like the run-scoped buyer-loop endpoints
     (CLEANUP §4.1); binds to the tenant/buyer when real auth lands. Distinct from the
     admin-gated /api/admin/orders."""
     from utils import orders
-    rows = orders.get_orders()
+    rows = orders.get_orders(company_id=_buyer_company_id(buyer)) if buyer else orders.get_orders()
     return {"count": len(rows), "orders": rows}
 
 
-@app.get("/api/reorder")
-def list_reorder():
+@app.get("/api/reorder", dependencies=[Depends(_DOOR_VIEW)])
+def list_reorder(buyer: Optional[dict] = Depends(_DOOR_VIEW)):
     """Reorder intelligence — parts due to be reordered, forecast from the customer's OWN
     order history (cadence from repeat purchases; never external data). Ungated like the
     History feed."""
     from utils import reorder
-    items = reorder.gather_reorder()
+    items = (reorder.gather_reorder(company_id=_buyer_company_id(buyer)) if buyer
+             else reorder.gather_reorder())
     return {"count": len(items), "reorder": items}
 
 
@@ -4758,7 +4842,7 @@ _ORDER_STATUS_TITLES: dict[str, str] = {
 }
 
 
-def _derive_events(limit: int = 50) -> list[dict]:
+def _derive_events(limit: int = 50, company_id: Optional[str] = None) -> list[dict]:
     """Derive a newest-first event list from existing persisted state — order statuses, run
     approval phase/history, and confirmed quotes. Read-only; no new table. Untargeted (all
     runs). REAL-state-only. Fail-soft PER SOURCE so one bad read can't sink the feed."""
@@ -4850,21 +4934,31 @@ def _derive_events(limit: int = 50) -> list[dict]:
             "timestamp": ts,
         })
 
+    # Arc 6 D6: under BUYER_ACCOUNTS_V1 the feed is the session company's only -- every
+    # event hangs off a run, so keep the events whose run is the company's. Filtered
+    # BEFORE the limit so another company's volume cannot crowd this one out.
+    if company_id is not None:
+        with _SessionFactory() as session:
+            own = {rid for (rid,) in session.query(SourcingRunORM.id)
+                   .filter(SourcingRunORM.company_id == company_id).all()}
+        events = [e for e in events if e.get("run_id") in own]
+
     # Newest-first. Timestamps are ISO-8601 UTC (same format across sources), so a string
     # sort is chronological; a missing timestamp sorts last.
     events.sort(key=lambda e: e.get("timestamp") or "", reverse=True)
     return events[:limit]
 
 
-@app.get("/api/events", response_model=EventsResponse)
-def list_events(limit: int = 50):
+@app.get("/api/events", response_model=EventsResponse, dependencies=[Depends(_DOOR_VIEW)])
+def list_events(limit: int = 50, buyer: Optional[dict] = Depends(_DOOR_VIEW)):
     """Derived, untargeted notification feed (read-only): REAL state changes (order
     statuses, approval decisions, confirmed quotes) shaped from existing rows. No table, no
     per-user targeting (no verified identity exists yet), no writes. Fail-soft: returns an
     empty list rather than 500-ing the shell."""
     import logging
     try:
-        events = _derive_events(limit=limit)
+        events = (_derive_events(limit=limit, company_id=_buyer_company_id(buyer)) if buyer
+                  else _derive_events(limit=limit))
     except Exception as exc:
         logging.getLogger(__name__).warning("[events] derive failed: %s", exc)
         events = []
@@ -4954,8 +5048,9 @@ class BasketRollup(BaseModel):
     runs: List[BasketRunRow]
 
 
-@app.get("/api/groups/{group_id}", response_model=BasketRollup)
-def get_group(group_id: str, request: Request):
+@app.get("/api/groups/{group_id}", response_model=BasketRollup, dependencies=[Depends(_DOOR_VIEW)])
+def get_group(group_id: str, request: Request,
+              buyer: Optional[dict] = Depends(_DOOR_VIEW)):
     """Read-only basket rollup over the runs sharing `group_id`: per-run part/phase/selected
     amount, a derived basket status, and the basket_total (the exact figure Stage 5 routes
     on). No writes. Fail-soft: a malformed child degrades to an error row, never 500-ing the
@@ -4981,6 +5076,7 @@ def get_group(group_id: str, request: Request):
         # Scope to this visitor's runs only. A NULL-session run (seeded/legacy) is never
         # owned by a demo visitor, so it is filtered out too.
         runs = [r for r in runs if r.get("session_id") and r.get("session_id") == demo_sid]
+    runs = _buyer_filter_runs(buyer, runs)   # Arc 6 D6: only the session company's runs
     if not runs:
         raise HTTPException(status_code=404, detail="Basket not found")
 
@@ -5047,8 +5143,9 @@ def _advance_run_to_approved(
     run.updated_at = now
 
 
-@app.post("/api/groups/{group_id}/approve")
-def approve_group(group_id: str, body: ApproveRequest, caller: Optional[Caller] = Depends(get_caller)):
+@app.post("/api/groups/{group_id}/approve", dependencies=[Depends(_DOOR_APPROVE)])
+def approve_group(group_id: str, body: ApproveRequest, caller: Optional[Caller] = Depends(get_caller),
+                  buyer: Optional[dict] = Depends(_DOOR_APPROVE)):
     """Approve a basket on the BASKET TOTAL — routed ONCE via determine_approval_path. Gathers
     the required number of approvals against the basket record; only when met does it advance
     EVERY child pending_first_approval -> approved via the legal transition. Children never go
@@ -5056,7 +5153,7 @@ def approve_group(group_id: str, body: ApproveRequest, caller: Optional[Caller] 
     from utils.procurement_agent.state import persistence
     from utils.procurement_agent.state.approval_rules import determine_approval_path
 
-    runs = persistence.list_runs(group_id=group_id, limit=500)
+    runs = _buyer_filter_runs(buyer, persistence.list_runs(group_id=group_id, limit=500))
     if not runs:
         raise HTTPException(status_code=404, detail="Basket not found")
     if not all(r.get("current_phase") == Phase.PENDING_FIRST_APPROVAL.value for r in runs):
@@ -5120,14 +5217,15 @@ def approve_group(group_id: str, body: ApproveRequest, caller: Optional[Caller] 
     return result
 
 
-@app.post("/api/groups/{group_id}/reject")
-def reject_group(group_id: str, body: RejectRequest, caller: Optional[Caller] = Depends(get_caller)):
+@app.post("/api/groups/{group_id}/reject", dependencies=[Depends(_DOOR_APPROVE)])
+def reject_group(group_id: str, body: RejectRequest, caller: Optional[Caller] = Depends(get_caller),
+                 buyer: Optional[dict] = Depends(_DOOR_APPROVE)):
     """Reject a basket — non-terminal: returns EVERY child to comparison (re-pick), clears
     each selection, commits NO order. Mirrors the per-run reject (a backward reset) at basket
     scope, and records the rejection on the basket record + each child's history."""
     from utils.procurement_agent.state import persistence
 
-    runs = persistence.list_runs(group_id=group_id, limit=500)
+    runs = _buyer_filter_runs(buyer, persistence.list_runs(group_id=group_id, limit=500))
     if not runs:
         raise HTTPException(status_code=404, detail="Basket not found")
     now = datetime.now(timezone.utc)
@@ -5207,7 +5305,7 @@ class RfqDraftRejectRequest(BaseModel):
     rejected_by: str
 
 
-@app.post("/api/runs/{run_id}/rfq-draft", status_code=201)
+@app.post("/api/runs/{run_id}/rfq-draft", status_code=201, dependencies=[Depends(_DOOR_ORDER)])
 def create_rfq_draft(run_id: str, body: RfqDraftCreateRequest):
     """Create a reviewable RFQ draft for one sourced candidate. The candidate is reconstructed
     SERVER-SIDE from the run's stored sourcing results (authoritative — a client-supplied
@@ -5246,7 +5344,7 @@ def create_rfq_draft(run_id: str, body: RfqDraftCreateRequest):
     }
 
 
-@app.get("/api/rfq-drafts/{draft_id}")
+@app.get("/api/rfq-drafts/{draft_id}", dependencies=[Depends(_DOOR_VIEW)])
 def get_rfq_draft(draft_id: str):
     """Read one stored draft (status, body, frozen candidate snapshot, approval state) — this
     is what makes a later approval a real review of what the human can see."""
@@ -5260,7 +5358,7 @@ def get_rfq_draft(draft_id: str):
     return draft
 
 
-@app.get("/api/runs/{run_id}/rfq-drafts")
+@app.get("/api/runs/{run_id}/rfq-drafts", dependencies=[Depends(_DOOR_VIEW)])
 def list_rfq_drafts(run_id: str):
     """All RFQ drafts for a run, newest first."""
     from utils.procurement_agent.state import persistence
@@ -5268,7 +5366,7 @@ def list_rfq_drafts(run_id: str):
     return {"run_id": run_id, "count": len(drafts), "drafts": drafts}
 
 
-@app.post("/api/rfq-drafts/{draft_id}/approve")
+@app.post("/api/rfq-drafts/{draft_id}/approve", dependencies=[Depends(_DOOR_ORDER)])
 def approve_rfq_draft(draft_id: str, body: RfqDraftApproveRequest):
     """Record a human approval against a STORED draft. The approval is stamped on the A0
     lifecycle transition (drafted -> approved). NO send. 404 unknown draft; 409 illegal
@@ -5283,7 +5381,7 @@ def approve_rfq_draft(draft_id: str, body: RfqDraftApproveRequest):
     return {"draft_id": draft["id"], "status": draft["status"], "approved_by": draft["approved_by"]}
 
 
-@app.post("/api/rfq-drafts/{draft_id}/reject")
+@app.post("/api/rfq-drafts/{draft_id}/reject", dependencies=[Depends(_DOOR_ORDER)])
 def reject_rfq_draft(draft_id: str, body: RfqDraftRejectRequest):
     """Reject a STORED draft (drafted -> rejected, terminal). NO send. 404 unknown; 409 illegal."""
     from utils.procurement_agent.state import persistence
@@ -5296,7 +5394,7 @@ def reject_rfq_draft(draft_id: str, body: RfqDraftRejectRequest):
     return {"draft_id": draft["id"], "status": draft["status"], "rejected_by": draft["rejected_by"]}
 
 
-@app.post("/api/rfq-drafts/{draft_id}/send")
+@app.post("/api/rfq-drafts/{draft_id}/send", dependencies=[Depends(_DOOR_ORDER)])
 def send_rfq_draft(draft_id: str):
     """Send an APPROVED RFQ draft (RFQ wiring A2 — the first path that can send a real email).
 
@@ -5390,20 +5488,28 @@ class ShipToBody(BaseModel):
     instructions: str = ""
 
 
-@app.get("/api/sites/{site_id}/ship-to")
-def get_site_shipto(site_id: str):
+@app.get("/api/sites/{site_id}/ship-to", dependencies=[Depends(_DOOR_VIEW)])
+def get_site_shipto(site_id: str, buyer: Optional[dict] = Depends(_DOOR_VIEW)):
     """A site's delivery ship-to (the durable store behind Delivery Settings + the
     graduated disclosure at order placement). null when nothing is saved yet — the UI
     falls back to its seeded default. Ungated like the other customer endpoints."""
     from utils import site_settings
+    if buyer:
+        return {"site_id": site_id,
+                "ship_to": site_settings.get_shipto(site_id, company_id=_buyer_company_id(buyer))}
     return {"site_id": site_id, "ship_to": site_settings.get_shipto(site_id)}
 
 
-@app.put("/api/sites/{site_id}/ship-to")
-def put_site_shipto(site_id: str, body: ShipToBody):
+@app.put("/api/sites/{site_id}/ship-to", dependencies=[Depends(_DOOR_SETTINGS)])
+def put_site_shipto(site_id: str, body: ShipToBody,
+                    buyer: Optional[dict] = Depends(_DOOR_SETTINGS)):
     """Save (upsert) a site's ship-to. One row per site. Ungated; binds to the buyer/
     admin role when real auth lands (CLEANUP §4.1)."""
     from utils import site_settings
+    if buyer:
+        cid = _buyer_company_id(buyer)
+        site_settings.upsert_shipto(site_id, body.model_dump(), company_id=cid)
+        return {"site_id": site_id, "ship_to": site_settings.get_shipto(site_id, company_id=cid)}
     site_settings.upsert_shipto(site_id, body.model_dump())
     return {"site_id": site_id, "ship_to": site_settings.get_shipto(site_id)}
 
@@ -5418,7 +5524,7 @@ def put_site_shipto(site_id: str, body: ShipToBody):
 # NEVER sends (gmail.readonly).
 # ---------------------------------------------------------------------------
 
-@app.get("/api/runs/{run_id}/review-items")
+@app.get("/api/runs/{run_id}/review-items", dependencies=[Depends(_DOOR_VIEW)])
 def list_run_review_items(run_id: str):
     """Run-scoped inbound quotes/contacts queued for review (the comparison-table feed).
     Includes sent_count (RFQs sent for this run) and quote_count so the UI can show
@@ -5431,7 +5537,7 @@ def list_run_review_items(run_id: str):
             "sent_count": len(sent), "quote_count": quote_count}
 
 
-@app.post("/api/runs/{run_id}/process-replies")
+@app.post("/api/runs/{run_id}/process-replies", dependencies=[Depends(_DOOR_ORDER)])
 def process_run_replies(run_id: str):
     """Trigger inbound reply ingestion: live-read the Arkim inbox, match replies to sent
     RFQs, extract quotes/contacts, and QUEUE them for review. The Gmail read is
@@ -5452,7 +5558,7 @@ def process_run_replies(run_id: str):
     return {"run_id": run_id, "available": True, "summary": summary, "queued_for_run": queued}
 
 
-@app.post("/api/review-items/{item_id}/confirm")
+@app.post("/api/review-items/{item_id}/confirm", dependencies=[Depends(_DOOR_ORDER)])
 def confirm_review_item(item_id: str):
     """Human-confirm a queued quote/contact. quote -> price_db (source="rfq"); contact ->
     supplier primary contact. The ONLY UI path that writes price_db — consequential, so
@@ -5472,7 +5578,7 @@ def confirm_review_item(item_id: str):
             "item": supplier_registry.get_review_item(item_id)}
 
 
-@app.post("/api/review-items/{item_id}/reject")
+@app.post("/api/review-items/{item_id}/reject", dependencies=[Depends(_DOOR_ORDER)])
 def reject_review_item(item_id: str):
     """Human-reject a queued item -> discard (no platform change, no price write)."""
     from utils import reply_processor, supplier_registry
@@ -5484,7 +5590,7 @@ def reject_review_item(item_id: str):
             "item": supplier_registry.get_review_item(item_id)}
 
 
-@app.post("/api/review-items/{item_id}/place-order")
+@app.post("/api/review-items/{item_id}/place-order", dependencies=[Depends(_DOOR_ORDER)])
 def place_order_from_quote(item_id: str):
     """Place a durable order directly from a CONFIRMED quote (the RFQ path: Tier 3 RFQ ->
     quote -> confirm -> order). The double gate holds: the quote must already be
@@ -5540,20 +5646,24 @@ def place_order_from_quote(item_id: str):
 # action counts are COUNTED; time saved is an ESTIMATE labelled with its model version.
 # ---------------------------------------------------------------------------
 
-@app.get("/api/runs/{run_id}/impact")
-def run_impact(run_id: str):
+@app.get("/api/runs/{run_id}/impact", dependencies=[Depends(_DOOR_VIEW)])
+def run_impact(run_id: str, buyer: Optional[dict] = Depends(_DOOR_VIEW)):
     """Per-decision impact for one run (measured saving | None, real counts, labelled
     time estimate)."""
     if _run_model_for(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     from utils import impact
+    if buyer:
+        return impact.gather_run_decision(run_id, company_id=_buyer_company_id(buyer))
     return impact.gather_run_decision(run_id)
 
 
-@app.get("/api/impact")
-def cumulative_impact():
+@app.get("/api/impact", dependencies=[Depends(_DOOR_VIEW)])
+def cumulative_impact(buyer: Optional[dict] = Depends(_DOOR_VIEW)):
     """Cumulative impact over the customer's real orders (drillable: per-month + ids)."""
     from utils import impact
+    if buyer:
+        return impact.gather_cumulative(company_id=_buyer_company_id(buyer))
     return impact.gather_cumulative()
 
 
@@ -8380,7 +8490,8 @@ def buyer_verify_link(body: BuyerVerifyBody, request: Request):
 
 
 @app.post("/api/buyer/auth/logout", dependencies=_BUYER_NEW_ROUTE)
-def buyer_logout(request: Request, session: dict = Depends(_require_buyer_session)):
+def buyer_logout(request: Request,
+                 session: dict = Depends(_buyer_require(buyer_accounts_rbac.VIEW_COMPANY))):
     """Revoke the session and clear the cookie. Audited."""
     buyer_accounts.revoke_session(session["session_id"])
     buyer_accounts.audit("logout", company_id=session["company_id"],

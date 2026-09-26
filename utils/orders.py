@@ -346,12 +346,14 @@ def cancel_order(order_id: str, reason: Optional[str] = None) -> Optional[dict]:
 
 
 def get_orders(run_id: Optional[str] = None, status: Optional[str] = None,
-               vendor: Optional[str] = None) -> list[dict]:
-    """Return orders (newest first), optionally filtered by run_id / status / vendor.
-    Fail-soft: [] on error."""
+               vendor: Optional[str] = None,
+               company_id: Optional[str] = None) -> list[dict]:
+    """Return orders (newest first), optionally filtered by run_id / status / vendor /
+    company_id (arc 6: the buyer session's company). Fail-soft: [] on error."""
     clauses: list[str] = []
     params: list = []
-    for col, val in (("run_id", run_id), ("status", status), ("vendor_name", vendor)):
+    for col, val in (("run_id", run_id), ("status", status), ("vendor_name", vendor),
+                     ("company_id", company_id)):
         if val is not None:
             clauses.append(f"{col} = ?")
             params.append(val)
