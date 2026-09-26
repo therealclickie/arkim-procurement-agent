@@ -8825,3 +8825,67 @@ def buyer_revoke_member(member_id: str, request: Request,
                          actor=session["member_id"], ip=_client_ip(request),
                          detail={"status": member["status"]})
     return {"ok": True, "member": _serialize_buyer_member(member)}
+
+
+# ===========================================================================
+# Arc 6 T7 — APPROVAL POLICY SETTINGS (D5).
+#
+# The company's auto-approval limit (USD, default 2500; 0 = every order needs a
+# second approval) and whether the Admin override is allowed (default on).
+# STORED and AUDITED here — who, old value, new value, when — and NOT enforced
+# at order time; that is arc 7. Admin-only, through the matrix: changing the
+# limit needs SET_APPROVAL_LIMIT, flipping the override needs
+# TOGGLE_ADMIN_OVERRIDE.
+# ===========================================================================
+
+def _serialize_approval_policy(company: dict) -> dict:
+    return {
+        "auto_approval_limit": company["auto_approval_limit"],
+        "allow_admin_override": company["allow_admin_override"],
+        "currency": "USD",
+    }
+
+
+_BUYER_POLICY = _buyer_require(buyer_accounts_rbac.SET_APPROVAL_LIMIT)
+
+
+@app.get("/api/buyer/settings", dependencies=_BUYER_NEW_ROUTE)
+def buyer_get_settings(session: dict = Depends(_BUYER_POLICY)):
+    """The session company's approval policy (the Admin Settings screen)."""
+    company = buyer_accounts.get_company(session["company_id"]) or session["company"]
+    return {"company_id": company["id"],
+            "approval_policy": _serialize_approval_policy(company)}
+
+
+class BuyerApprovalPolicyBody(BaseModel):
+    # Typed Any ON PURPOSE: pydantic's lax float would quietly turn "2500" (and
+    # true) into a number. The store's validator is the one rule, and it refuses
+    # anything that is not a real, finite, non-negative number.
+    auto_approval_limit: Any = None
+    allow_admin_override: Any = None
+
+
+@app.put("/api/buyer/settings/approval-policy", dependencies=_BUYER_NEW_ROUTE)
+def buyer_set_approval_policy(body: BuyerApprovalPolicyBody, request: Request,
+                              session: dict = Depends(_BUYER_POLICY)):
+    """Change the limit and/or the override setting. 403 without the matching
+    capability; 422 on a negative or non-numeric limit, a non-boolean override,
+    or an empty change. Every actual change writes one audit row per field
+    with the old value, the new value and the acting member."""
+    fields = body.model_dump(exclude_unset=True)
+    if not any(v is not None for v in fields.values()):
+        raise HTTPException(status_code=422, detail="nothing to change")
+    if fields.get("allow_admin_override") is not None and not buyer_accounts_rbac.has_permission(
+            session["member"], buyer_accounts_rbac.TOGGLE_ADMIN_OVERRIDE, session["company"]):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        company = buyer_accounts.set_approval_policy(
+            session["company_id"], actor=session["member_id"], ip=_client_ip(request),
+            auto_approval_limit=fields.get("auto_approval_limit"),
+            allow_admin_override=fields.get("allow_admin_override"))
+    except buyer_accounts.BuyerAccountsError as exc:
+        _buyer_error(exc)
+    if company is None:
+        raise HTTPException(status_code=500, detail="policy could not be saved")
+    return {"company_id": company["id"],
+            "approval_policy": _serialize_approval_policy(company)}
